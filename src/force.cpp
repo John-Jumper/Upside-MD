@@ -238,7 +238,7 @@ struct HMMPot : public DerivComputation
     {
         int n_dep = 5;  // number of atoms that each term depends on 
         n_bin     = get_dset_size<5>(grp, "rama_deriv")[2];
-        rama_maps.resize(n_residue*N_STATE*n_bin*n_bin);
+        rama_maps.host().resize(n_residue*N_STATE*n_bin*n_bin);
 
         check_size(grp, "id",             n_residue,   n_dep);
         check_size(grp, "trans_matrices", n_residue-1, N_STATE, N_STATE);
@@ -358,7 +358,7 @@ struct AffinePairs : public DerivComputation
     virtual void compute_germ() {
         Timer timer(string("affine_pairs"));
         affine_pairs(
-                alignment.output.data(), alignment.slot_machine.accum.data(),
+                alignment.output.host().data(), alignment.slot_machine.accum.data(),
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue);
     }
 };
@@ -537,7 +537,7 @@ struct SidechainInteraction : public DerivComputation
     virtual void compute_germ() {
         Timer timer(string("sidechain_pairs"));
         sidechain_pairs(
-                alignment.output.data(), alignment.slot_machine.accum.data(),
+                alignment.output.host().data(), alignment.slot_machine.accum.data(),
                 sidechain_params.data(), params.data(), 
                 dist_cutoff, n_residue);
     }
