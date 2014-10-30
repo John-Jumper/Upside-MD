@@ -639,11 +639,11 @@ def main():
     parser = argparse.ArgumentParser(description='Prepare input file')
     parser.add_argument('--fasta', required=True,
             help='[required] FASTA sequence file')
-    parser.add_argument('--n-system', type=int, required=True, 
+    parser.add_argument('--n-system', type=int, default=1, required=False, 
             help='[required] number of systems to prepare')
     parser.add_argument('--output', default='system.h5',
             help='path to output the created .h5 file (default system.h5)')
-    parser.add_argument('--residue-radius', type=float, default=1.25,
+    parser.add_argument('--residue-radius', type=float, default=0.,
             help='radius of residue for repulsive interaction (1 kT value)')
     parser.add_argument('--affine', default=False, action='store_true',
             help='use affine nonbonded')
