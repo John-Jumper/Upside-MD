@@ -11,7 +11,6 @@ set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11 ${DEFINES} ${OPT} ${WARN}" )
 set (CMAKE_LD_FLAGS  "${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
-# include(${VTK_USE_FILE})
 
 add_executable (upside
     sidechain.cpp 
@@ -38,22 +37,3 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 add_library(analysis SHARED analysis.cpp hbond.cpp)
 target_link_libraries(analysis stdc++)
 set_target_properties(analysis PROPERTIES PREFIX "")
-
-# all: ../obj/upside ../obj/analysis.so
-# 
-# CPPFLAGS=${INCLUDE} ${DEFINES} ${OPT} ${WARN} ${EXTRA_CPPFLAGS} ${SANITIZE}
-# 
-# 
- 
-# ../obj/analysis.so: ../obj/analysis.o
-# 	${UPSIDE_CC} -fPIC -shared  ${OPENMP} ../obj/analysis.o -lstdc++ -o ../obj/analysis.so
-# 
-# ../obj/helicity_of_triples.o: helicity_of_triples.cpp Makefile h5_support.h
-# 	${UPSIDE_CC} -fPIC -isystem ${EIGEN} ${CPPFLAGS} -c helicity_of_triples.cpp -o ../obj/helicity_of_triples.o
-# 
-# ../obj/helicity_of_triples: ../obj/helicity_of_triples.o
-# 	${UPSIDE_CC} ../obj/helicity_of_triples.o -lstdc++ -lhdf5 -lhdf5_hl -lm -o ../obj/helicity_of_triples
-# 
-# clean:
-# 	rm -f ../obj/*.o ../obj/*.so ../obj/upside ../obj/helicity_of_triples
-# 

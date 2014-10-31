@@ -20,6 +20,10 @@ deg=np.deg2rad(1)
 
 default_filter = tables.Filters(complib='zlib', complevel=5, fletcher32=True)
 
+def vmag(x):
+    assert x.shape[-1]
+    return np.sqrt(x[:,0]**2+x[:,1]**2+x[:,2]**2)
+
 def create_array(grp, nm, obj=None):
     return t.create_carray(grp, nm, obj=obj, filters=default_filter)
 
@@ -74,6 +78,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation):
     donor_residues    = np.array([i for i in range(n_res) if i>0 and fasta[i]!='PRO'])
     acceptor_residues = np.arange(0,n_res-1)
 
+    print
     print 'hbond, %i donors, %i acceptors in sequence' % (len(donor_residues), len(acceptor_residues))
     
     positive = np.array([x in ('LYS','HIS','ARG') for x in fasta])
@@ -98,13 +103,44 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation):
     else:
         import pandas as pd
         bonus = pd.read_csv(helix_energy_perturbation)
-        d = dict(zip(df['aa'],zip(df['U_donor'],df['U_acceptor'])))
+        d = dict(zip(bonus['aa'],zip(bonus['U_donor'],bonus['U_acceptor'])))
         don_bonus = np.array([d[fasta[nr]][0] for nr in    donor_residues])
         acc_bonus = np.array([d[fasta[nr]][1] for nr in acceptor_residues])
 
     create_array(donors,    'helix_energy_bonus', obj=don_bonus)
     create_array(acceptors, 'helix_energy_bonus', obj=acc_bonus)
     return
+
+
+def make_restraint_group(group_num, residues, initial_pos):
+    np.random.seed(314159)  # make groups deterministic
+
+    grp = t.root.input.force.dist_spring
+
+    id = grp.id[:]
+    equil_dist = grp.equil_dist[:]
+    spring_const = grp.spring_const[:]
+    bonded_atoms = grp.bonded_atoms[:]
+    n_orig = id.shape[0]
+
+    r_atoms = np.array([(3*i+0,3*i+1,3*i+2) for i in sorted(residues)]).reshape((-1,))
+    random_pairing = lambda: np.column_stack((r_atoms, np.random.permutation(r_atoms)))
+
+    pairs = np.concatenate([random_pairing() for i in range(2)], axis=0)
+    pairs = [((x,y) if x<y else (y,x)) for x,y in pairs if x/3!=y/3]   # avoid same-residue restraints
+    pairs = np.array(sorted(set(pairs)))
+
+    pair_dists = vmag(initial_pos[pairs[:,0]]-initial_pos[pairs[:,1]])
+
+    grp.id._f_remove()
+    grp.equil_dist._f_remove()
+    grp.spring_const._f_remove()
+    grp.bonded_atoms._f_remove()
+
+    create_array(grp, 'id',           obj=np.concatenate((id,          pairs),      axis=0))
+    create_array(grp, 'equil_dist',   obj=np.concatenate((equil_dist,  pair_dists), axis=0))
+    create_array(grp, 'spring_const', obj=np.concatenate((spring_const,4.*np.ones(len(pairs))),axis=0))
+    create_array(grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms,np.zeros(len(pairs),dtype='bool')),axis=0))
 
 
 def make_tab_matrices(phi, theta, bond_length):
@@ -665,7 +701,17 @@ def main():
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with a bond length of 1.4 A will be used ' +
             'instead.')
+    parser.add_argument('--restraint-group', default=[], action='append',
+            help='Path to file containing whitespace-separated residue numbers (first residue is number 0).  '+
+            'Each atom in the specified residues will be randomly connected to atoms in other residues by ' +
+            'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
+            'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
+            'with different filenames.')
+
+
     args = parser.parse_args()
+    if args.restraint_group and not args.initial_structures:
+        parser.error('must specify --initial-structures to use --restraint-group')
 
     fasta_seq = read_fasta(open(args.fasta))
 
@@ -717,6 +763,18 @@ def main():
     if args.affine:
         write_affine_alignment(len(fasta_seq))
         write_affine_pair(fasta_seq)
+
+    if args.restraint_group:
+        print
+        print 'Restraint groups (uppercase letters are restrained residues)'
+        fasta_one_letter = ''.join(one_letter_aa[x] for x in fasta_seq)
+
+        for i,rg in enumerate(args.restraint_group):
+            restrained_atoms = set(int(i) for i in open(rg).read().split())
+            print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_atoms else f.lower()) 
+                                              for i,f in enumerate(fasta_one_letter)))
+            make_restraint_group(i,restrained_atoms,pos[:,:,0])
+            
 
     t.close()
 
