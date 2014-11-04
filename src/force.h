@@ -90,7 +90,7 @@ struct DerivEngine
 
     void compute();
     enum IntegratorType {Verlet=0, Predescu=1};
-    void integration_cycle(float* mom, float dt, IntegratorType type = Verlet);
+    void integration_cycle(float* mom, float dt, float max_force, IntegratorType type = Verlet);
 };
 
 double get_n_hbond(DerivEngine &engine);

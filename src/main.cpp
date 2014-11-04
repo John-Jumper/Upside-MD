@@ -15,6 +15,7 @@ struct StateLogger
     int n_atom;
     int n_chunk;
 
+    hid_t config;
     H5Obj pos_tbl;
     H5Obj kin_tbl;
     H5Obj time_tbl;
@@ -28,8 +29,8 @@ struct StateLogger
     StateLogger& operator=(const StateLogger &o) = delete;
     // move constructor could be defined if necessary
 
-    StateLogger(int n_atom_, hid_t output_grp, int n_chunk_):
-        n_atom(n_atom_), n_chunk(n_chunk_),
+    StateLogger(int n_atom_, hid_t config_, hid_t output_grp, int n_chunk_):
+        n_atom(n_atom_), n_chunk(n_chunk_), config(config_),
         pos_tbl (create_earray(output_grp, "pos",     H5T_NATIVE_FLOAT,  {0,n_atom,3}, {n_chunk,n_atom,3})),
         kin_tbl (create_earray(output_grp, "kinetic", H5T_NATIVE_DOUBLE, {0},          {n_chunk})),
         time_tbl(create_earray(output_grp, "time",    H5T_NATIVE_DOUBLE, {0},          {n_chunk}))
@@ -60,6 +61,7 @@ struct StateLogger
         if(pos_buffer .size()) {append_to_dset(pos_tbl.get(),  pos_buffer,  0); pos_buffer .resize(0);}
         if(kin_buffer .size()) {append_to_dset(kin_tbl.get(),  kin_buffer,  0); kin_buffer .resize(0);}
         if(time_buffer.size()) {append_to_dset(time_tbl.get(), time_buffer, 0); time_buffer.resize(0);}
+        H5Fflush(config, H5F_SCOPE_LOCAL);
     }
 
     virtual ~StateLogger() {
@@ -118,6 +120,8 @@ try {
             false, -1., "float", cmd);
     ValueArg<double> thermostat_timescale_arg("", "thermostat-timescale", "timescale for the thermostat", 
             false, 5., "float", cmd);
+    ValueArg<double> equilibration_duration_arg("", "equilibration-duration", "duration to limit max force for equilibration (also decreases thermostat interval)", 
+            false, 0., "float", cmd);
     SwitchArg generate_expected_force_arg("", "generate-expected-force", 
             "write an expected force to the input for later testing (developer only)", 
             cmd, false);
@@ -157,6 +161,12 @@ try {
         int thermostat_interval = max(1.,round(thermostat_interval_arg.getValue() / (3*dt)));
         int frame_interval = max(1.,round(frame_interval_arg.getValue() / (3*dt)));
 
+        float equil_duration = equilibration_duration_arg.getValue();
+        // equilibration_max_force is set so that the change in momentum should not be more than
+        // 20% of the equilibration magnitude over a single dt interval
+        float equil_avg_mom   = sqrt(temperature_arg.getValue()/1.5f);  // all particles have mass == 1.
+        float equil_max_force = 0.8f*equil_avg_mom/dt;
+
         // initialize thermostat and thermalize momentum
         vector<float> mom(n_atom*n_system*3, 0.f);
         auto thermostat = OrnsteinUhlenbeckThermostat(
@@ -175,7 +185,7 @@ try {
         }
 
         auto output_grp = h5_obj(H5Gclose, H5Gcreate2(config.get(), "output", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
-        StateLogger state_logger(n_atom, output_grp.get(), 100);
+        StateLogger state_logger(n_atom, config.get(), output_grp.get(), 100);
 
         int round_print_width = ceil(log(n_round)/log(10));
 
@@ -190,8 +200,10 @@ try {
                         get_n_hbond(engine));
                 fflush(stdout);
             }
-            if(!(nr%thermostat_interval)) thermostat.apply(mom.data(), n_atom);
-            engine.integration_cycle(mom.data(), dt, DerivEngine::Verlet);
+            // To be cautious, apply the thermostat more often if in the equilibration phase
+            bool in_equil = nr*3*dt < equil_duration;
+            if(!(nr%thermostat_interval) || in_equil) thermostat.apply(mom.data(), n_atom);
+            engine.integration_cycle(mom.data(), dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
         }
         state_logger.flush();
 

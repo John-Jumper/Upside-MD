@@ -2,6 +2,7 @@
 #include "coord.h"
 #include "random.h"
 #include "md_export.h"
+#include <cmath>
 
 
 template <typename MutableCoordT>
@@ -63,10 +64,20 @@ integration_stage_body(
         MutableCoordT &pos,
         StaticCoordT  &deriv,
         float vel_factor,
-        float pos_factor)
+        float pos_factor, 
+        float max_force)
 {
     // assumes unit mass for all particles
-    mom.set_value(mom.f3() - vel_factor*deriv.f3());
+    float3 f = deriv.f3();
+    if(max_force) {
+        float f_mag = mag(f);
+        float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
+        f *= scale_factor;
+        // add extra robustness, and ensure no problems when f_mag == 0.f
+        if(isnan(f.x) | isnan(f.y) | isnan(f.z)) f = make_float3(0.f,0.f,0.f);
+    }
+
+    mom.set_value(mom.f3() - vel_factor*f);
     pos.set_value(pos.f3() + pos_factor*mom.f3());
 }
 
@@ -77,13 +88,14 @@ integration_stage(
         const float* restrict deriv,
         float vel_factor,
         float pos_factor,
+        float max_force,
         int n_atom)
 {
     for(int na=0; na<n_atom; ++na) {
         MutableCoord<3> p(mom,   na);
         MutableCoord<3> x(pos,   na);
         StaticCoord <3> d(deriv, na);
-        integration_stage_body(p, x, d, vel_factor, pos_factor);
+        integration_stage_body(p, x, d, vel_factor, pos_factor, max_force);
         x.flush();
         p.flush();
     }

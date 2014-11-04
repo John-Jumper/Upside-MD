@@ -77,8 +77,8 @@ integration_stage(
         const float* deriv,
         float vel_factor,
         float pos_factor,
+        float max_force,
         int n_atom);
-
 
 void 
 deriv_accumulation(
@@ -87,7 +87,6 @@ deriv_accumulation(
         const DerivRecord* restrict tape,
         int n_tape,
         int n_atom);
-
 
 void
 recenter(

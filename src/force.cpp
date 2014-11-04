@@ -92,7 +92,7 @@ void DerivEngine::compute() {
 }
 
 
-void DerivEngine::integration_cycle(float* mom, float dt, IntegratorType type) {
+void DerivEngine::integration_cycle(float* mom, float dt, float max_force, IntegratorType type) {
     // integrator from Predescu et al., 2012
     // http://dx.doi.org/10.1080/00268976.2012.681311
 
@@ -106,7 +106,7 @@ void DerivEngine::integration_cycle(float* mom, float dt, IntegratorType type) {
         compute();   // compute derivatives
         Timer timer(string("integration"));
         integration_stage(mom, pos->output.data(), pos->deriv.data(), 
-                dt*mom_update[stage], dt*pos_update[stage], pos->n_atom);
+                dt*mom_update[stage], dt*pos_update[stage], max_force, pos->n_atom);
     }
 }
 
