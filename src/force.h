@@ -6,24 +6,30 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include "coord.h"
 
 struct SlotMachine
 {
     const int width;
     const int n_elem;
     const int n_system;
+    int offset;
 
     std::vector<DerivRecord> deriv_tape;
     std::vector<float>       accum;
 
-    SlotMachine(int width_, int n_elem_, int n_system_): width(width_), n_elem(n_elem_), n_system(n_system_) {}
+    SlotMachine(int width_, int n_elem_, int n_system_): 
+        width(width_), n_elem(n_elem_), n_system(n_system_), offset(0) {}
 
     void add_request(int output_width, CoordPair &pair) { 
         DerivRecord prev_record = deriv_tape.size() ? deriv_tape.back() : DerivRecord(-1,0,0);
         deriv_tape.emplace_back(pair.index, prev_record.loc+prev_record.output_width, output_width);
         pair.slot = deriv_tape.back().loc;
-        for(int i=0; i<output_width*width; ++i) accum.push_back(0.f);
+        for(int i=0; i<output_width*width*n_system; ++i) accum.push_back(0.f);
+        offset += output_width*width;
     }
+
+    SysArray accum_array() { return SysArray(accum.data(), offset); }
 };
 
 struct DerivComputation 
@@ -46,6 +52,9 @@ struct Pos : public DerivComputation
     {}
 
     virtual void propagate_deriv();
+    CoordArray coords() {
+        return CoordArray(SysArray(output.data(), n_atom*3), slot_machine.accum_array());
+    }
 };
 
 

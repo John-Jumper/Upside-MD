@@ -59,16 +59,15 @@ struct AffineCoord
     float d[6];   // first three components are translation deriv, second 3 are torque deriv
 
     float* deriv_arr;
-    int    base_slot;
 
     AffineCoord() {};
 
-    AffineCoord(const float* restrict value_arr, float* restrict deriv_arr_, const CoordPair &c):
-        deriv_arr(deriv_arr_), base_slot(c.slot)
+    AffineCoord(const CoordArray arr, int system, const CoordPair &c):
+        deriv_arr(arr.deriv.x + system*arr.deriv.offset + c.slot*6)
     {
         float q[4];
-        for(int nd=0; nd<3; ++nd) t[nd] = value_arr[c.index*7 + nd    ];
-        for(int nd=0; nd<4; ++nd) q[nd] = value_arr[c.index*7 + nd + 3];
+        for(int nd=0; nd<3; ++nd) t[nd] = arr.value.x[system*arr.value.offset + c.index*7 + nd    ];
+        for(int nd=0; nd<4; ++nd) q[nd] = arr.value.x[system*arr.value.offset + c.index*7 + nd + 3];
 
         // FIXME remove normalization
         float norm_factor = 1.f/sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
@@ -106,7 +105,6 @@ struct AffineCoord
 
     float3 apply(const float* r) { return apply(make_float3(r[0], r[1], r[2])); }
 
-
     float3 tf3() const {return make_float3(t[0], t[1], t[2]);}
 
     void add_deriv_at_location(const float3& r_lab_frame, const float3& r_deriv) {
@@ -136,7 +134,7 @@ struct AffineCoord
 
     void flush() const {
         for(int nd=0; nd<6; ++nd) 
-            deriv_arr[base_slot*6 + nd] = d[nd];
+            deriv_arr[nd] = d[nd];
     }
 };
 

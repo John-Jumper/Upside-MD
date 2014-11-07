@@ -2,6 +2,7 @@
 #define MD_EXPORT_H
 
 #include "md.h"
+#include "coord.h"
 
 #define N_STATE 5
 
@@ -17,90 +18,84 @@ struct PackedRefPos {
 };
 
 void dist_spring(
-        const float* pos,
-        float* pos_deriv,
+        const CoordArray pos,
         const DistSpringParams* params,
-        int n_terms);
+        int n_terms, int n_system);
 void angle_spring(
-        const float* pos,
-        float* pos_deriv,
+        const CoordArray pos,
         const AngleSpringParams* params,
-        int n_terms);
+        int n_terms, int n_system);
 void dihedral_spring(
-        const float* pos,
-        float* pos_deriv,
+        const CoordArray pos,
         const DihedralSpringParams* params,
-        int n_terms);
+        int n_terms, int n_system);
 void affine_alignment(
-        float* rigid_body,
-        float* pos,
-        float* pos_deriv,
-        const AffineAlignmentParams* params,
-        int n_res);
+        SysArray rigid_body,
+        CoordArray pos,
+        const AffineAlignmentParams* restrict params,
+        int n_res,
+        int n_system);
 void affine_pairs(
-        const float* rigid_body,
-        float*       rigid_body_deriv,
+        const CoordArray rigid_body,
         const PackedRefPos* ref_pos,
         const AffineParams* params,
         float energy_scale,
         float dist_cutoff2,
-        int n_res);
+        int n_res, int n_system);
 void pos_spring(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const PosSpringParams* restrict params,
-        int n_terms);
+        int n_terms, int n_system);
 void affine_reverse_autodiff(
-        const float*    affine,
-        const float*    affine_accum,
-        float* restrict pos_deriv,
+        const SysArray affine,
+        const SysArray affine_accum,
+        SysArray pos_deriv,
         const DerivRecord* tape,
         const AutoDiffParams* p,
         int n_tape,
-        int n_atom);
+        int n_atom, int n_system);
 
 uint32_t pack_atom(const float x[3]);
 
 void
 ornstein_uhlenbeck_thermostat(
-        float* mom,
+        SysArray mom,
         const float mom_scale,
         const float noise_scale,
         int seed,
         int n_atoms,
-        int n_round);
+        int n_round, int n_system);
 
 void
 integration_stage(
-        float* mom,
-        float* pos,
-        const float* deriv,
+        SysArray mom,
+        SysArray pos,
+        const SysArray deriv,
         float vel_factor,
         float pos_factor,
         float max_force,
-        int n_atom);
+        int n_atom, int n_system);
 
 void 
 deriv_accumulation(
-        float* restrict deriv, 
-        const float* restrict accum_buffer, 
+        SysArray deriv, 
+        const SysArray accum_buffer, 
         const DerivRecord* restrict tape,
         int n_tape,
-        int n_atom);
+        int n_atom, int n_system);
 
 void
 recenter(
-        float* restrict pos,
-        int n_atom
+        SysArray pos,
+        int n_atom, int n_system
         );
 
 void hmm(
-        const float* pos,
-        float* pos_deriv,
+        const CoordArray pos,
         const HMMParams* params,
         const float* trans_matrices,
         int n_bin,
         const RamaMapGerm* rama_map_data,
-        int n_residue);
+        int n_residue, int n_system);
 
 #endif

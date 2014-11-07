@@ -13,8 +13,9 @@ using namespace std;
 
 void Pos::propagate_deriv() {
     Timer timer(string("pos_deriv"));
-    deriv_accumulation(deriv.data(), slot_machine.accum.data(), slot_machine.deriv_tape.data(), 
-            slot_machine.deriv_tape.size(), n_atom);
+    deriv_accumulation( SysArray(deriv.data(),n_atom*3), 
+            slot_machine.accum_array(), slot_machine.deriv_tape.data(), 
+            slot_machine.deriv_tape.size(), n_atom, n_system);
 }
 
 void DerivEngine::add_node(
@@ -105,8 +106,12 @@ void DerivEngine::integration_cycle(float* mom, float dt, float max_force, Integ
     for(int stage=0; stage<3; ++stage) {
         compute();   // compute derivatives
         Timer timer(string("integration"));
-        integration_stage(mom, pos->output.data(), pos->deriv.data(), 
-                dt*mom_update[stage], dt*pos_update[stage], max_force, pos->n_atom);
+        integration_stage( 
+                SysArray(mom,                pos->n_atom*3), 
+                SysArray(pos->output.data(), pos->n_atom*3), 
+                SysArray(pos->deriv.data(),  pos->n_atom*3),
+                dt*mom_update[stage], dt*pos_update[stage], max_force, 
+                pos->n_atom, pos->n_system);
     }
 }
 
@@ -136,7 +141,7 @@ struct PosSpring : public DerivComputation
 
     virtual void compute_germ() {
         Timer timer(string("pos_spring")); 
-        pos_spring(pos.output.data(), pos.slot_machine.accum.data(), params.host().data(), n_elem);}
+        pos_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);}
 };
 
 
@@ -155,16 +160,16 @@ struct DistSpring : public DerivComputation
         check_size(grp, "spring_const", n_elem);
 
         auto& p = params.host();
-        traverse_dset<2,int>  (grp, "id",              [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
-        traverse_dset<1,float>(grp, "equil_dist",      [&](size_t i,           float x) { p[i].equil_dist = x;});
-        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x)    { p[i].spring_constant = x;});
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
+        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dist = x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
 
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
     virtual void compute_germ() {
         Timer timer(string("dist_spring"));
-        dist_spring(pos.output.data(), pos.slot_machine.accum.data(), params.host().data(), n_elem);}
+        dist_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);}
 };
 
 
@@ -192,7 +197,7 @@ struct AngleSpring : public DerivComputation
 
     virtual void compute_germ() {
         Timer timer(string("angle_spring"));
-        angle_spring(pos.output.data(), pos.slot_machine.accum.data(), params.host().data(), n_elem);}
+        angle_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);}
 };
 
 
@@ -220,7 +225,7 @@ struct DihedralSpring : public DerivComputation
 
     virtual void compute_germ() {
         Timer timer(string("dihedral_spring"));
-        dihedral_spring(pos.output.data(), pos.slot_machine.accum.data(), params.host().data(), n_elem);}
+        dihedral_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);}
 };
 
 
@@ -257,8 +262,9 @@ struct HMMPot : public DerivComputation
 
     virtual void compute_germ() {
         Timer timer(string("hmm"));
-        hmm(pos.output.data(), pos.slot_machine.accum.data(), params.host().data(),
-                trans_matrices.host().data(), n_bin, rama_maps.host().data(), n_residue);
+        hmm(pos.coords(), params.host().data(),
+                trans_matrices.host().data(), n_bin, rama_maps.host().data(), 
+                n_residue, pos.n_system);
     }
 };
 
@@ -274,7 +280,7 @@ struct AffineAlignment : public DerivComputation
 
     AffineAlignment(hid_t grp, Pos& pos_):
         pos(pos_), n_residue(get_dset_size<2>(grp, "atoms")[0]), params(n_residue),
-        output(7*n_residue), slot_machine(6, n_residue, pos.n_system)
+        output(7*n_residue*pos.n_system), slot_machine(6, n_residue, pos.n_system)
     {
         int n_dep = 3;
         check_size(grp, "atoms",    n_residue, n_dep);
@@ -287,15 +293,22 @@ struct AffineAlignment : public DerivComputation
         for(auto &p: params.host()) autodiff_params.host().push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
+    CoordArray coords() {
+        return CoordArray(SysArray(output.host().data(), n_residue*7), slot_machine.accum_array());
+    }
+
     virtual void compute_germ() {
         Timer timer(string("affine_alignment"));
-        affine_alignment(output.host().data(), pos.output.data(), pos.slot_machine.accum.data(), params.host().data(), n_residue);}
+        affine_alignment(coords().value, pos.coords(), params.host().data(), 
+                n_residue, pos.n_system);}
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
         affine_reverse_autodiff(
-                output.host().data(), slot_machine.accum.data(), pos.slot_machine.accum.data(), 
-                slot_machine.deriv_tape.data(), autodiff_params.host().data(), slot_machine.deriv_tape.size(), n_residue);}
+                coords().value, coords().deriv, pos.slot_machine.accum_array(), 
+                slot_machine.deriv_tape.data(), autodiff_params.host().data(), 
+                slot_machine.deriv_tape.size(), 
+                n_residue, pos.n_system);}
 };
 
 template <int ndim>
@@ -358,8 +371,9 @@ struct AffinePairs : public DerivComputation
     virtual void compute_germ() {
         Timer timer(string("affine_pairs"));
         affine_pairs(
-                alignment.output.host().data(), alignment.slot_machine.accum.data(),
-                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue);
+                alignment.coords(), 
+                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
+                alignment.pos.n_system);
     }
 };
 
@@ -375,7 +389,7 @@ struct Infer_H_O : public DerivComputation
 
     Infer_H_O(hid_t grp, Pos& pos_):
         pos(pos_), n_donor(get_dset_size<2>(grp, "donors/id")[0]), n_acceptor(get_dset_size<2>(grp, "acceptors/id")[0]),
-        n_virtual(n_donor+n_acceptor), params(n_virtual), output(6*n_virtual), slot_machine(6, n_virtual, pos.n_system)
+        n_virtual(n_donor+n_acceptor), params(n_virtual), output(6*n_virtual*pos.n_system), slot_machine(6, n_virtual, pos.n_system)
     {
         int n_dep = 3;
         auto don = h5_obj(H5Gclose, H5Gopen2(grp, "donors",    H5P_DEFAULT));
@@ -395,17 +409,25 @@ struct Infer_H_O : public DerivComputation
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
+    CoordArray coords() {
+        return CoordArray(SysArray(output.data(), n_virtual*6), slot_machine.accum_array());
+    }
+
     virtual void compute_germ() {
         Timer timer(string("infer_H_O"));
         infer_HN_OC_pos_and_dir(
-                output.data(), pos.output.data(), pos.slot_machine.accum.data(), 
-                params.data(), n_virtual);
+                SysArray(output.data(),n_virtual*6), pos.coords(), 
+                params.data(), n_virtual, pos.n_system);
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("infer_H_O_deriv"));
-        reverse_autodiff<6,3,0>(slot_machine.accum.data(), pos.slot_machine.accum.data(), nullptr, 
-                slot_machine.deriv_tape.data(), autodiff_params.data(), slot_machine.deriv_tape.size(), n_virtual);}
+        reverse_autodiff<6,3,0>(
+                slot_machine.accum_array(), 
+                pos.slot_machine.accum_array(), SysArray(), 
+                slot_machine.deriv_tape.data(), autodiff_params.data(), 
+                slot_machine.deriv_tape.size(), 
+                n_virtual, pos.n_system);}
 };
 
 
@@ -451,9 +473,9 @@ struct HBondEnergy : public DerivComputation
     virtual void compute_germ() {
         Timer timer(string("hbond_energy"));
         n_hbond = (1.f/hbond_energy) * count_hbond(
-                infer.output.data(), infer.slot_machine.accum.data(),
+                infer.coords(), 
                 n_donor, don_params.data(), n_acceptor, acc_params.data(),
-                hbond_energy);
+                hbond_energy, infer.pos.n_system);
     }
 };
 
@@ -537,9 +559,9 @@ struct SidechainInteraction : public DerivComputation
     virtual void compute_germ() {
         Timer timer(string("sidechain_pairs"));
         sidechain_pairs(
-                alignment.output.host().data(), alignment.slot_machine.accum.data(),
+                alignment.coords(), 
                 sidechain_params.data(), params.data(), 
-                dist_cutoff, n_residue);
+                dist_cutoff, n_residue, alignment.pos.n_system);
     }
 };
 

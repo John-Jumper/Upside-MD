@@ -387,25 +387,27 @@ void affine_alignment_body(
 }
 
 void affine_alignment(
-        float* restrict rigid_body,
-        float* restrict pos,
-        float* restrict pos_deriv,
+        SysArray rigid_body,
+        CoordArray pos,
         const AffineAlignmentParams* restrict params,
-        int n_res)
+        int n_res,
+        int n_system)
 {
-    for(int nr=0; nr<n_res; ++nr) {
-        MutableCoord<7> rigid_body_coord(rigid_body, nr);
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nr=0; nr<n_res; ++nr) {
+            MutableCoord<7> rigid_body_coord(rigid_body, ns, nr);
 
-        Coord<3,7> x1(pos, pos_deriv, params[nr].atom[0]);
-        Coord<3,7> x2(pos, pos_deriv, params[nr].atom[1]);
-        Coord<3,7> x3(pos, pos_deriv, params[nr].atom[2]);
+            Coord<3,7> x1(pos, ns, params[nr].atom[0]);
+            Coord<3,7> x2(pos, ns, params[nr].atom[1]);
+            Coord<3,7> x3(pos, ns, params[nr].atom[2]);
 
-        affine_alignment_body(rigid_body_coord, x1,x2,x3, params[nr]);
+            affine_alignment_body(rigid_body_coord, x1,x2,x3, params[nr]);
 
-        rigid_body_coord.flush();
-        x1.flush();
-        x2.flush();
-        x3.flush();
+            rigid_body_coord.flush();
+            x1.flush();
+            x2.flush();
+            x3.flush();
+        }
     }
 }
 
@@ -413,48 +415,51 @@ void affine_alignment(
 
 void
 affine_reverse_autodiff(
-        const float*    affine,
-        const float*    affine_accum,
-        float* restrict pos_deriv,
+        const SysArray  affine,
+        const SysArray  affine_accum,
+        SysArray         pos_deriv,
         const DerivRecord* tape,
         const AutoDiffParams* p,
         int n_tape,
-        int n_res)
+        int n_res, 
+        int n_system)
 {
-    std::vector<TempCoord<6>> torque_sens(n_res);
+    for(int ns=0; ns<n_system; ++ns) {
+        std::vector<TempCoord<6>> torque_sens(n_res);
 
-    for(int nt=0; nt<n_tape; ++nt) {
-        auto tape_elem = tape[nt];
-        for(int rec=0; rec<tape_elem.output_width; ++rec) {
-            auto val = StaticCoord<6>(affine_accum, tape_elem.loc + rec);
-            for(int d=0; d<6; ++d)
-                torque_sens[tape_elem.atom].v[d] += val.v[d];
+        for(int nt=0; nt<n_tape; ++nt) {
+            auto tape_elem = tape[nt];
+            for(int rec=0; rec<tape_elem.output_width; ++rec) {
+                auto val = StaticCoord<6>(affine_accum, ns, tape_elem.loc + rec);
+                for(int d=0; d<6; ++d)
+                    torque_sens[tape_elem.atom].v[d] += val.v[d];
+            }
         }
-    }
 
-    for(int na=0; na<n_res; ++na) {
-        float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
+        for(int na=0; na<n_res; ++na) {
+            float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
 
-        float q[4]; for(int d=0; d<4; ++d) q[d] = affine[na*7+d+3];
+            float q[4]; for(int d=0; d<4; ++d) q[d] = affine.x[ns*affine.offset+na*7+d+3];
 
-        // push back torque to affine derivatives (multiply by quaternion)
-        // I am not sure if this multiplication should be on the right or the left
-        // by the quat or its conjugate
-        // the torque is in the tangent space of the rotated frame
-        // to act on a tangent in the affine space, I need to push that tangent into the rotated space
-        // this means a right multiply by the quaternion itself, I think
+            // push back torque to affine derivatives (multiply by quaternion)
+            // I am not sure if this multiplication should be on the right or the left
+            // by the quat or its conjugate
+            // the torque is in the tangent space of the rotated frame
+            // to act on a tangent in the affine space, I need to push that tangent into the rotated space
+            // this means a right multiply by the quaternion itself, I think
 
-        float *torque = torque_sens[na].v+3;
-        sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
-        sens[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
-        sens[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
-        sens[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+            float *torque = torque_sens[na].v+3;
+            sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
+            sens[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
+            sens[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
+            sens[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
 
-        for(int ns=0; ns<p[na].n_slots1; ++ns) {
-            for(int sens_dim=0; sens_dim<7; ++sens_dim) {
-                MutableCoord<3> c(pos_deriv, p[na].slots1[ns]+sens_dim);
-                for(int d=0; d<3; ++d) c.v[d] *= sens[sens_dim];
-                c.flush();
+            for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
+                for(int sens_dim=0; sens_dim<7; ++sens_dim) {
+                    MutableCoord<3> c(pos_deriv, ns, p[na].slots1[nsl]+sens_dim);
+                    for(int d=0; d<3; ++d) c.v[d] *= sens[sens_dim];
+                    c.flush();
+                }
             }
         }
     }

@@ -117,44 +117,45 @@ float sidechain_interaction(
 
 
 void sidechain_pairs(
-        const float* restrict rigid_body,
-        float*       restrict rigid_body_deriv,
+        const CoordArray rigid_body,
 
         Sidechain* restrict sidechains,
         SidechainParams* restrict params,
         
         float dist_cutoff,  // pair lists will subsume this
-        int n_res)
+        int n_res,
+        int n_system)
 {
     float dist_cutoff2 = dist_cutoff*dist_cutoff;
 
-    vector<AffineCoord> coords;
-    coords.reserve(n_res);
-    for(int nr=0; nr<n_res; ++nr) 
-        coords.emplace_back(rigid_body, rigid_body_deriv, params[nr].res);
+    for(int ns=0; ns<n_system; ++ns) {
+        vector<AffineCoord> coords;
+        coords.reserve(n_res);
+        for(int nr=0; nr<n_res; ++nr) 
+            coords.emplace_back(rigid_body, ns, params[nr].res);
 
-    for(int nr1=0; nr1<n_res; ++nr1) {
-        for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
-            if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
-                int rt1 = params[nr1].restype;
-                int rt2 = params[nr2].restype;
-                sidechain_interaction(
-                        coords[nr1], coords[nr2],
-                        sidechains[rt1].interaction_pot,
-                        sidechains[rt2].density_kernel_centers.size(),
-                        sidechains[rt2].density_kernel_centers.data());
+        for(int nr1=0; nr1<n_res; ++nr1) {
+            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
+                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
+                    int rt1 = params[nr1].restype;
+                    int rt2 = params[nr2].restype;
+                    sidechain_interaction(
+                            coords[nr1], coords[nr2],
+                            sidechains[rt1].interaction_pot,
+                            sidechains[rt2].density_kernel_centers.size(),
+                            sidechains[rt2].density_kernel_centers.data());
 
-                sidechain_interaction(
-                        coords[nr2], coords[nr1],
-                        sidechains[rt2].interaction_pot,
-                        sidechains[rt1].density_kernel_centers.size(),
-                        sidechains[rt1].density_kernel_centers.data());
+                    sidechain_interaction(
+                            coords[nr2], coords[nr1],
+                            sidechains[rt2].interaction_pot,
+                            sidechains[rt1].density_kernel_centers.size(),
+                            sidechains[rt1].density_kernel_centers.data());
+                }
             }
         }
-    }
 
-    for(int nr=0; nr<n_res; ++nr) {
-        coords[nr].flush();
+        for(int nr=0; nr<n_res; ++nr) {
+            coords[nr].flush();
+        }
     }
-    // test_density3d();
 }

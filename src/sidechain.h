@@ -41,12 +41,11 @@ struct Sidechain {
 };
 
 void sidechain_pairs(
-        const float* restrict rigid_body,
-        float*       restrict rigid_body_deriv,
+        const CoordArray rigid_body,
 
         Sidechain* restrict sidechains,
         SidechainParams* restrict params,
         
         float dist_cutoff,  // pair lists will subsume this
-        int n_res);
+        int n_res, int n_system);
 #endif

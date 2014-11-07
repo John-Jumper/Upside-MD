@@ -13,6 +13,7 @@ using namespace h5;
 struct StateLogger
 {
     int n_atom;
+    int n_sys;
     int n_chunk;
 
     hid_t config;
@@ -29,14 +30,14 @@ struct StateLogger
     StateLogger& operator=(const StateLogger &o) = delete;
     // move constructor could be defined if necessary
 
-    StateLogger(int n_atom_, hid_t config_, hid_t output_grp, int n_chunk_):
-        n_atom(n_atom_), n_chunk(n_chunk_), config(config_),
-        pos_tbl (create_earray(output_grp, "pos",     H5T_NATIVE_FLOAT,  {0,n_atom,3}, {n_chunk,n_atom,3})),
-        kin_tbl (create_earray(output_grp, "kinetic", H5T_NATIVE_DOUBLE, {0},          {n_chunk})),
-        time_tbl(create_earray(output_grp, "time",    H5T_NATIVE_DOUBLE, {0},          {n_chunk}))
+    StateLogger(int n_atom_, hid_t config_, hid_t output_grp, int n_chunk_, int n_sys_):
+        n_atom(n_atom_), n_sys(n_sys_), n_chunk(n_chunk_), config(config_),
+        pos_tbl (create_earray(output_grp, "pos",     H5T_NATIVE_FLOAT,  {0,n_sys,n_atom,3}, {n_chunk,1,n_atom,3})),
+        kin_tbl (create_earray(output_grp, "kinetic", H5T_NATIVE_DOUBLE, {0,n_sys},          {n_chunk,1})),
+        time_tbl(create_earray(output_grp, "time",    H5T_NATIVE_DOUBLE, {0},                {n_chunk}))
     {
-        pos_buffer .reserve(n_chunk * n_atom * 3);
-        kin_buffer .reserve(n_chunk);
+        pos_buffer .reserve(n_chunk * n_sys * n_atom * 3);
+        kin_buffer .reserve(n_chunk * n_sys);
         time_buffer.reserve(n_chunk);
     }
 
@@ -44,12 +45,14 @@ struct StateLogger
         Timer timer(string("state_logger"));
         time_buffer.push_back(sim_time);
 
-        pos_buffer.resize(pos_buffer.size()+n_atom*3);
-        std::copy_n(pos, n_atom*3, &pos_buffer[pos_buffer.size()-n_atom*3]);
+        pos_buffer.resize(pos_buffer.size()+n_sys*n_atom*3);
+        std::copy_n(pos, n_sys*n_atom*3, &pos_buffer[pos_buffer.size()-n_sys*n_atom*3]);
 
-        double sum_kin = 0.f;
-        for(int i=0; i<n_atom*3; ++i) sum_kin += mom[i]*mom[i];
-        kin_buffer.push_back((0.5/n_atom)*sum_kin);  // kinetic_energy = (1/2) * <mom^2>
+        for(int ns=0; ns<n_sys; ++ns) {
+            double sum_kin = 0.f;
+            for(int i=0; i<n_atom*3; ++i) sum_kin += mom[ns*n_atom*3 + i]*mom[ns*n_atom*3 + i];
+            kin_buffer.push_back((0.5/n_atom)*sum_kin);  // kinetic_energy = (1/2) * <mom^2>
+        }
 
         if(time_buffer.size() == (size_t)n_chunk) flush();
     }
@@ -120,7 +123,8 @@ try {
             false, -1., "float", cmd);
     ValueArg<double> thermostat_timescale_arg("", "thermostat-timescale", "timescale for the thermostat", 
             false, 5., "float", cmd);
-    ValueArg<double> equilibration_duration_arg("", "equilibration-duration", "duration to limit max force for equilibration (also decreases thermostat interval)", 
+    ValueArg<double> equilibration_duration_arg("", "equilibration-duration", 
+            "duration to limit max force for equilibration (also decreases thermostat interval)", 
             false, 0., "float", cmd);
     SwitchArg generate_expected_force_arg("", "generate-expected-force", 
             "write an expected force to the input for later testing (developer only)", 
@@ -145,12 +149,11 @@ try {
         int  n_atom   = pos_shape[0];
         int  n_system = pos_shape[2];
         if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
-        if(n_system!=1) throw string("multiple systems not currently supported");
 
         auto force_group = open_group(config.get(), "/input/force");
         auto engine = initialize_engine_from_hdf5(n_atom, n_system, force_group.get());
-        traverse_dset<3,float>(config.get(), "/input/pos", [&](size_t i, size_t j, size_t k, float x) { 
-                engine.pos->output.at(i*3*n_system + j*n_system + k) = x;});
+        traverse_dset<3,float>(config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
+                engine.pos->output.at(ns*n_atom*3 + na*3 + d) = x;});
         printf("\nn_atom %i\nn_system %i\n", engine.pos->n_atom, engine.pos->n_system);
 
         engine.compute();  // just a test force computation
@@ -174,7 +177,7 @@ try {
                 thermostat_timescale_arg.getValue(),
                 temperature_arg.getValue(),
                 1e8);
-        thermostat.apply(mom.data(), n_atom);   // initial thermalization
+        thermostat.apply(SysArray(mom.data(),n_atom*3), n_atom, n_system); // initial thermalization
         thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
 
         if(h5_exists(config.get(), "/output", false)) {
@@ -184,25 +187,27 @@ try {
             else throw string("/output already exists and --overwrite-output was not specified");
         }
 
-        auto output_grp = h5_obj(H5Gclose, H5Gcreate2(config.get(), "output", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
-        StateLogger state_logger(n_atom, config.get(), output_grp.get(), 100);
+        auto output_grp = h5_obj(H5Gclose, 
+                H5Gcreate2(config.get(), "output", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
+        StateLogger state_logger(n_atom, config.get(), output_grp.get(), 100, n_system);
 
         int round_print_width = ceil(log(n_round)/log(10));
 
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
             if(!frame_interval || !(nr%frame_interval)) {
-                recenter(engine.pos->output.data(), n_atom);
+                recenter(engine.pos->coords().value, n_atom, n_system);
                 state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data());
                 printf("%*lu / %*lu rounds %5.1f hbonds\n", 
                         round_print_width, (unsigned long)nr, 
                         round_print_width, (unsigned long)n_round, 
-                        get_n_hbond(engine));
+                        get_n_hbond(engine)/n_system);
                 fflush(stdout);
             }
             // To be cautious, apply the thermostat more often if in the equilibration phase
             bool in_equil = nr*3*dt < equil_duration;
-            if(!(nr%thermostat_interval) || in_equil) thermostat.apply(mom.data(), n_atom);
+            if(!(nr%thermostat_interval) || in_equil) 
+                thermostat.apply(SysArray(mom.data(),n_atom*3), n_atom, n_system);
             engine.integration_cycle(mom.data(), dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
         }
         state_logger.flush();
@@ -212,13 +217,14 @@ try {
                 elapsed, elapsed*1e6/n_system/n_round/3);
 
         {
-            double sum_kin = 0.; int n_kin=0;
-            traverse_dset<1,float>(config.get(),"/output/kinetic", [&](size_t i, float x){
-                    if(i>n_round*0.5 / frame_interval){
-                        sum_kin+=x;
-                        n_kin++;
-                    }});
-            printf("avg kinetic energy %.3f\n", sum_kin/n_kin);
+            auto sum_kin = vector<double>(n_system, 0.);
+            auto n_kin   = vector<long>  (n_system, 0);
+            traverse_dset<2,float>(config.get(),"/output/kinetic", [&](size_t i, size_t ns, float x){
+                    if(i>n_round*0.5 / frame_interval){ sum_kin[ns]+=x; n_kin[ns]++; }
+                    });
+            printf("\navg kinetic energy");
+            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns]);
+            printf("\n");
         }
 
         printf("\n");

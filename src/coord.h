@@ -25,6 +25,23 @@ struct float4 {
         x(x_), y(y_), z(z_), w(w_) {}
 };
 
+struct SysArray {
+    float *x;
+    int   offset;  // offset per system, units of floats
+    SysArray(float* x_, int offset_):
+        x(x_), offset(offset_) {}
+    SysArray(): x(nullptr), offset(0) {}
+};
+
+
+struct CoordArray {
+    SysArray value;
+    SysArray deriv;
+    CoordArray(SysArray value_, SysArray deriv_):
+        value(value_), deriv(deriv_) {}
+};
+
+
 namespace{
 static const float M_PI_F   = 3.141592653589793f;
 static const float M_1_PI_F = 0.3183098861837907f;
@@ -142,15 +159,14 @@ struct Coord
     float v[N_DIM];
     float d[N_DIM_OUTPUT][N_DIM];
     float * const deriv_arr;
-    const int base_slot;
 
-    Coord() {};
+    Coord(): deriv_arr(0) {};
 
-    Coord(const float* restrict value_arr, float* restrict deriv_arr_, CoordPair c):
-        deriv_arr(deriv_arr_), base_slot(c.slot)
+    Coord(const CoordArray arr, int system, CoordPair c):
+        deriv_arr(arr.deriv.x + system*arr.deriv.offset + c.slot*N_DIM)
     {
         for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = value_arr[c.index*N_DIM + nd];
+            v[nd] = arr.value.x[system*arr.value.offset + c.index*N_DIM + nd];
 
         for(int no=0; no<N_DIM_OUTPUT; ++no) 
             for(int nd=0; nd<N_DIM; ++nd) 
@@ -182,13 +198,13 @@ struct Coord
             case OverwriteWritePolicy:
                 for(int no=0; no<N_DIM_OUTPUT; ++no) 
                     for(int nd=0; nd<N_DIM; ++nd) 
-                        deriv_arr[(base_slot+no)*N_DIM + nd] = d[no][nd];
+                        deriv_arr[no*N_DIM + nd] = d[no][nd];
                 break;
 
             case SumWritePolicy:
                 for(int no=0; no<N_DIM_OUTPUT; ++no) 
                     for(int nd=0; nd<N_DIM; ++nd) 
-                        deriv_arr[(base_slot+no)*N_DIM + nd] = d[no][nd];
+                        deriv_arr[no*N_DIM + nd] = d[no][nd];
                 break;
         }
     }
@@ -202,17 +218,16 @@ struct MutableCoord
     const static int n_dim = N_DIM;
     float v[(N_DIM==0) ? 1 : N_DIM];  // specialization for a trivial case
     float * const value_arr;
-    const int index;
 
     enum Init { ReadValue, Zero };
 
-    MutableCoord() {};
+    MutableCoord(): value_arr(nullptr) {};
 
-    MutableCoord(float* value_arr_, int index_, Init init = ReadValue):
-        value_arr(value_arr_), index(index_)
+    MutableCoord(SysArray arr, int system, int index, Init init = ReadValue):
+        value_arr(arr.x + system*arr.offset + index*N_DIM)
     {
         for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = init==ReadValue ? value_arr[index*N_DIM + nd] : 0.f;
+            v[nd] = init==ReadValue ? value_arr[nd] : 0.f;
     }
 
     float3 f3() const {
@@ -232,10 +247,9 @@ struct MutableCoord
         return *this;
     }
 
-
     void flush() {
         for(int nd=0; nd<N_DIM; ++nd) 
-            value_arr[index*N_DIM + nd] = v[nd];
+            value_arr[nd] = v[nd];
     }
 };
 
@@ -305,10 +319,10 @@ struct StaticCoord
 
     StaticCoord() {};
 
-    StaticCoord(const float* value_arr, int index)
+    StaticCoord(SysArray value, int ns, int index)
     {
         for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = value_arr[index*N_DIM + nd];
+            v[nd] = value.x[ns*value.offset + index*N_DIM + nd];
     }
 
     float3 f3() const {
@@ -321,47 +335,48 @@ struct StaticCoord
 
 template <int my_width, int width1, int width2>
 void reverse_autodiff(
-        const float* restrict accum,
-        float* restrict deriv1,
-        float* restrict deriv2,
+        const SysArray accum,
+        SysArray deriv1,
+        SysArray deriv2,
         const DerivRecord* tape,
         const AutoDiffParams* p,
         int n_tape,
-        int n_atom)
+        int n_atom, 
+        int n_system)
 {
-    std::vector<TempCoord<my_width>> sens(n_atom);
-
-    for(int nt=0; nt<n_tape; ++nt) {
-        auto tape_elem = tape[nt];
-        for(int rec=0; rec<tape_elem.output_width; ++rec) {
-            auto val = StaticCoord<my_width>(accum, tape_elem.loc + rec);
-            for(int d=0; d<my_width; ++d)
-                sens[tape_elem.atom].v[d] += val.v[d];
-        }
-    }
-
-    for(int na=0; na<n_atom; ++na) {
-        if(width1) {
-            for(int ns=0; ns<p[na].n_slots1; ++ns) {
-                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    MutableCoord<width1> c(deriv1, p[na].slots1[ns]+sens_dim);
-                    for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
-                    c.flush();
-                }
+    for(int ns=0; ns<n_system; ++ns) {
+        std::vector<TempCoord<my_width>> sens(n_atom);
+        for(int nt=0; nt<n_tape; ++nt) {
+            auto tape_elem = tape[nt];
+            for(int rec=0; rec<tape_elem.output_width; ++rec) {
+                auto val = StaticCoord<my_width>(accum, ns, tape_elem.loc + rec);
+                for(int d=0; d<my_width; ++d)
+                    sens[tape_elem.atom].v[d] += val.v[d];
             }
         }
 
-        if(width2) {
-            for(int ns=0; ns<p[na].n_slots2; ++ns) {
-                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    MutableCoord<width2> c(deriv2, p[na].slots2[ns]+sens_dim);
-                    for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
-                    c.flush();
+        for(int na=0; na<n_atom; ++na) {
+            if(width1) {
+                for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
+                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                        MutableCoord<width1> c(deriv1, ns, p[na].slots1[nsl]+sens_dim);
+                        for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
+                        c.flush();
+                    }
+                }
+            }
+
+            if(width2) {
+                for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
+                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                        MutableCoord<width2> c(deriv2, ns, p[na].slots2[nsl]+sens_dim);
+                        for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
+                        c.flush();
+                    }
                 }
             }
         }
     }
 }
-
 
 #endif

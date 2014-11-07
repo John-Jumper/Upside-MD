@@ -105,41 +105,42 @@ inline void affine_pairs_body(
 }
 
 void affine_pairs(
-        const float* restrict rigid_body,
-        float*       restrict rigid_body_deriv,
+        const CoordArray rigid_body,
         const PackedRefPos* restrict ref_pos,
         const AffineParams* restrict params,
         float energy_scale,
         float dist_cutoff,
-        int n_res)
+        int n_res, int n_system)
 {
-    float dist_cutoff2 = dist_cutoff*dist_cutoff;
-    vector<AffineCoord> coords;
-    coords.reserve(n_res);
-    for(int nr=0; nr<n_res; ++nr) 
-        coords.emplace_back(rigid_body, rigid_body_deriv, params[nr].residue);
+    for(int ns=0; ns<n_system; ++ns) {
+        float dist_cutoff2 = dist_cutoff*dist_cutoff;
+        vector<AffineCoord> coords;
+        coords.reserve(n_res);
+        for(int nr=0; nr<n_res; ++nr) 
+            coords.emplace_back(rigid_body, ns, params[nr].residue);
 
-    vector<int>    ref_pos_atoms (n_res);
-    vector<float3> ref_pos_coords(n_res*4);
+        vector<int>    ref_pos_atoms (n_res);
+        vector<float3> ref_pos_coords(n_res*4);
 
-    for(int nr=0; nr<n_res; ++nr) {
-        ref_pos_atoms[nr] = ref_pos[nr].n_atoms;
-        for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(unpack_atom(ref_pos[nr].pos[na]));
-    }
+        for(int nr=0; nr<n_res; ++nr) {
+            ref_pos_atoms[nr] = ref_pos[nr].n_atoms;
+            for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(unpack_atom(ref_pos[nr].pos[na]));
+        }
 
-    for(int nr1=0; nr1<n_res; ++nr1) {
-        for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
-            if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
-                affine_pairs_body(
-                        coords[nr1],        coords[nr2], 
-                        ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
-                        ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
+        for(int nr1=0; nr1<n_res; ++nr1) {
+            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
+                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
+                    affine_pairs_body(
+                            coords[nr1],        coords[nr2], 
+                            ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
+                            ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
+                }
             }
         }
-    }
 
-    for(int nr=0; nr<n_res; ++nr) {
-        for(int d=0; d<6; ++d) coords[nr].d[d] *= energy_scale;
-        coords[nr].flush();
+        for(int nr=0; nr<n_res; ++nr) {
+            for(int d=0; d<6; ++d) coords[nr].d[d] *= energy_scale;
+            coords[nr].flush();
+        }
     }
 }

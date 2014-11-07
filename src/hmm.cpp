@@ -229,57 +229,58 @@ void hmm_stage3(
 }
 
 void hmm(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const HMMParams* restrict params,
         const float* restrict trans_matrices,
         int n_bin,
         const RamaMapGerm* restrict rama_map_data,
-        int n_residue) 
+        int n_residue, int n_system) 
 {
-    std::vector<HMMDeriv> deriv(n_residue);
-    std::vector<float> basin_prob (n_residue*N_STATE);
-    std::vector<float> forward_backward_prob(n_residue*2*N_STATE);
-    RamaMap rama_map(n_residue, n_bin, rama_map_data);
+    for(int ns=0; ns<n_system; ++ns) {
+        std::vector<HMMDeriv> deriv(n_residue);
+        std::vector<float> basin_prob (n_residue*N_STATE);
+        std::vector<float> forward_backward_prob(n_residue*2*N_STATE);
+        RamaMap rama_map(n_residue, n_bin, rama_map_data);
 
-    for(int nt=0; nt<n_residue; ++nt) {
-        StaticCoord<3> x1(pos, params[nt].atom[0].index);
-        StaticCoord<3> x2(pos, params[nt].atom[1].index);
-        StaticCoord<3> x3(pos, params[nt].atom[2].index);
-        StaticCoord<3> x4(pos, params[nt].atom[3].index);
-        StaticCoord<3> x5(pos, params[nt].atom[4].index);
+        for(int nt=0; nt<n_residue; ++nt) {
+            StaticCoord<3> x1(pos.value, ns, params[nt].atom[0].index);
+            StaticCoord<3> x2(pos.value, ns, params[nt].atom[1].index);
+            StaticCoord<3> x3(pos.value, ns, params[nt].atom[2].index);
+            StaticCoord<3> x4(pos.value, ns, params[nt].atom[3].index);
+            StaticCoord<3> x5(pos.value, ns, params[nt].atom[4].index);
 
-        hmm_stage1(x1,x2,x3,x4,x5, deriv[nt], rama_map, basin_prob.data(), nt);
-    }
+            hmm_stage1(x1,x2,x3,x4,x5, deriv[nt], rama_map, basin_prob.data(), nt);
+        }
 
-    for(int is_backward=0; is_backward<2; ++is_backward) {
-        hmm_stage2(forward_backward_prob.data(),
-                n_residue,
-                basin_prob.data(),
-                trans_matrices,
-                is_backward);
-    }
+        for(int is_backward=0; is_backward<2; ++is_backward) {
+            hmm_stage2(forward_backward_prob.data(),
+                    n_residue,
+                    basin_prob.data(),
+                    trans_matrices,
+                    is_backward);
+        }
 
-    for(int nt=0; nt<n_residue; ++nt) {
-        MutableCoord<3> x1d(pos_deriv, params[nt].atom[0].slot, MutableCoord<3>::Zero);
-        MutableCoord<3> x2d(pos_deriv, params[nt].atom[1].slot, MutableCoord<3>::Zero);
-        MutableCoord<3> x3d(pos_deriv, params[nt].atom[2].slot, MutableCoord<3>::Zero);
-        MutableCoord<3> x4d(pos_deriv, params[nt].atom[3].slot, MutableCoord<3>::Zero);
-        MutableCoord<3> x5d(pos_deriv, params[nt].atom[4].slot, MutableCoord<3>::Zero);
+        for(int nt=0; nt<n_residue; ++nt) {
+            MutableCoord<3> x1d(pos.deriv, ns, params[nt].atom[0].slot, MutableCoord<3>::Zero);
+            MutableCoord<3> x2d(pos.deriv, ns, params[nt].atom[1].slot, MutableCoord<3>::Zero);
+            MutableCoord<3> x3d(pos.deriv, ns, params[nt].atom[2].slot, MutableCoord<3>::Zero);
+            MutableCoord<3> x4d(pos.deriv, ns, params[nt].atom[3].slot, MutableCoord<3>::Zero);
+            MutableCoord<3> x5d(pos.deriv, ns, params[nt].atom[4].slot, MutableCoord<3>::Zero);
 
-        hmm_stage3(
-                x1d,x2d,x3d,x4d,x5d,
-                pos_deriv,
-                basin_prob.data(),
-                deriv[nt],
-                forward_backward_prob.data(),
-                n_residue,
-                nt);
+            hmm_stage3(
+                    x1d,x2d,x3d,x4d,x5d,
+                    pos.deriv.x + ns*pos.deriv.offset,
+                    basin_prob.data(),
+                    deriv[nt],
+                    forward_backward_prob.data(),
+                    n_residue,
+                    nt);
 
-        x1d.flush();
-        x2d.flush();
-        x3d.flush();
-        x4d.flush();
-        x5d.flush();
+            x1d.flush();
+            x2d.flush();
+            x3d.flush();
+            x4d.flush();
+            x5d.flush();
+        }
     }
 }

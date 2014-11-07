@@ -46,22 +46,17 @@ void finite_difference(FuncT& f, CoordT& x, float* expected, float eps = 1e-2)
 
 
 void infer_HN_OC_pos_and_dir(
-        float* HN_OC,
-        const float* pos,
-        float* pos_deriv,
+        const SysArray   HN_OC,
+        const CoordArray pos,
         const VirtualParams* params,
-        int n_term);
-
-
-
+        int n_term, int n_system);
 
 
 float count_hbond(
-        const float * restrict virtual_pos,
-        float       * restrict virtual_pos_deriv,
+        const CoordArray virtual_pos,
         int n_donor,    const VirtualHBondParams * restrict donor_params,
         int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
-        const float hbond_energy);
+        const float hbond_energy, int n_system);
 
 
 void helical_probabilities(

@@ -13,15 +13,16 @@ inline void pos_spring_body(
 
 
 void pos_spring(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const PosSpringParams* restrict params,
-        int n_terms)
+        int n_terms, int n_system)
 {
-    for(int nt=0; nt<n_terms; ++nt) {
-        Coord<3> x1(pos, pos_deriv, params[nt].atom[0]);
-        pos_spring_body(x1, params[nt]);
-        x1.flush();
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            Coord<3> x1(pos, ns, params[nt].atom[0]);
+            pos_spring_body(x1, params[nt]);
+            x1.flush();
+        }
     }
 }
 
@@ -42,17 +43,18 @@ inline void dist_spring_body(
 
 
 void dist_spring(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const DistSpringParams* restrict params,
-        int n_terms)
+        int n_terms, int n_system)
 {
-    for(int nt=0; nt<n_terms; ++nt) {
-        Coord<3> x1(pos, pos_deriv, params[nt].atom[0]);
-        Coord<3> x2(pos, pos_deriv, params[nt].atom[1]);
-        dist_spring_body(x1,x2, params[nt]);
-        x1.flush();
-        x2.flush();
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            Coord<3> x1(pos, ns, params[nt].atom[0]);
+            Coord<3> x2(pos, ns, params[nt].atom[1]);
+            dist_spring_body(x1,x2, params[nt]);
+            x1.flush();
+            x2.flush();
+        }
     }
 }
 
@@ -77,19 +79,20 @@ inline void angle_spring_body(
 
 
 void angle_spring(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const AngleSpringParams* restrict params,
-        int n_terms)
+        int n_terms, int n_system)
 {
-    for(int nt=0; nt<n_terms; ++nt) {
-        Coord<3> x1(pos, pos_deriv, params[nt].atom[0]);
-        Coord<3> x2(pos, pos_deriv, params[nt].atom[1]);
-        Coord<3> x3(pos, pos_deriv, params[nt].atom[2]);
-        angle_spring_body(x1,x2,x3, params[nt]);
-        x1.flush();
-        x2.flush();
-        x3.flush();
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            Coord<3> x1(pos, ns, params[nt].atom[0]);
+            Coord<3> x2(pos, ns, params[nt].atom[1]);
+            Coord<3> x3(pos, ns, params[nt].atom[2]);
+            angle_spring_body(x1,x2,x3, params[nt]);
+            x1.flush();
+            x2.flush();
+            x3.flush();
+        }
     }
 }
 
@@ -120,20 +123,21 @@ inline void dihedral_spring_body(
 
 
 void dihedral_spring(
-        const float* restrict pos,
-        float* restrict pos_deriv,
+        const CoordArray pos,
         const DihedralSpringParams* restrict params,
-        int n_terms)
+        int n_terms, int n_system)
 {
-    for(int nt=0; nt<n_terms; ++nt) {
-        Coord<3> x1(pos, pos_deriv, params[nt].atom[0]);
-        Coord<3> x2(pos, pos_deriv, params[nt].atom[1]);
-        Coord<3> x3(pos, pos_deriv, params[nt].atom[2]);
-        Coord<3> x4(pos, pos_deriv, params[nt].atom[3]);
-        dihedral_spring_body(x1,x2,x3,x4, params[nt]);
-        x1.flush();
-        x2.flush();
-        x3.flush();
-        x4.flush();
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            Coord<3> x1(pos, ns, params[nt].atom[0]);
+            Coord<3> x2(pos, ns, params[nt].atom[1]);
+            Coord<3> x3(pos, ns, params[nt].atom[2]);
+            Coord<3> x4(pos, ns, params[nt].atom[3]);
+            dihedral_spring_body(x1,x2,x3,x4, params[nt]);
+            x1.flush();
+            x2.flush();
+            x3.flush();
+            x4.flush();
+        }
     }
 }

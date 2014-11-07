@@ -108,24 +108,25 @@ void infer_x_body(
 }
 
 void infer_HN_OC_pos_and_dir(
-        float* HN_OC,
-        const float* pos,
-        float* pos_deriv,
+        const SysArray   HN_OC,
+        const CoordArray pos,
         const VirtualParams* params,
-        int n_term)
+        int n_term, int n_system)
 {
-    for(int nt=0; nt<n_term; ++nt) {
-        MutableCoord<6> hbond_pos(HN_OC, nt);
-        Coord<3,6>      prev_c(pos, pos_deriv, params[nt].atom[0]);
-        Coord<3,6>      curr_c(pos, pos_deriv, params[nt].atom[1]);
-        Coord<3,6>      next_c(pos, pos_deriv, params[nt].atom[2]);
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_term; ++nt) {
+            MutableCoord<6> hbond_pos(HN_OC, ns, nt);
+            Coord<3,6>      prev_c(pos, ns, params[nt].atom[0]);
+            Coord<3,6>      curr_c(pos, ns, params[nt].atom[1]);
+            Coord<3,6>      next_c(pos, ns, params[nt].atom[2]);
 
-        infer_x_body(hbond_pos, prev_c,curr_c,next_c, params[nt].bond_length);
+            infer_x_body(hbond_pos, prev_c,curr_c,next_c, params[nt].bond_length);
 
-        hbond_pos.flush();
-        prev_c.flush();
-        curr_c.flush();
-        next_c.flush();
+            hbond_pos.flush();
+            prev_c.flush();
+            curr_c.flush();
+            next_c.flush();
+        }
     }
 }
 
@@ -175,87 +176,89 @@ float hbond_score(
 }
 
 
-void 
-test_infer_x_body()
-{
-    RandomGenerator gen(14, 10, 32, 101);
-
-    float bond_length = 1.24f;
-    vector<float> output_storage(6);
-    vector<float> pos(9);
-    vector<float> deriv(10);
-    for(auto& x: pos) x = gen.normal().x;
-
-    Coord<3,6> x1(pos.data(), deriv.data(), CoordPair(0,0));
-    Coord<3,6> x2(pos.data(), deriv.data(), CoordPair(1,0));
-    Coord<3,6> x3(pos.data(), deriv.data(), CoordPair(2,0));
-
-    auto f = [&](Coord<3,6>& xprime) {
-        MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-        infer_x_body(o, xprime, x2, x3, bond_length);
-        return o;
-    };
-    f(x1);
-    finite_difference(f, x1, &x1.d[0][0]);
-
-    auto g = [&](Coord<3,6>& xprime) {
-        MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-        infer_x_body(o, x1, xprime, x3, bond_length);
-        return o;
-    };
-    g(x2);
-    finite_difference(g, x2, &x2.d[0][0]);
-
-    auto h = [&](Coord<3,6>& xprime) {
-        MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-        infer_x_body(o, x1, x2, xprime, bond_length);
-        return o;
-    };
-    h(x3);
-    finite_difference(h, x3, &x3.d[0][0]);
-}
+// void 
+// test_infer_x_body()
+// {
+//     RandomGenerator gen(14, 10, 32, 101);
+// 
+//     float bond_length = 1.24f;
+//     vector<float> output_storage(6);
+//     vector<float> pos(9);
+//     vector<float> deriv(10);
+//     for(auto& x: pos) x = gen.normal().x;
+// 
+//     Coord<3,6> x1(pos.data(), deriv.data(), CoordPair(0,0));
+//     Coord<3,6> x2(pos.data(), deriv.data(), CoordPair(1,0));
+//     Coord<3,6> x3(pos.data(), deriv.data(), CoordPair(2,0));
+// 
+//     auto f = [&](Coord<3,6>& xprime) {
+//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
+//         infer_x_body(o, xprime, x2, x3, bond_length);
+//         return o;
+//     };
+//     f(x1);
+//     finite_difference(f, x1, &x1.d[0][0]);
+// 
+//     auto g = [&](Coord<3,6>& xprime) {
+//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
+//         infer_x_body(o, x1, xprime, x3, bond_length);
+//         return o;
+//     };
+//     g(x2);
+//     finite_difference(g, x2, &x2.d[0][0]);
+// 
+//     auto h = [&](Coord<3,6>& xprime) {
+//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
+//         infer_x_body(o, x1, x2, xprime, bond_length);
+//         return o;
+//     };
+//     h(x3);
+//     finite_difference(h, x3, &x3.d[0][0]);
+// }
 }
 
 
 float count_hbond(
-        const float * restrict virtual_pos,
-        float       * restrict virtual_pos_deriv,
+        const CoordArray virtual_pos,
         int n_donor,    const VirtualHBondParams * restrict donor_params,
         int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
-        const float hbond_energy)
+        const float hbond_energy, int n_system)
 {
-    vector<Coord<6>> donors;    donors   .reserve(n_donor);
-    vector<Coord<6>> acceptors; acceptors.reserve(n_acceptor);
-
-    for(int nd=0; nd<n_donor; ++nd) 
-        donors   .emplace_back(virtual_pos, virtual_pos_deriv, donor_params   [nd].id);
-
-    for(int na=0; na<n_acceptor; ++na)
-        acceptors.emplace_back(virtual_pos, virtual_pos_deriv, acceptor_params[na].id);
 
     float tot_hbond = 0.f;
-    for(int nd=0; nd<n_donor; ++nd) {
-        for(int na=0; na<n_acceptor; ++na) {
-            if(mag2(donors[nd].f3()-acceptors[na].f3()) < radial_cutoff2) {
-                int res_disp = donor_params[nd].residue_id - acceptor_params[na].residue_id;
-                if(abs(res_disp)<2) continue;
+    for(int ns=0; ns<n_system; ++ns) {
+        vector<Coord<6>> donors;    donors   .reserve(n_donor);
+        vector<Coord<6>> acceptors; acceptors.reserve(n_acceptor);
 
-                const float energy = hbond_energy + (res_disp==4) * (donor_params[nd].helix_energy_bonus +
-                        acceptor_params[na].helix_energy_bonus);
+        for(int nd=0; nd<n_donor; ++nd) 
+            donors   .emplace_back(virtual_pos, ns, donor_params   [nd].id);
 
-                Coord<6> &H = donors[nd];
-                Coord<6> &O = acceptors[na];
-                tot_hbond += hbond_score(H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, energy);
+        for(int na=0; na<n_acceptor; ++na)
+            acceptors.emplace_back(virtual_pos, ns, acceptor_params[na].id);
+
+        for(int nd=0; nd<n_donor; ++nd) {
+            for(int na=0; na<n_acceptor; ++na) {
+                if(mag2(donors[nd].f3()-acceptors[na].f3()) < radial_cutoff2) {
+                    int res_disp = donor_params[nd].residue_id - acceptor_params[na].residue_id;
+                    if(abs(res_disp)<2) continue;
+
+                    const float energy = hbond_energy + (res_disp==4) * (donor_params[nd].helix_energy_bonus +
+                            acceptor_params[na].helix_energy_bonus);
+
+                    Coord<6> &H = donors[nd];
+                    Coord<6> &O = acceptors[na];
+                    tot_hbond += hbond_score(H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, energy);
+                }
             }
         }
-    }
 
-    for(auto& d: donors)    for(int i=0; i<6; ++i) d.flush();
-    for(auto& a: acceptors) for(int i=0; i<6; ++i) a.flush();
+        for(auto& d: donors)    for(int i=0; i<6; ++i) d.flush();
+        for(auto& a: acceptors) for(int i=0; i<6; ++i) a.flush();
+    }
     return tot_hbond;
 }
 
-
+/*
 void helical_probabilities(
         int n_residue, float * restrict helicity,  // size (n_residue,), corresponds to donor_params residue_id's
         const float * restrict virtual_pos,
@@ -286,3 +289,4 @@ void helical_probabilities(
         }
     }
 }
+*/

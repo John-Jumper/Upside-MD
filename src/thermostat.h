@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cmath>
+#include "coord.h"
 
 struct OrnsteinUhlenbeckThermostat
         // following the notation in Gillespie, 1996
@@ -31,5 +32,5 @@ struct OrnsteinUhlenbeckThermostat
         OrnsteinUhlenbeckThermostat& set_delta_t  (float delta_t_)   {
             delta_t   = delta_t_;   update_parameters(); return *this;}
 
-        void apply(float* mom, int n_atom); 
+        void apply(SysArray mom, int n_atom, int n_system); 
 };
