@@ -393,6 +393,7 @@ void affine_alignment(
         int n_res,
         int n_system)
 {
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nr=0; nr<n_res; ++nr) {
             MutableCoord<7> rigid_body_coord(rigid_body, ns, nr);

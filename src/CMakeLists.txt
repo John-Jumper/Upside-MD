@@ -5,11 +5,12 @@ set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED)
 # find_package(VTF REQUIRED)
 
+set (OMP_FLAGS "-fopenmp")
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
 set (OPT     " -O3 -ffast-math -march=native")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11 ${DEFINES} ${OPT} ${WARN}" )
-set (CMAKE_LD_FLAGS  "${CMAKE_LD_FLAGS}" )
+set (CMAKE_CXX_FLAGS "${OMP_FLAGS} ${CMAKE_CXX_FLAGS} -g -std=c++11 ${DEFINES} ${OPT} ${WARN}" )
+set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside

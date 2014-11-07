@@ -13,7 +13,7 @@ using namespace std;
 
 void Pos::propagate_deriv() {
     Timer timer(string("pos_deriv"));
-    deriv_accumulation( SysArray(deriv.data(),n_atom*3), 
+    deriv_accumulation(SysArray(deriv.data(),n_atom*3), 
             slot_machine.accum_array(), slot_machine.deriv_tape.data(), 
             slot_machine.deriv_tape.size(), n_atom, n_system);
 }

@@ -236,6 +236,7 @@ void hmm(
         const RamaMapGerm* restrict rama_map_data,
         int n_residue, int n_system) 
 {
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         std::vector<HMMDeriv> deriv(n_residue);
         std::vector<float> basin_prob (n_residue*N_STATE);

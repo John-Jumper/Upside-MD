@@ -112,6 +112,7 @@ void affine_pairs(
         float dist_cutoff,
         int n_res, int n_system)
 {
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         float dist_cutoff2 = dist_cutoff*dist_cutoff;
         vector<AffineCoord> coords;

@@ -26,6 +26,7 @@ ornstein_uhlenbeck_thermostat(
         int n_round, // FIXME uint64_t
         int n_system)
 {
+#pragma omp parallel for
     for(uint32_t ns=0; ns<(uint32_t)n_system; ++ns) {
         for(int na=0; na<n_atoms; ++na) {
             RandomGenerator random(seed, 0u, na*n_system + ns, n_round);
@@ -114,11 +115,10 @@ void deriv_accumulation(
         int n_atom,
         int n_system)
 {
-    std::vector<MutableCoord<3>> coords;
-    coords.reserve(n_atom);
-
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
-        coords.resize(0);
+        std::vector<MutableCoord<3>> coords;
+        coords.reserve(n_atom);
         for(int na=0; na<n_atom; ++na) coords.emplace_back(deriv, ns, na, MutableCoord<3>::Zero);
 
         for(int nt=0; nt<n_tape; ++nt) {
