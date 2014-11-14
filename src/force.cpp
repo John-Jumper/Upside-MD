@@ -211,21 +211,55 @@ struct DihedralSpring : public DerivComputation
     n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
-        check_size(grp, "id",              n_elem, n_dep);
-        check_size(grp, "equil_dist",  n_elem);
+        check_size(grp, "id",           n_elem, n_dep);
+        check_size(grp, "equil_dist",   n_elem);
         check_size(grp, "spring_const", n_elem);
 
         auto& p = params.host();
-        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
-        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dihedral = x;});
-        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j].index  =x;});
+        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) {p[i].equil_dihedral =x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) {p[i].spring_constant=x;});
 
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
     virtual void compute_germ() {
         Timer timer(string("dihedral_spring"));
-        dihedral_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);}
+        dihedral_spring(pos.coords(), params.host().data(), n_elem, pos.n_system);
+    }
+};
+
+
+struct DynamicDihedralSpring : public DerivComputation
+{
+    int n_elem;
+    Pos& pos;
+    int params_offset;
+    shared_vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
+
+    DynamicDihedralSpring(hid_t grp, Pos& pos_):
+    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
+    {
+        int n_dep = 4;  // number of atoms that each term depends on 
+        check_size(grp, "id", n_elem, n_dep, pos.n_system);  // only id is required for dynamic spring
+
+        auto& p = params.host();
+        traverse_dset<2,int>  (grp, "id", [&](size_t nt, size_t na, int x) {
+                for(int ns=0; ns<pos.n_system; ++ns) 
+                    p[ns*n_elem+nt].atom[na].index = x;});
+
+        for(auto& p: params.host()) {
+            p.equil_dihedral  = 0.f;
+            p.spring_constant = 0.f;
+        }
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("dynamic_dihedral_spring"));
+        dynamic_dihedral_spring(pos.coords(), params.host().data(), params_offset, n_elem, pos.n_system);
+    }
 };
 
 

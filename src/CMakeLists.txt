@@ -25,7 +25,8 @@ add_executable (upside
     bonds.cpp 
     timing.cpp 
     main.cpp 
-    thermostat.cpp)
+    thermostat.cpp
+    string.cpp)
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIR})
 target_link_libraries(upside stdc++ ${HDF5_LIBRARIES} hdf5_hl) # ${VTK_LIBRARIES})

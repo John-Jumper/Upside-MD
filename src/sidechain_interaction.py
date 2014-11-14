@@ -121,9 +121,9 @@ def interaction_field_for_gaussian_mixture(weights, centers, sigma_field, sigma_
     assert energy_scale is not None
     assert cutoff is not None
 
-    dists = np.linspace(0, cutoff, 300)
+    dists = np.linspace(0, 10*cutoff, 500)
     f = interaction_function(dists, energy_scale, sigma_field, sigma_point)
-    return interaction_field(weights, centers, dx, f, cutoff)
+    return interaction_field(weights, centers, dx, f, cutoff), f
 
 
 def test_deriv(f, x, eps=1e-8):

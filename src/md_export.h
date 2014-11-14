@@ -29,6 +29,11 @@ void dihedral_spring(
         const CoordArray pos,
         const DihedralSpringParams* params,
         int n_terms, int n_system);
+void dynamic_dihedral_spring(
+        const CoordArray pos,
+        const DihedralSpringParams* restrict params,
+        int params_offset,
+        int n_terms, int n_system);
 void affine_alignment(
         SysArray rigid_body,
         CoordArray pos,

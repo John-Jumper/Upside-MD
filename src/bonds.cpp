@@ -122,6 +122,28 @@ inline void dihedral_spring_body(
 }
 
 
+void dynamic_dihedral_spring(
+        const CoordArray pos,
+        const DihedralSpringParams* restrict params,
+        int params_offset,
+        int n_terms, int n_system)
+{
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            Coord<3> x1(pos, ns, params[nt].atom[0]);
+            Coord<3> x2(pos, ns, params[nt].atom[1]);
+            Coord<3> x3(pos, ns, params[nt].atom[2]);
+            Coord<3> x4(pos, ns, params[nt].atom[3]);
+            dihedral_spring_body(x1,x2,x3,x4, params[ns*params_offset + nt]);
+            x1.flush();
+            x2.flush();
+            x3.flush();
+            x4.flush();
+        }
+    }
+}
+
+
 void dihedral_spring(
         const CoordArray pos,
         const DihedralSpringParams* restrict params,
