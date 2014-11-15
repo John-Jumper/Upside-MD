@@ -3,6 +3,7 @@
 #include "coord.h"
 #include <vector>
 #include <string>
+#include <cmath>
 
 struct SidechainParams {
     CoordPair res;
@@ -32,12 +33,40 @@ struct Density3D {
 
 
 struct Sidechain {
+    float3 density_center;     float density_radius;
+    float3 interaction_center; float interaction_radius;
+
     // .w component is weight/probability of each center (sum to number of sidechain atoms)
     std::vector<float4> density_kernel_centers;
     Density3D interaction_pot;
 
-    Sidechain(const std::vector<float4>& density_kernel_centers_, const Density3D& interaction_pot_):
-        density_kernel_centers(density_kernel_centers_), interaction_pot(interaction_pot_) {};
+    Sidechain(const std::vector<float4>& density_kernel_centers_, const Density3D& interaction_pot_, float energy_cutoff=0.f):
+        density_kernel_centers(density_kernel_centers_), interaction_pot(interaction_pot_) {
+            density_center = make_float3(0.f,0.f,0.f);
+            for(auto& x: density_kernel_centers) density_center += xyz(x);
+            if(density_kernel_centers.size()) density_center *= 1.f/density_kernel_centers.size();
+
+            density_radius = 0.f;
+            for(auto& x: density_kernel_centers) {
+                float r = sqrt(mag2(density_center-xyz(x)));
+                if(r>density_radius) density_radius = r;
+            }
+
+            auto &p = interaction_pot;
+            interaction_center = p.corner + 0.5*p.side_length;
+            interaction_radius = 0.f;
+
+            for(int ix=0; ix<p.nx; ++ix) {
+                for(int iy=0; iy<p.ny; ++iy) {
+                    for(int iz=0; iz<p.nz; ++iz) {
+                        auto pt = p.corner + make_float3(ix,iy,iz) * (1./p.bin_scale);
+                        float r = sqrt(mag2(pt-interaction_center));
+                        if(r > interaction_radius && fabs(p.data[ix*p.ny*p.nz + iy*p.nz + iz].w) > energy_cutoff)
+                            interaction_radius = r;
+                    }
+                }
+            }
+        };
 };
 
 void sidechain_pairs(

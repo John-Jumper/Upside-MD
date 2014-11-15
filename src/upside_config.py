@@ -669,6 +669,15 @@ def read_fasta(file_obj):
     return seq
 
 
+def write_sidechain_potential(fasta, library):
+    g = t.create_group(t.root.input.force, 'sidechain')
+    t.create_external_link(g, 'sidechain_data', os.path.abspath(library)+':/params')
+    create_array(g, 'restype', map(str,fasta))
+
+    # quick check to ensure the external link worked
+    assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
+
+
 def main():
     import argparse
 
@@ -683,6 +692,8 @@ def main():
             help='radius of residue for repulsive interaction (1 kT value)')
     parser.add_argument('--affine', default=False, action='store_true',
             help='use affine nonbonded')
+    parser.add_argument('--sidechain-library', default=None, 
+            help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
             help='Bond spring constant in units of energy/A^2 (default 48)')
     parser.add_argument('--angle-stiffness', default=175., type=float,
@@ -712,6 +723,9 @@ def main():
     args = parser.parse_args()
     if args.restraint_group and not args.initial_structures:
         parser.error('must specify --initial-structures to use --restraint-group')
+
+    if args.sidechain_library and not args.affine:
+        parser.error('must specify --affine to use --sidechain-library')
 
     fasta_seq = read_fasta(open(args.fasta))
 
@@ -763,6 +777,9 @@ def main():
     if args.affine:
         write_affine_alignment(len(fasta_seq))
         write_affine_pair(fasta_seq)
+
+    if args.sidechain_library:
+        write_sidechain_potential(fasta_seq, args.sidechain_library)
 
     if args.restraint_group:
         print

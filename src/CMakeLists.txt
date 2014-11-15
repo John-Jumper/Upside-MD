@@ -5,7 +5,7 @@ set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED)
 # find_package(VTF REQUIRED)
 
-set (OMP_FLAGS "-fopenmp")
+set (OMP_FLAGS "") # "-fopenmp")
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
 set (OPT     " -O3 -ffast-math -march=native")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function")

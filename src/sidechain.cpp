@@ -139,17 +139,28 @@ void sidechain_pairs(
                 if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
                     int rt1 = params[nr1].restype;
                     int rt2 = params[nr2].restype;
-                    sidechain_interaction(
-                            coords[nr1], coords[nr2],
-                            sidechains[rt1].interaction_pot,
-                            sidechains[rt2].density_kernel_centers.size(),
-                            sidechains[rt2].density_kernel_centers.data());
 
-                    sidechain_interaction(
-                            coords[nr2], coords[nr1],
-                            sidechains[rt2].interaction_pot,
-                            sidechains[rt1].density_kernel_centers.size(),
-                            sidechains[rt1].density_kernel_centers.data());
+                    Sidechain &sc1 = sidechains[rt1];
+                    Sidechain &sc2 = sidechains[rt2];
+
+                    float cutoff12 = sc1.interaction_radius + sc2.density_radius;
+                    if(mag2(sc1.interaction_center-sc2.density_center) < cutoff12*cutoff12) {
+                        sidechain_interaction(
+                                coords[nr1], coords[nr2],
+                                sc1.interaction_pot,
+                                sc2.density_kernel_centers.size(),
+                                sc2.density_kernel_centers.data());
+                    }
+
+
+                    float cutoff21 = sc2.interaction_radius + sc1.density_radius;
+                    if(mag2(sc2.interaction_center-sc1.density_center) < cutoff21*cutoff21) {
+                        sidechain_interaction(
+                                coords[nr2], coords[nr1],
+                                sc2.interaction_pot,
+                                sc1.density_kernel_centers.size(),
+                                sc1.density_kernel_centers.data());
+                    }
                 }
             }
         }

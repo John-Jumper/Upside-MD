@@ -108,7 +108,8 @@ def main():
     n_res = t.root.input.sequence.shape[0]
     # print_traj_vtf(args.output_vtf, t.root.input.sequence[:], t.root.output.pos[:], 
     #         np.column_stack((np.arange(3*n_res)[:-1], np.arange(3*n_res)[1:])))
-    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], t.root.output.pos[::args.stride][...,None])
+    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], 
+            t.root.output.pos[::args.stride].transpose((0,2,3,1)))
 
 if __name__ == '__main__':
     main()

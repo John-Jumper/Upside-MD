@@ -520,6 +520,7 @@ struct SidechainInteraction : public DerivComputation
     AffineAlignment&  alignment;
     vector<Sidechain> sidechain_params;
     float             dist_cutoff;
+    float             energy_cutoff;
     map<string,int>   name_map;
     vector<float>     density_data;
     vector<float4>    center_data;
@@ -527,14 +528,14 @@ struct SidechainInteraction : public DerivComputation
 
     SidechainInteraction(hid_t grp, AffineAlignment& alignment_):
         n_residue(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
-        dist_cutoff (h5::read_attribute<float>(grp, ".", "dist_cutoff")),
+        energy_cutoff(h5::read_attribute<float>(grp, "./sidechain_data", "energy_cutoff")),
         params(n_residue)
     {
         using namespace h5;
         traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
                 if(name_map.find(s) == end(name_map)) {
                     sidechain_params.push_back(
-                        parse_sidechain(
+                        parse_sidechain(energy_cutoff,
                             h5_obj(H5Gclose, 
                                 H5Gopen2(grp, (string("sidechain_data/")+s).c_str(), H5P_DEFAULT)).get()));
                     name_map[s] = sidechain_params.size()-1;
@@ -543,11 +544,27 @@ struct SidechainInteraction : public DerivComputation
                 params[nr].restype = name_map[s];
             });
 
+        // find longest possible interaction
+        float max_interaction_radius = 0.f;
+        float max_density_radius = 0.f;
+        for(auto &sc: sidechain_params) {
+            // FIXME is the sidechain data in the correct reference frame
+            float interaction_maxdist = sc.interaction_radius+mag(sc.interaction_center);
+            float density_maxdist = sc.density_radius+mag(sc.density_center);
+            max_interaction_radius = max(max_interaction_radius, interaction_maxdist);
+            max_density_radius = max(max_density_radius, density_maxdist);
+            printf("%4.1f %4.1f %4.1f %4.1f\n", 
+                    mag(sc.interaction_center), sc.interaction_radius, 
+                    mag(sc.density_center), sc.density_radius);
+        }
+        dist_cutoff = max_interaction_radius + max_density_radius;
+        printf("total_cutoff: %4.1f\n", dist_cutoff);
+
         if(n_residue != alignment.n_residue) throw string("invalid restype array");
         for(int nr=0; nr<n_residue; ++nr) alignment.slot_machine.add_request(1,params[nr].res);
     }
 
-    static Sidechain parse_sidechain(hid_t grp) 
+    static Sidechain parse_sidechain(float energy_cutoff, hid_t grp) 
     {
         using namespace h5;
         int nkernel = get_dset_size<2>(grp, "kernels")[0];
@@ -587,7 +604,10 @@ struct SidechainInteraction : public DerivComputation
 
         auto bin_side_length = read_attribute<float>(grp, "interaction", "bin_side_length");
 
-        return Sidechain(kernels, Density3D(corner, 1.f/bin_side_length, dims[0],dims[1],dims[2], data));
+        return Sidechain(
+                kernels, 
+                Density3D(corner, 1.f/bin_side_length, dims[0],dims[1],dims[2], data),
+                energy_cutoff);
     }
 
     virtual void compute_germ() {
