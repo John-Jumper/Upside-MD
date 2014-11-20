@@ -53,10 +53,15 @@ inline float3 make_float3(float x, float y, float z         ) { return float3(x,
 inline float4 make_float4(float x, float y, float z, float w) { return float4(x,y,z,w); }
 inline float4 make_float4(float3 v, float w) { return make_float4(v.x,v.y,v.z,w); }
 
-inline float2 operator*(const float  &a, const float2 &b) { return make_float2(a*b.x, a*b.y); }
-inline float2 operator+(const float  &a, const float2 &b) { return make_float2(a+b.x, a+b.y); }
-inline float2 operator-(const float  &a, const float2 &b) { return make_float2(a-b.x, a-b.y); }
-inline float2 operator/(const float  &a, const float2 &b) { return make_float2(a/b.x, a/b.y); }
+inline float2 operator*(float a, const float2 &b) { return make_float2(a*b.x, a*b.y); }
+inline float2 operator+(float a, const float2 &b) { return make_float2(a+b.x, a+b.y); }
+inline float2 operator-(float a, const float2 &b) { return make_float2(a-b.x, a-b.y); }
+inline float2 operator/(float a, const float2 &b) { return make_float2(a/b.x, a/b.y); }
+
+inline float2 operator*(const float2 &a, const float2 &b) { return make_float2(a.x*b.x, a.y*b.y); }
+inline float2 operator+(const float2 &a, const float2 &b) { return make_float2(a.x+b.x, a.y+b.y); }
+inline float2 operator-(const float2 &a, const float2 &b) { return make_float2(a.x-b.x, a.y-b.y); }
+inline float2 operator/(const float2 &a, const float2 &b) { return make_float2(a.x/b.x, a.y/b.y); }
 
 inline float3 float3_from_float4(const float4& x) { return make_float3(x.x,x.y,x.z); }
 inline float3 xyz(const float4& x) { return make_float3(x.x,x.y,x.z); }

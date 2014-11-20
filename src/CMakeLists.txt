@@ -24,6 +24,7 @@ add_executable (upside
     hbond.cpp 
     bonds.cpp 
     timing.cpp 
+    steric.cpp
     main.cpp 
     thermostat.cpp
     string.cpp)

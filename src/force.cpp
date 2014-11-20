@@ -6,6 +6,7 @@
 #include "sidechain.h"
 #include <map>
 #include "gpu.h"
+#include "steric.h"
 
 using namespace h5;
 
@@ -47,7 +48,6 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
     if(must_exist && loc == nodes.end()) throw string("name not found");
     return loc != nodes.end() ? loc-begin(nodes) : -1;
 }
-
 
 void DerivEngine::compute() {
     // FIXME add CUDA streams support
@@ -514,6 +514,112 @@ struct HBondEnergy : public DerivComputation
 };
 
 
+struct StericInteraction : public DerivComputation
+{
+    int n_res;
+    AffineAlignment&  alignment;
+    map<string,int>   name_map;
+
+    vector<StericParams>  params;
+    vector<StericResidue> ref_res;
+    vector<StericPoint>   ref_point;
+    Interaction           pot;
+    vector<int>           point_starts;
+
+    void pushback_residue(hid_t grp) {
+        ref_res.push_back(StericResidue());  auto& r = ref_res.back();
+        r.start_point = ref_point.size();
+        r.n_pts = get_dset_size<1>(grp, "weight")[0];
+
+        for(int np=0; np<r.n_pts; ++np) ref_point.push_back(StericPoint());
+
+        check_size(grp, "point",  r.n_pts, 3);
+        check_size(grp, "weight", r.n_pts);
+        check_size(grp, "type",   r.n_pts);
+
+        traverse_dset<2,float>(grp, "point",  [&](size_t np, size_t dim, float v) {
+                switch(dim) {
+                    case 0: ref_point[r.start_point+np].pos.x = v; break;
+                    case 1: ref_point[r.start_point+np].pos.y = v; break;
+                    case 2: ref_point[r.start_point+np].pos.z = v; break;
+                }});
+
+        traverse_dset<1,float>(grp, "weight", [&](size_t np, float v) {
+                ref_point[r.start_point+np].weight = v;});
+
+        traverse_dset<1,int>  (grp, "type", [&](size_t np, int v) {
+                ref_point[r.start_point+np].type = v;});
+
+        float3 center = make_float3(0.f,0.f,0.f);
+        for(int np=0; np<r.n_pts; ++np) center += ref_point[r.start_point+np].pos;
+        center *= 1.f/r.n_pts;
+
+        float  radius = 0.f;
+        for(int np=0; np<r.n_pts; ++np) radius += mag2(ref_point[r.start_point+np].pos - center);
+        radius = sqrt(radius/r.n_pts);
+
+        r.center = center;
+        r.radius = radius;
+    }
+
+    StericInteraction(hid_t grp, AffineAlignment& alignment_):
+        n_res(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
+        params(n_res),
+        pot(get_dset_size<2>     (grp, "atom_interaction/cutoff")[0], 
+            get_dset_size<3>     (grp, "atom_interaction/potential")[2], 
+            read_attribute<float>(grp, "atom_interaction", "dx")) {
+
+            traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
+                if(name_map.find(s) == end(name_map)) {
+                   pushback_residue(
+                       h5_obj(H5Gclose, 
+                           H5Gopen2(grp, (string("residue_data/")+s).c_str(), H5P_DEFAULT)).get());
+                   name_map[s] = ref_res.size()-1;
+                }
+                params[nr].loc.index  = nr;
+                params[nr].restype = name_map[s];
+                });
+
+            // Parse potential
+            check_size(grp, "atom_interaction/cutoff",      pot.n_types, pot.n_types);
+            check_size(grp, "atom_interaction/potential",   pot.n_types, pot.n_types, pot.n_bin);
+            check_size(grp, "atom_interaction/deriv_over_r",pot.n_types, pot.n_types, pot.n_bin);
+
+            traverse_dset<2,float>(grp,"atom_interaction/cutoff", [&](size_t tp1, size_t tp2, float c) {
+                    pot.cutoff2[tp1*pot.n_types+tp2]=c*c;});
+            traverse_dset<3,float>(grp,"atom_interaction/potential", [&](size_t rt1,size_t rt2,size_t nb,float x) {
+                    pot.germ_arr[rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb].x = x;});
+            traverse_dset<3,float>(grp,"atom_interaction/deriv_over_r", [&](size_t rt1,size_t rt2,size_t nb,float x){
+                    pot.germ_arr[rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb].y = x;});
+
+            pot.largest_cutoff = 0.f;
+            for(int rt=0; rt<pot.n_types; ++rt) 
+                pot.largest_cutoff = max(pot.largest_cutoff, sqrt(pot.cutoff2[rt]));
+
+            // determine location to write each residue's points
+            point_starts.push_back(0);  // first residue starts at 0
+            for(auto& p: params)
+                point_starts.push_back(point_starts.back()+ref_res.at(p.restype).n_pts);
+
+            if(n_res!= alignment.n_residue) throw string("invalid restype array");
+            for(int nr=0; nr<n_res; ++nr) alignment.slot_machine.add_request(1,params[nr].loc);
+        }
+
+    virtual void compute_germ() {
+        Timer timer(string("steric"));
+        steric_pairs(
+                alignment.coords(),
+                params.data(),
+                ref_res.data(),
+                ref_point.data(),
+                pot,
+                point_starts.data(),
+                n_res, alignment.pos.n_system);
+    }
+
+};
+
+
 struct SidechainInteraction : public DerivComputation 
 {
     int n_residue;
@@ -531,7 +637,6 @@ struct SidechainInteraction : public DerivComputation
         energy_cutoff(h5::read_attribute<float>(grp, "./sidechain_data", "energy_cutoff")),
         params(n_residue)
     {
-        using namespace h5;
         traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
                 if(name_map.find(s) == end(name_map)) {
                     sidechain_params.push_back(
@@ -684,6 +789,8 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         attempt_add_node<AffinePairs,AffineAlignment>(engine, force_group, "affine_pairs", "affine_alignment");
         attempt_add_node<SidechainInteraction,AffineAlignment>
             (engine, force_group, "sidechain",    "affine_alignment");
+        attempt_add_node<StericInteraction,AffineAlignment>
+            (engine, force_group, "steric",    "affine_alignment");
 
         string count_hbond = "count_hbond";
         attempt_add_node<Infer_H_O,Pos>        (engine, force_group, "infer_H_O",    "pos",       &count_hbond);

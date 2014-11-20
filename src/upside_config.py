@@ -678,6 +678,18 @@ def write_sidechain_potential(fasta, library):
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 
+def write_steric(fasta, library):
+    g = t.create_group(t.root.input.force, 'steric')
+    t.create_external_link(g, 'residue_data',     os.path.abspath(library)+':/residue_data')
+    t.create_external_link(g, 'atom_interaction', os.path.abspath(library)+':/atom_interaction')
+    create_array(g, 'restype', map(str,fasta))
+
+    # quick check to ensure the external link worked
+
+    assert len(t.get_node('/input/force/steric/residue_data/LYS').point.shape) == 2
+    assert len(t.get_node('/input/force/steric/atom_interaction/potential').shape) == 3
+
+
 def main():
     import argparse
 
@@ -692,6 +704,8 @@ def main():
             help='radius of residue for repulsive interaction (1 kT value)')
     parser.add_argument('--affine', default=False, action='store_true',
             help='use affine nonbonded')
+    parser.add_argument('--steric', default=None,
+            help='use steric library')
     parser.add_argument('--sidechain-library', default=None, 
             help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
@@ -726,6 +740,9 @@ def main():
 
     if args.sidechain_library and not args.affine:
         parser.error('must specify --affine to use --sidechain-library')
+
+    if args.steric and args.affine:
+        parser.error('--steric is incompatible with --affine.  You probably want just --steric.')
 
     fasta_seq = read_fasta(open(args.fasta))
 
@@ -780,6 +797,10 @@ def main():
 
     if args.sidechain_library:
         write_sidechain_potential(fasta_seq, args.sidechain_library)
+
+    if args.steric:
+        write_affine_alignment(len(fasta_seq))
+        write_steric(fasta_seq, args.steric)
 
     if args.restraint_group:
         print
