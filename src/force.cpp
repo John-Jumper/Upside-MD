@@ -556,7 +556,7 @@ struct StericInteraction : public DerivComputation
 
         float  radius = 0.f;
         for(int np=0; np<r.n_pts; ++np) radius += mag2(ref_point[r.start_point+np].pos - center);
-        radius = sqrt(radius/r.n_pts);
+        radius = sqrtf(radius/r.n_pts);
 
         r.center = center;
         r.radius = radius;
@@ -594,7 +594,7 @@ struct StericInteraction : public DerivComputation
 
             pot.largest_cutoff = 0.f;
             for(int rt=0; rt<pot.n_types; ++rt) 
-                pot.largest_cutoff = max(pot.largest_cutoff, sqrt(pot.cutoff2[rt]));
+                pot.largest_cutoff = max(pot.largest_cutoff, sqrtf(pot.cutoff2[rt]));
 
             // determine location to write each residue's points
             point_starts.push_back(0);  // first residue starts at 0

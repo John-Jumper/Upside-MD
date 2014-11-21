@@ -46,7 +46,7 @@ namespace{
 static const float M_PI_F   = 3.141592653589793f;
 static const float M_1_PI_F = 0.3183098861837907f;
 
-inline float rsqrt(float x) {return 1.f/sqrtf(x);}
+inline float rsqrtf(float x) {return 1.f/sqrtf(x);}
 
 inline float2 make_float2(float x, float y                  ) { return float2(x,y);     }
 inline float3 make_float3(float x, float y, float z         ) { return float3(x,y,z);   }
@@ -119,7 +119,7 @@ inline float4 operator/=(      float4 &a, const float4 &b) { a.x/=b.x; a.y/=b.y;
 inline float3 operator-(const float3 &a) {return make_float3(-a.x, -a.y, -a.z);}
 inline float4 operator-(const float4 &a) {return make_float4(-a.x, -a.y, -a.z, -a.w);}
 
-inline float inv_mag(float3 a){return rsqrt(a.x*a.x + a.y*a.y + a.z*a.z);}
+inline float inv_mag(float3 a){return rsqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}
 
 inline float3 cross(float3 a, float3 b){
     return make_float3(
@@ -140,7 +140,7 @@ inline float dot(float3 a, float3 b){return a.x*b.x + a.y*b.y + a.z*b.z;}
 
 inline float2 sigmoid(float x) {
 #ifdef APPROX_SIGMOID
-    float z = rsqrt(4.f+x*x);
+    float z = rsqrtf(4.f+x*x);
     return make_float2(0.5f*(1.f + x*z), (2.f*z)*(z*z));
 #else
     //return make_float2(0.5f*(tanh(0.5f*x) + 1.f), 0.5f / (1.f + cosh(x)));
@@ -301,7 +301,7 @@ inline float dihedral_germ(
     float inv_Bmag2 = inv_mag2(B);
 
     float Gmag2    = mag2(G);
-    float inv_Gmag = rsqrt(Gmag2);
+    float inv_Gmag = rsqrtf(Gmag2);
     float Gmag     = Gmag2 * inv_Gmag;
 
     d1 = -Gmag * inv_Amag2 * A;

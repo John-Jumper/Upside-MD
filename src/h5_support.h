@@ -192,7 +192,7 @@ try {
     for(int i=0; i<ndims; ++i) dim_product *= dims[i];
 
     // the extra 1+ accounts for the space to hold the NULL-terminator
-    auto tmp = std::unique_ptr<char>(new char[dim_product*(1u+maxchars)]);
+    auto tmp = std::unique_ptr<char[]>(new char[dim_product*(1u+maxchars)]);
     h5_noerr(H5Dread(dset.get(), dtype.get(), H5S_ALL, H5S_ALL, H5P_DEFAULT, tmp.get()));
 
     // I must wrap the traversal function to provide the requested std::string

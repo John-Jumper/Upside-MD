@@ -48,7 +48,7 @@ struct Sidechain {
 
             density_radius = 0.f;
             for(auto& x: density_kernel_centers) {
-                float r = sqrt(mag2(density_center-xyz(x)));
+                float r = sqrtf(mag2(density_center-xyz(x)));
                 if(r>density_radius) density_radius = r;
             }
 
@@ -60,8 +60,8 @@ struct Sidechain {
                 for(int iy=0; iy<p.ny; ++iy) {
                     for(int iz=0; iz<p.nz; ++iz) {
                         auto pt = p.corner + make_float3(ix,iy,iz) * (1./p.bin_scale);
-                        float r = sqrt(mag2(pt-interaction_center));
-                        if(r > interaction_radius && fabs(p.data[ix*p.ny*p.nz + iy*p.nz + iz].w) > energy_cutoff)
+                        float r = sqrtf(mag2(pt-interaction_center));
+                        if(r > interaction_radius && fabsf(p.data[ix*p.ny*p.nz + iy*p.nz + iz].w) > energy_cutoff)
                             interaction_radius = r;
                     }
                 }

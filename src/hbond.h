@@ -40,7 +40,7 @@ void finite_difference(FuncT& f, CoordT& x, float* expected, float eps = 1e-2)
             z += t*t;
         }
     }
-    printf("rmsd % f\n\n\n", sqrt(z/ndim_output/ndim_input));
+    printf("rmsd % f\n\n\n", sqrtf(z/ndim_output/ndim_input));
 
 }
 

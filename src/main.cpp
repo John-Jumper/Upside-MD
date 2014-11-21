@@ -89,7 +89,7 @@ void force_testing(hid_t config, DerivEngine& engine, bool generate, double forc
         traverse_dset<3,float>(config, "/testing/expected_deriv", [&](size_t na, size_t d, size_t ns, float x) {
                 double dev = x - pos.deriv.at(na*3*pos.n_system + d*pos.n_system + ns);
                 rms_error += dev*dev;});
-        rms_error = sqrt(rms_error / pos.n_atom / pos.n_system);
+        rms_error = sqrtf(rms_error / pos.n_atom / pos.n_system);
         printf("RMS force difference: %.6f\n", rms_error);
         if(rms_error > force_tol) throw string("inacceptable force deviation");
     }
@@ -167,7 +167,7 @@ try {
         float equil_duration = equilibration_duration_arg.getValue();
         // equilibration_max_force is set so that the change in momentum should not be more than
         // 20% of the equilibration magnitude over a single dt interval
-        float equil_avg_mom   = sqrt(temperature_arg.getValue()/1.5f);  // all particles have mass == 1.
+        float equil_avg_mom   = sqrtf(temperature_arg.getValue()/1.5f);  // all particles have mass == 1.
         float equil_max_force = 0.8f*equil_avg_mom/dt;
 
         // initialize thermostat and thermalize momentum

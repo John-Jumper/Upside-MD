@@ -143,7 +143,7 @@ float hbond_score(
     const float eps = 1e-6;  // a bit of paranoia to avoid division by zero later
     float magHO2 = HO[0]*HO[0] + HO[1]*HO[1] + HO[2]*HO[2] + eps;
 
-    float invHOmag = rsqrt(magHO2);
+    float invHOmag = rsqrtf(magHO2);
     float rHO[3] = {HO[0]*invHOmag, HO[1]*invHOmag, HO[2]*invHOmag};
 
     float dotHOC =  rHO[0]*rOC[0] + rHO[1]*rOC[1] + rHO[2]*rOC[2];
@@ -151,7 +151,7 @@ float hbond_score(
 
     if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) return 0.f;
 
-    float2 radial   = score_multiplier * hbond_radial_potential(sqrt(magHO2));  // x has val, y has deriv
+    float2 radial   = score_multiplier * hbond_radial_potential(sqrtf(magHO2));  // x has val, y has deriv
     float2 angular1 =                    hbond_angular_potential(dotHOC);
     float2 angular2 =                    hbond_angular_potential(dotOHN);
 

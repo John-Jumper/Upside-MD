@@ -9,7 +9,7 @@ struct OrnsteinUhlenbeckThermostat
         int   n_invocations;
         void update_parameters() {
             mom_scale   = exp(-delta_t/timescale);
-            noise_scale = sqrt(temp * (1-mom_scale*mom_scale));
+            noise_scale = sqrtf(temp * (1-mom_scale*mom_scale));
         }
 
     public:

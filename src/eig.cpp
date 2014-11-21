@@ -27,7 +27,7 @@ float house(
 
     for(int i=1; i<n; ++i) sigma += x[i]*x[i];
     
-    mu = sqrt(x[0]*x[0] + sigma);   // |x|
+    mu = sqrtf(x[0]*x[0] + sigma);   // |x|
     if(sigma == 0.f) {  // FIXME more robust condition needed here
         beta = (x[0]>=0.f) ? 0.f : 2.f;
         s = 1.f;
@@ -41,16 +41,27 @@ float house(
     return beta;
 }
 
+void givens_accurate(float *c, float *s, float a, float b)
+{
+    if(b==0.f) {
+        *c=1.f; *s=0.f;
+    } else {
+        if(fabsf(b) > fabsf(a)) {
+            float tau = -a/b; *s = 1.f/sqrtf(1.f+tau*tau); *c = *s * tau;
+        } else {
+            float tau = -b/a; *c = 1.f/sqrtf(1.f+tau*tau); *s = *c * tau;
+        }
+    }
+}
+
 void givens(float *c, float *s, float a, float b)
 {
     if(b==0.f) {
         *c=1.f; *s=0.f;
     } else {
-        if(fabs(b) > fabs(a)) {
-            float tau = -a/b; *s = 1.f/sqrt(1.f+tau*tau); *c = *s * tau;
-        } else {
-            float tau = -b/a; *c = 1.f/sqrt(1.f+tau*tau); *s = *c * tau;
-        }
+        float inv_r = rsqrtf(a*a+b*b);
+        *c =  a*inv_r;
+        *s = -b*inv_r;
     }
 }
 
@@ -152,43 +163,6 @@ unpack_tridiagonalize_4x4(
 
 
 #define rot(i,j) (rot_[(i)*4 + (j)])
-#define IMPLICIT_SYMM_QR_BODY \
-    float dval = 0.5*(d[n-2] - d[n-1]); \
-    float mu = d[n-1] - u[n-2]*u[n-2]/(dval+copysign(sqrt(dval*dval + u[n-2]*u[n-2]),dval)); \
-    float x = d[0] - mu; \
-    float z = u[0]; \
-     \
-    for(int k=0; k<n-1; ++k){ \
-        float c,s; \
-        givens(&c,&s,x,z); \
- \
-        /* accumulate Givens rotation */ \
-        for(int j=0; j<4; ++j) { \
-            float t1 = rot(k  ,j); \
-            float t2 = rot(k+1,j); \
-            rot(k  ,j) = c*t1 - s*t2; \
-            rot(k+1,j) = s*t1 + c*t2; \
-        } \
- \
-        /* compute the T(k-1,:) row */ \
-        if(k > 0) u[k-1] = c*x - s*z; \
- \
-        /* mix the T(k,k),T(k,k+1),T(k+1,k+1) block */ \
-        float T00 = d[k  ]; \
-        float T11 = d[k+1]; \
-        float T01 = u[k  ]; \
-         \
-        d[k  ]  = T00*c*c - T01*2.*c*s + T11*s*s; \
-        d[k+1]  = T00*s*s + T01*2.*c*s + T11*c*c; \
-        u[k  ]  = (T00-T11)*c*s + T01*(c*c-s*s); \
-        x = u[k]; \
- \
-        /* compute the T(k+2,:) row */ \
-        if(k<n-2) { \
-            z = -u[k+1]*s; \
-            u[k+1] *= c; \
-        } \
-    } 
 
 // general implementation
 void
@@ -199,14 +173,48 @@ implicit_symm_QR_step_4x4(
         float * restrict rot_) // rotation to accumulate Givens rotations
                      // must be at least nx4-sized
 {
-    IMPLICIT_SYMM_QR_BODY;
+    float dval = 0.5*(d[n-2] - d[n-1]);
+    float mu = d[n-1] - u[n-2]*u[n-2]/(dval+copysignf(sqrtf(dval*dval + u[n-2]*u[n-2]),dval));
+    float x = d[0] - mu;
+    float z = u[0];
+    
+    for(int k=0; k<n-1; ++k){
+        float c,s;
+        givens(&c,&s,x,z);
+
+        /* accumulate Givens rotation */
+        for(int j=0; j<4; ++j) {
+            float t1 = rot(k  ,j);
+            float t2 = rot(k+1,j);
+            rot(k  ,j) = c*t1 - s*t2;
+            rot(k+1,j) = s*t1 + c*t2;
+        }
+
+        /* compute the T(k-1,:) row */
+        if(k > 0) u[k-1] = c*x - s*z;
+
+        /* mix the T(k,k),T(k,k+1),T(k+1,k+1) block */
+        float T00 = d[k  ];
+        float T11 = d[k+1];
+        float T01 = u[k  ];
+        
+        d[k  ]  = T00*c*c - T01*2.f*c*s + T11*s*s;
+        d[k+1]  = T00*s*s + T01*2.f*c*s + T11*c*c;
+        u[k  ]  = (T00-T11)*c*s + T01*(c*c-s*s);
+        x = u[k];
+
+        /* compute the T(k+2,:) row */
+        if(k<n-2) {
+            z = -u[k+1]*s;
+            u[k+1] *= c;
+        }
+    } 
 }
 
-// specializations for the length of the array
-void implicit_symm_QR_step_4x4_n4(float *d, float *u, float *rot_) {const int n=4; IMPLICIT_SYMM_QR_BODY;}
-void implicit_symm_QR_step_4x4_n3(float *d, float *u, float *rot_) {const int n=3; IMPLICIT_SYMM_QR_BODY;}
-void implicit_symm_QR_step_4x4_n2(float *d, float *u, float *rot_) {const int n=2; IMPLICIT_SYMM_QR_BODY;}
-#undef IMPLICIT_SYMM_QR_BODY
+// // specializations for the length of the array
+// void implicit_symm_QR_step_4x4_n4(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(4,d,u,rot);}
+// void implicit_symm_QR_step_4x4_n3(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(3,d,u,rot);}
+// void implicit_symm_QR_step_4x4_n2(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(2,d,u,rot);}
 #undef rot
 
 
@@ -231,7 +239,7 @@ symm_QR_4x4(
     for(int k=0; k<max_iter; ++k) {
         // exactly zero off-diagonal elements that are nearly zero
         for(int i=0; i<n-1; ++i) {
-            if(fabs(u[i]) <= tol * (fabs(d[i]) + fabs(d[i+1]))) u[i] = 0.f;
+            if(fabsf(u[i]) <= tol * (fabsf(d[i]) + fabsf(d[i+1]))) u[i] = 0.f;
         }
 
         // find largest diagonal lower left subblock

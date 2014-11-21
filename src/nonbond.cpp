@@ -43,7 +43,7 @@ nonbonded_kernel_over_r(float r_mag2)
     const float scale_factor = 1.f/(wall*width);  // ensure character
 
     // overflow protection prevents NaN
-    float z = min(exp(scale_factor * (r_mag2-wall_squared)), 1e12f);
+    float z = fminf(expf(scale_factor * (r_mag2-wall_squared)), 1e12f);
     float w = 1.f/(1.f + z);  // include protection from 0
 
     float deriv_over_r = -2.f*scale_factor * z * (w*w);

@@ -70,7 +70,7 @@ struct AffineCoord
         for(int nd=0; nd<4; ++nd) q[nd] = arr.value.x[system*arr.value.offset + c.index*7 + nd + 3];
 
         // FIXME remove normalization
-        float norm_factor = 1.f/sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+        float norm_factor = 1.f/sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
         for(int d=0; d<4; ++d) q[d] *= norm_factor;
         quat_to_rot(U,q);
 

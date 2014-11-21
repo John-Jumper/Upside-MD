@@ -62,7 +62,7 @@ void steric_pairs(
                             const float3 r = lab_points[i1].pos - lab_points[i2].pos;
                             const float rmag2 = mag2(r);
                             if(rmag2>=interaction.cutoff2[loc]) continue;
-                            const float deriv_over_r = interaction.germ(loc, sqrt(rmag2)).y;
+                            const float deriv_over_r = interaction.germ(loc, sqrtf(rmag2)).y;
                             const float3 g = (lab_points[i1].weight * lab_points[i2].weight * deriv_over_r)*r;
 
                             coords[nr1].add_deriv_at_location(lab_points[i1].pos,  g);
@@ -73,8 +73,7 @@ void steric_pairs(
             }
         }
 
-        for(int nr=0; nr<n_res; ++nr) {
+        for(int nr=0; nr<n_res; ++nr)
             coords[nr].flush();
-        }
     }
 }

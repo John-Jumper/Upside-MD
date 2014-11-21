@@ -94,7 +94,7 @@ double mixture_loglikelihood_3d(
 {
     double scale = 1./sigma;
     vector<double> tmp(n_comp*4);
-    double prefactor = -3. * log(sigma * sqrt(2*M_PI)) - log(double(n_comp));
+    double prefactor = -3. * log(sigma * sqrtf(2*M_PI)) - log(double(n_comp));
 
     double retval = 0.;
 
