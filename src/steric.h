@@ -31,7 +31,7 @@ struct Interaction {
     float   inv_dx;
 
     float*  cutoff2;
-    float2* germ_arr;
+    float4* germ_arr;
 
     Interaction(int n_types_, int n_bin_, float dx_):
         largest_cutoff(0.f),
@@ -39,15 +39,22 @@ struct Interaction {
         n_bin(n_bin_),
         inv_dx(1.f/dx_),
         cutoff2 (new float [n_types*n_types]),
-        germ_arr(new float2[n_types*n_types*n_bin]) {};
+        germ_arr(new float4[n_types*n_types*n_bin]) {
+            for(int nb=0; nb<n_bin; ++nb) 
+                germ_arr[nb] = make_float4(0.f,0.f,0.f,0.f);
+        };
+
 
     float2 germ(int loc, float r_mag) const {
         float coord = inv_dx*r_mag;
         int   coord_bin = int(coord);
-        float excess = coord - coord_bin;
 
-        return (1.f-excess) * germ_arr[loc*n_types*n_types + coord_bin  ] + 
-               excess       * germ_arr[loc*n_types*n_types + coord_bin+1];
+        float4 vals = germ_arr[loc*n_types*n_types + coord_bin]; 
+        float r_excess = coord - coord_bin;
+        float l_excess = 1.f-r_excess;
+
+        return make_float2(l_excess * vals.x + r_excess * vals.y,
+                           l_excess * vals.z + r_excess * vals.w);
     }
 
     ~Interaction() {

@@ -588,9 +588,15 @@ struct StericInteraction : public DerivComputation
             traverse_dset<2,float>(grp,"atom_interaction/cutoff", [&](size_t tp1, size_t tp2, float c) {
                     pot.cutoff2[tp1*pot.n_types+tp2]=c*c;});
             traverse_dset<3,float>(grp,"atom_interaction/potential", [&](size_t rt1,size_t rt2,size_t nb,float x) {
-                    pot.germ_arr[rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb].x = x;});
+                    int loc = rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb;
+                    pot.germ_arr[loc].x = x;
+                    if(nb>0) pot.germ_arr[loc-1].y = x;
+                    });
             traverse_dset<3,float>(grp,"atom_interaction/deriv_over_r", [&](size_t rt1,size_t rt2,size_t nb,float x){
-                    pot.germ_arr[rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb].y = x;});
+                    int loc = rt1*pot.n_types*pot.n_bin + rt2*pot.n_bin + nb;
+                    pot.germ_arr[loc].z = x;
+                    if(nb>0) pot.germ_arr[loc-1].w = x;
+                    });
 
             pot.largest_cutoff = 0.f;
             for(int rt=0; rt<pot.n_types; ++rt) 
