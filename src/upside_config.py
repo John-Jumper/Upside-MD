@@ -689,6 +689,27 @@ def write_steric(fasta, library):
     assert len(t.get_node('/input/force/steric/residue_data/LYS').point.shape) == 2
     assert len(t.get_node('/input/force/steric/atom_interaction/potential').shape) == 3
 
+def parse_segments(s):
+    ''' Parse segments of the form 10-30,50-60 '''
+    import argparse
+    import re
+
+    if re.match('^([0-9]+(-[0-9]+)?)(,[0-9]+(-[0-9]+)?)*$', s) is None:
+        raise argparse.ArgumentTypeError('segments must be of the form 10-30,45,72-76 or similar')
+
+    def parse_seg(x):
+        atoms = x.split('-')
+        if len(atoms) == 1:
+            return np.array([int(atoms[0])])
+        elif len(atoms) == 2:
+            return np.arange(int(atoms[0]),1+int(atoms[1]))  # inclusive on both ends
+        else:
+            raise RuntimeError('the impossible happened.  oops.')
+
+    ints = np.concatenate([parse_seg(a) for a in s.split(',')])
+    ints = np.array(sorted(set(ints)))   # remove duplicates and sort
+    return ints
+
 
 def main():
     import argparse
@@ -726,7 +747,7 @@ def main():
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with a bond length of 1.4 A will be used ' +
             'instead.')
-    parser.add_argument('--restraint-group', default=[], action='append',
+    parser.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
             help='Path to file containing whitespace-separated residue numbers (first residue is number 0).  '+
             'Each atom in the specified residues will be randomly connected to atoms in other residues by ' +
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
@@ -808,10 +829,11 @@ def main():
         fasta_one_letter = ''.join(one_letter_aa[x] for x in fasta_seq)
 
         for i,rg in enumerate(args.restraint_group):
-            restrained_atoms = set(int(i) for i in open(rg).read().split())
-            print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_atoms else f.lower()) 
+            restrained_residues = set(rg)
+            assert np.amax(list(restrained_residues)) < len(fasta_seq)
+            print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
                                               for i,f in enumerate(fasta_one_letter)))
-            make_restraint_group(i,restrained_atoms,pos[:,:,0])
+            make_restraint_group(i,restrained_residues,pos[:,:,0])
             
 
     t.close()
