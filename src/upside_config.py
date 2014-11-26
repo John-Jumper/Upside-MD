@@ -63,7 +63,7 @@ def write_affine_alignment(n_res):
     create_array(grp, 'ref_geom', obj=ref_geom)
 
 
-def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation):
+def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_residues):
     n_res = len(fasta)
     if hbond_energy > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
@@ -75,15 +75,12 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation):
     acceptors = t.create_group(grp, 'acceptors')
 
     # note that proline is not an hbond donor since it has no NH
-    donor_residues    = np.array([i for i in range(n_res) if i>0 and fasta[i]!='PRO'])
-    acceptor_residues = np.arange(0,n_res-1)
+    excluded_residues = set(excluded_residues)
+    donor_residues    = np.array([i for i in range(n_res) if i>0       and i not in excluded_residues and fasta[i]!='PRO'])
+    acceptor_residues = np.array([i for i in range(n_res) if i<n_res-1 and i not in excluded_residues])
 
     print
     print 'hbond, %i donors, %i acceptors in sequence' % (len(donor_residues), len(acceptor_residues))
-    
-    positive = np.array([x in ('LYS','HIS','ARG') for x in fasta])
-    negative = np.array([x in ('ASP','GLU')       for x in fasta])
-    electrostatics = 1*positive - 1*negative
 
     H_bond_length = 0.88
     O_bond_length = 1.24
@@ -739,6 +736,8 @@ def main():
             help='dimer basin probability library')
     parser.add_argument('--hbond-energy', default=0., type=float,
             help='energy for forming a hydrogen bond')
+    parser.add_argument('--hbond-excluded-residues', default=[], type=parse_segments,
+            help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
             help='hbond energy perturbation file for helices')
     parser.add_argument('--initial-structures', default='', 
@@ -791,7 +790,9 @@ def main():
     write_angle_spring(args)
     write_dihedral_spring()
     # # write_rama_pot()
-    if args.hbond_energy!=0.: write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation)
+    if args.hbond_energy!=0.: 
+        write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation, args.hbond_excluded_residues)
+
     dimer_counts = cPickle.load(open(args.dimer_basin_library)) if args.dimer_basin_library else None
     write_hmm_pot(fasta_seq, args.rama_library, dimer_counts=dimer_counts)
 
