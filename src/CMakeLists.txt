@@ -14,6 +14,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    attraction.cpp
     sidechain.cpp 
     h5_support.cpp 
     force.cpp 

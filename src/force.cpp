@@ -1,3 +1,4 @@
+#include "attraction.h"
 #include "hbond.h"
 #include "force.h"
 #include "md_export.h"
@@ -412,6 +413,72 @@ struct AffinePairs : public DerivComputation
 };
 
 
+struct AttractionPairs : public DerivComputation
+{
+    map<string,int> name_map;
+    int n_residue;
+    int n_type;
+    AffineAlignment& alignment;
+
+    vector<AttractionParams> params;
+    vector<AttractionInteraction> interaction_params;
+    float cutoff;
+
+    AttractionPairs(hid_t grp, AffineAlignment& alignment_):
+        n_residue(get_dset_size<1>(grp, "id"   )[0]), 
+        n_type   (get_dset_size<1>(grp, "data/names")[0]),
+        alignment(alignment_), 
+
+        params(n_residue), interaction_params(n_type*n_type),
+        cutoff(read_attribute<float>(grp, "data", "cutoff"))
+    {
+        check_size(grp, "id",      n_residue);
+        check_size(grp, "restype", n_residue);
+
+        check_size(grp, "data/names",      n_type);
+        check_size(grp, "data/energy",     n_type, n_type);
+        check_size(grp, "data/scale",      n_type, n_type);
+        check_size(grp, "data/r0_squared", n_type, n_type);
+        check_size(grp, "data/sc_ref_pos", n_type, 3);
+
+        int i=0; 
+        traverse_string_dset<1>(grp, "data/names", [&](size_t nt, std::string &s) {name_map[s]=i++;});
+        if(i!=n_type) throw std::string("internal error");
+
+        traverse_dset<2,float>(grp, "data/energy", [&](size_t rt1, size_t rt2, float x) {
+                interaction_params[rt1*n_type+rt2].energy = x;});
+        traverse_dset<2,float>(grp, "data/scale", [&](size_t rt1, size_t rt2, float x) {
+                interaction_params[rt1*n_type+rt2].scale = x;});
+        traverse_dset<2,float>(grp, "data/r0_squared", [&](size_t rt1, size_t rt2, float x) {
+                interaction_params[rt1*n_type+rt2].r0_squared = x;});
+
+        vector<float3> sc_ref_pos(n_type);
+        traverse_dset<2,float>(grp, "data/sc_ref_pos", [&](size_t nt, int d, float v) {
+                switch(d) {
+                    case 0: sc_ref_pos[nt].x = v; break;
+                    case 1: sc_ref_pos[nt].y = v; break;
+                    case 2: sc_ref_pos[nt].z = v; break;
+                }});
+
+        traverse_dset<1,int   >(grp, "id",      [&](size_t nr, int x) {params[nr].loc.index = x;});
+        traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
+                if(name_map.find(s) == end(name_map)) std::string("restype contains name not found in data/");
+                params[nr].restype    = name_map[s];
+                params[nr].sc_ref_pos = sc_ref_pos.at(name_map[s]);
+            });
+
+        for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].loc);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("attraction_pairs"));
+        attraction_pairs(
+                alignment.coords(), 
+                params.data(), interaction_params.data(), n_type, cutoff, 
+                n_residue, alignment.pos.n_system);
+    }
+};
+
 struct Infer_H_O : public DerivComputation
 {
     Pos& pos;
@@ -797,6 +864,8 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
             (engine, force_group, "sidechain",    "affine_alignment");
         attempt_add_node<StericInteraction,AffineAlignment>
             (engine, force_group, "steric",    "affine_alignment");
+        attempt_add_node<AttractionPairs,AffineAlignment>
+            (engine, force_group, "attractive","affine_alignment");
 
         string count_hbond = "count_hbond";
         attempt_add_node<Infer_H_O,Pos>        (engine, force_group, "infer_H_O",    "pos",       &count_hbond);

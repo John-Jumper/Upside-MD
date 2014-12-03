@@ -675,6 +675,17 @@ def write_sidechain_potential(fasta, library):
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 
+def write_attractive(fasta, library):
+    g = t.create_group(t.root.input.force, 'attractive')
+    t.create_external_link(g, 'data', os.path.abspath(library)+':/params')
+    create_array(g, 'restype', obj=map(str,fasta))
+    create_array(g, 'id',      obj=np.arange(len(fasta)))
+
+    # quick check to ensure the external link worked
+    assert len(t.get_node('/input/force/attractive/data/names').shape) == 1
+    
+
+
 def write_steric(fasta, library):
     g = t.create_group(t.root.input.force, 'steric')
     t.create_external_link(g, 'residue_data',     os.path.abspath(library)+':/residue_data')
@@ -682,9 +693,9 @@ def write_steric(fasta, library):
     create_array(g, 'restype', map(str,fasta))
 
     # quick check to ensure the external link worked
-
     assert len(t.get_node('/input/force/steric/residue_data/LYS').point.shape) == 2
     assert len(t.get_node('/input/force/steric/atom_interaction/potential').shape) == 3
+
 
 def parse_segments(s):
     ''' Parse segments of the form 10-30,50-60 '''
@@ -724,6 +735,8 @@ def main():
             help='use affine nonbonded')
     parser.add_argument('--steric', default=None,
             help='use steric library')
+    parser.add_argument('--attractive', default=None,
+            help='use attractive library')
     parser.add_argument('--sidechain-library', default=None, 
             help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
@@ -814,15 +827,23 @@ def main():
         write_nonbonded(fasta_seq, Vfcns)
 
     if args.affine:
-        write_affine_alignment(len(fasta_seq))
+        do_alignment = True
         write_affine_pair(fasta_seq)
 
     if args.sidechain_library:
+        do_alignment = True
         write_sidechain_potential(fasta_seq, args.sidechain_library)
 
     if args.steric:
-        write_affine_alignment(len(fasta_seq))
+        do_alignment = True
         write_steric(fasta_seq, args.steric)
+
+    if args.attractive:
+        do_alignment = True
+        write_attractive(fasta_seq, args.attractive)
+
+    if do_alignment:
+        write_affine_alignment(len(fasta_seq))
 
     if args.restraint_group:
         print
