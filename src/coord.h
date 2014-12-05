@@ -25,6 +25,18 @@ struct float4 {
         x(x_), y(y_), z(z_), w(w_) {}
 };
 
+inline float& component(float3 &v, int dim) {
+    switch(dim) {
+        case 0: return v.x;
+        case 1: return v.y;
+        case 2: return v.z;
+    }
+    // should never occur, but I don't want this function to throw
+    fprintf(stderr, "the impossible occurred\n");
+    return v.x;  
+}
+
+
 struct SysArray {
     float *x;
     int   offset;  // offset per system, units of floats

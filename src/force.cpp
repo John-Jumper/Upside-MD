@@ -413,6 +413,47 @@ struct AffinePairs : public DerivComputation
 };
 
 
+struct ContactEnergy : public DerivComputation
+{
+    int n_contact;
+    AffineAlignment& alignment;
+    vector<ContactPair> params;
+    float cutoff;
+
+    ContactEnergy(hid_t grp, AffineAlignment& alignment_):
+        n_contact(get_dset_size<2>(grp, "id")[0]),
+        alignment(alignment_), 
+        params(n_contact),
+        cutoff(read_attribute<float>(grp, ".", "cutoff"))
+    {
+        check_size(grp, "id",         n_contact, 2);
+        check_size(grp, "sc_ref_pos", n_contact, 2, 3);
+        check_size(grp, "r0",         n_contact);
+        check_size(grp, "scale",      n_contact);
+        check_size(grp, "energy",     n_contact);
+
+        traverse_dset<2,int  >(grp, "id",         [&](size_t nc, size_t i, int x) {params[nc].loc[i].index = x;});
+        traverse_dset<3,float>(grp, "sc_ref_pos", [&](size_t nc, size_t i, size_t d, float x) {
+                component(params[nc].sc_ref_pos[i], d) = x;});
+
+        traverse_dset<1,float>(grp, "r0",     [&](size_t nc, float x) {params[nc].r0     = x;});
+        traverse_dset<1,float>(grp, "scale",  [&](size_t nc, float x) {params[nc].scale  = x;});
+        traverse_dset<1,float>(grp, "energy", [&](size_t nc, float x) {params[nc].energy = x;});
+
+        for(int j=0; j<2; ++j) 
+            for(size_t i=0; i<params.size(); ++i) 
+                alignment.slot_machine.add_request(1, params[i].loc[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("contact_energy"));
+        contact_energy(
+                alignment.coords(), params.data(), 
+                n_contact, cutoff, alignment.pos.n_system);
+    }
+};
+
+
 struct AttractionPairs : public DerivComputation
 {
     map<string,int> name_map;
@@ -866,6 +907,8 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
             (engine, force_group, "steric",    "affine_alignment");
         attempt_add_node<AttractionPairs,AffineAlignment>
             (engine, force_group, "attractive","affine_alignment");
+        attempt_add_node<ContactEnergy,AffineAlignment>
+            (engine, force_group, "contact",   "affine_alignment");
 
         string count_hbond = "count_hbond";
         attempt_add_node<Infer_H_O,Pos>        (engine, force_group, "infer_H_O",    "pos",       &count_hbond);

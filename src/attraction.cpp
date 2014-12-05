@@ -57,3 +57,39 @@ void attraction_pairs(
             residues[nr].coord.flush();
     }
 }
+
+
+void contact_energy(
+        const CoordArray   rigid_body,
+        const ContactPair* contact_param,
+        int n_contacts, float cutoff, int n_system)
+{
+    #pragma omp parallel for
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nc=0; nc<n_contacts; ++nc) {
+            ContactPair p = contact_param[nc];
+            AffineCoord r1(rigid_body, ns, p.loc[0]);
+            AffineCoord r2(rigid_body, ns, p.loc[1]);
+
+            float3 x1 = r1.apply(p.sc_ref_pos[0]);
+            float3 x2 = r2.apply(p.sc_ref_pos[1]);
+
+            float3 disp = x1-x2;
+            float  dist = mag(disp);
+            float  reduced_coord = p.scale * (dist - p.r0);
+
+            if(reduced_coord<cutoff) {
+                float  z = expf(reduced_coord);
+                float  w = 1.f / (1.f + z);
+                float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
+                float3 deriv = deriv_over_r * disp;
+
+                r1.add_deriv_at_location(x1,  deriv);
+                r2.add_deriv_at_location(x2, -deriv);
+            }
+
+            r1.flush();
+            r2.flush();
+        }
+    }
+}

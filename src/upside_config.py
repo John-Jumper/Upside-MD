@@ -20,6 +20,28 @@ deg=np.deg2rad(1)
 
 default_filter = tables.Filters(complib='zlib', complevel=5, fletcher32=True)
 
+base_sc_ref = \
+{'ALA': np.array([-0.019807 ,   1.5117411,   1.2068012]),
+ 'ARG': np.array([-0.25952421,  3.43205428,  2.24589099]),
+ 'ASN': np.array([-0.2700791 ,  2.28252364,  1.32357562]),
+ 'ASP': np.array([-0.19024352,  2.2455347 ,  1.36711698]),
+ 'CYS': np.array([-0.17887778,  1.94327737,  1.33380085]),
+ 'GLN': np.array([-0.28785288,  2.84669658,  1.59386594]),
+ 'GLU': np.array([-0.26834331,  2.809264  ,  1.70152681]),
+ 'GLY': np.array([-0.019807  ,  0.56798484,  0.        ]),
+ 'HIS': np.array([-0.32871673,  2.66801071,  1.42400533]),
+ 'ILE': np.array([-0.24519931,  2.26386696,  1.4913392 ]),
+ 'LEU': np.array([-0.24683502,  2.67214609,  1.30884661]),
+ 'LYS': np.array([-0.25903788,  3.17968913,  1.87237359]),
+ 'MET': np.array([-0.19761002,  2.7962938 ,  1.54052013]),
+ 'PHE': np.array([-0.26930762,  2.83798775,  1.45306497]),
+ 'PRO': np.array([-1.08975169,  0.91730521,  1.41514215]),
+ 'SER': np.array([-0.01096021,  1.57254317,  1.47568677]),
+ 'THR': np.array([-0.16045957,  1.80159775,  1.42475827]),
+ 'TRP': np.array([-0.01513264,  3.06427424,  1.57177336]),
+ 'TYR': np.array([-0.28912749,  3.02893674,  1.50062717]),
+ 'VAL': np.array([-0.03010607,  1.9661081 ,  1.32514758])}
+
 def vmag(x):
     assert x.shape[-1]
     return np.sqrt(x[:,0]**2+x[:,1]**2+x[:,2]**2)
@@ -666,6 +688,43 @@ def read_fasta(file_obj):
     return seq
 
 
+def write_contact_energies(parser, fasta, contact_table):
+    fields = [ln.split() for ln in open(contact_table)]
+    if [x.lower() for x in fields[0]] != 'residue1 residue2 r0 width energy'.split():
+        parser.error('First line of contact energy table must be "residue1 residue2 r0 width energy"')
+    if not all(len(f)==5 for f in fields):
+        parser.error('Invalid format for contact file')
+    fields = fields[1:]
+    n_contact = len(fields)
+
+    g = t.create_group(t.root.input.force, 'contact')
+    g._v_attrs.cutoff = 6.   # in units of width
+
+    id         = np.zeros((n_contact,2), dtype='i')
+    sc_ref_pos = np.zeros((n_contact,2,3))
+    r0         = np.zeros((n_contact,))
+    scale      = np.zeros((n_contact,))
+    energy     = np.zeros((n_contact,))
+
+    for i,f in enumerate(fields):
+        id[i] = (int(f[0]), int(f[1]))
+        sc_ref_pos[i] = (base_sc_ref[fasta[id[i,0]]], base_sc_ref[fasta[id[i,1]]])
+
+        r0[i]     =    float(f[2])
+        scale[i]  = 1./float(f[3])
+        energy[i] =    float(f[4])
+
+    if energy.max() > 0.:
+        print ('\nWARNING: Some contact energies are positive (repulsive).\n'+
+                 '         Please ignore this warning if you intendent to have repulsive contacts.')
+
+    create_array(g, 'id',         obj=id)
+    create_array(g, 'sc_ref_pos', obj=sc_ref_pos)
+    create_array(g, 'r0',         obj=r0)
+    create_array(g, 'scale',      obj=scale)
+    create_array(g, 'energy',     obj=energy)
+
+
 def write_sidechain_potential(fasta, library):
     g = t.create_group(t.root.input.force, 'sidechain')
     t.create_external_link(g, 'sidechain_data', os.path.abspath(library)+':/params')
@@ -759,17 +818,29 @@ def main():
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with a bond length of 1.4 A will be used ' +
             'instead.')
+    parser.add_argument('--target-structures', default='', 
+            help='Pickle file for target structures for the simulation.  ' +
+            'This option controls the structure used for restraint group and '+
+            'other structure-specific potentials.  If not provided, the initial '
+            'structure is used as a default.')
     parser.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
             help='Path to file containing whitespace-separated residue numbers (first residue is number 0).  '+
             'Each atom in the specified residues will be randomly connected to atoms in other residues by ' +
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
             'with different filenames.')
+    parser.add_argument('--contact-energies', default='', 
+            help='Path to text file that defines a contact energy function.  The first line of the file should ' +
+            'be a header containing "residue1 residue2 r0 width energy", and the remaining lines should contain '+
+            'space separated values.  The form of the interaction is '+
+            'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
+            'sidechain, typically a few angstroms above the CB.')
+
 
 
     args = parser.parse_args()
-    if args.restraint_group and not args.initial_structures:
-        parser.error('must specify --initial-structures to use --restraint-group')
+    if args.restraint_group and not (args.initial_structures or args.target_structures):
+        parser.error('must specify --initial-structures or --target-structuresto use --restraint-group')
 
     if args.sidechain_library and not args.affine:
         parser.error('must specify --affine to use --sidechain-library')
@@ -796,6 +867,14 @@ def main():
     for i in range(n_system):
         pos[:,:,i] = init_pos[...,i%init_pos.shape[-1]] if args.initial_structures else random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)
+
+    if args.target_structures:
+        target = cPickle.load(open(args.target_structures))
+        assert target.shape == (n_atom, 3, target.shape[-1])
+        if target.shape[-1] != 1: 
+            parser.error('Only a single target structure is supported, but your file contains multiple')
+    else:
+        target = pos.copy()
     
     force = t.create_group(input,  'force')
 
@@ -842,6 +921,10 @@ def main():
         do_alignment = True
         write_attractive(fasta_seq, args.attractive)
 
+    if args.contact_energies:
+        do_alignment = True
+        write_contact_energies(parser, fasta_seq, args.contact_energies)
+
     if do_alignment:
         write_affine_alignment(len(fasta_seq))
 
@@ -855,7 +938,7 @@ def main():
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
             print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
                                               for i,f in enumerate(fasta_one_letter)))
-            make_restraint_group(i,restrained_residues,pos[:,:,0])
+            make_restraint_group(i,restrained_residues,target[:,:,0])
             
 
     t.close()
