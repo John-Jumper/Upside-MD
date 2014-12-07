@@ -4,7 +4,6 @@ import prody
 import numpy as np
 import sys
 import cPickle
-
 import argparse
 
 three_letter_aa = dict(

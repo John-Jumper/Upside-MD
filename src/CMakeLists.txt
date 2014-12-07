@@ -44,3 +44,19 @@ target_link_libraries(sidechain_interaction stdc++)
 
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+
+add_custom_target(support ALL COMMENT "Creating supporting executables")
+
+macro(python_executable TARGET FILENAME)
+    string(REGEX REPLACE "\\.py$" "" PYTHON_NEW_NAME ${FILENAME})
+    add_custom_command(
+	OUTPUT   ${PYTHON_NEW_NAME}
+	COMMAND  ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME})
+    add_custom_target(${PYTHON_NEW_NAME}_PYTHON DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME})
+    add_dependencies(${TARGET} ${PYTHON_NEW_NAME}_PYTHON)
+endmacro(python_executable)
+
+python_executable(support upside_config.py)
+python_executable(support extract-vtf.py)
+python_executable(support PDB-to-initial-structure.py)
+python_executable(support P_of_r.py)
