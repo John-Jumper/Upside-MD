@@ -788,8 +788,8 @@ def main():
             help='[required] number of systems to prepare')
     parser.add_argument('--output', default='system.h5',
             help='path to output the created .h5 file (default system.h5)')
-    parser.add_argument('--residue-radius', type=float, default=0.,
-            help='radius of residue for repulsive interaction (1 kT value)')
+    # parser.add_argument('--residue-radius', type=float, default=0.,
+    #         help='radius of residue for repulsive interaction (1 kT value)')
     parser.add_argument('--backbone', default=False, action='store_true',
             help='use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--steric', default=None,
@@ -889,18 +889,18 @@ def main():
     for k,v in sorted(vars(args).items()):
         args_group._v_attrs[k] = v
 
-    if args.residue_radius != 0.:
-        height = 20.
-        # width = args.residue_radius / np.sqrt(2*np.log(height))
-        # V = lambda r: height * np.exp(-0.5 * r**2 / width**2)
+    # if args.residue_radius != 0.:
+    #     height = 20.
+    #     # width = args.residue_radius / np.sqrt(2*np.log(height))
+    #     # V = lambda r: height * np.exp(-0.5 * r**2 / width**2)
 
-        width = 0.3
-        radius = args.residue_radius - width * np.log(height-1.)  # set kT energy at desired coordinate
-        V = lambda r: height/(1.+np.exp((r-radius)/width))
-        # set all atoms to the same function
-        Vfcns = dict(((aa1,aa2), V) for aa1 in aa_num for aa2 in aa_num)
+    #     width = 0.3
+    #     radius = args.residue_radius - width * np.log(height-1.)  # set kT energy at desired coordinate
+    #     V = lambda r: height/(1.+np.exp((r-radius)/width))
+    #     # set all atoms to the same function
+    #     Vfcns = dict(((aa1,aa2), V) for aa1 in aa_num for aa2 in aa_num)
 
-        write_nonbonded(fasta_seq, Vfcns)
+    #     write_nonbonded(fasta_seq, Vfcns)
 
     if args.backbone:
         do_alignment = True
