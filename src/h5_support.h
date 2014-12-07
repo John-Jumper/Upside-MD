@@ -348,6 +348,35 @@ catch(const std::string &e) {
 }
 
 
+static std::vector<std::string> 
+node_names_in_group(const hid_t loc, const std::string grp_name) {
+    std::vector<std::string> names;
+
+    H5G_info_t info;
+    h5_noerr(H5Gget_info_by_name(loc, grp_name.c_str(), &info, H5P_DEFAULT));
+
+    for(int i=0; i<int(info.nlinks); ++i) {
+        // 1+ is for NULL terminator
+        size_t name_size = 1 + h5_noerr(
+                 H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
+                    nullptr, 0, H5P_DEFAULT));
+
+        auto tmp = std::unique_ptr<char[]>(new char[name_size]);
+        h5_noerr(H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
+                    tmp.get(), name_size, H5P_DEFAULT));
+
+        names.emplace_back(tmp.get());
+    }
+    return names;
+}
+
+
+
+
+
+
+
+
 
 }
 #endif
