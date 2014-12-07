@@ -555,7 +555,7 @@ def make_trans_matrices(seq, monomer_basin_prob, dimer_counts):
 
 def populate_rama_maps(seq, rama_library_h5):
     rama_maps = np.zeros((len(seq), 72,72))
-    t=tables.openFile(rama_library_h5)
+    t=tables.open_file(rama_library_h5)
     rama = t.root.rama[:]
     restype = t.root.rama._v_attrs.restype
     dirtype = t.root.rama._v_attrs.dir
@@ -854,7 +854,7 @@ def main():
     n_system = args.n_system
     n_atom = 3*len(fasta_seq)
     
-    t = tables.openFile(args.output,'w')
+    t = tables.open_file(args.output,'w')
     
     input = t.create_group(t.root, 'input')
     create_array(input, 'sequence', obj=fasta_seq)

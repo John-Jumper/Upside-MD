@@ -19,7 +19,6 @@ Dependences for generating config files
   * PyTables python library
 
 
-If you are running on midway, the following commands should take care of all
 dependences.  Note that the `module` command must be re-executed every time you
 login or put in your `.bashrc`.  The `easy_install` commands only need to be
 executed once.
@@ -34,16 +33,12 @@ executed once.
     git clone git@psd-repo.uchicago.edu:freed-and-sosnick-lab/upside-parameters.git
 
 #### Compiling the code
+If you are running on midway, godzilla, Ubuntu, Debian, or OS X, try
+`initial_setup.bash` in the upside directory.
 
 Note that the build system uses CMake (www.CMake.org) to find dependencies.  If
-you just want to build and run the code, do the following after installing the
-dependencies above.
-
-    cd upside
-    mkdir obj
-    cd obj
-    cmake ../src
-    make -j8
+you just want to build and run the code, try `get_new_version.bash` in the `upside`
+directory.
 
 After executing these commands, there will be an `upside` binary in the `obj/`
 directory.  The configuration generator `upside_config.py` will still be in the `src/`

@@ -101,7 +101,7 @@ def main():
     parser.add_argument('--stride', type=int, default=1, help='Stride for reading file')
     args = parser.parse_args()
     
-    t=tables.openFile(args.input_h5); 
+    t=tables.open_file(args.input_h5); 
     print t.root.output.pos.shape[0], 'frames found,', t.root.output.time[-1], 'time units'
 
     

@@ -30,7 +30,7 @@ def main():
     import sys
     fnames = sys.argv[1:]
     for fn in fnames:
-        tbl = tables.openFile(fn)
+        tbl = tables.open_file(fn)
         summarize(tbl.root)
         tbl.close()
 
