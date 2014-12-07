@@ -49,9 +49,9 @@ def vmag(x):
 def create_array(grp, nm, obj=None):
     return t.create_carray(grp, nm, obj=obj, filters=default_filter)
 
-def write_affine_pair(fasta):
+def write_backbone_pair(fasta):
     n_res = len(fasta)
-    grp = t.create_group(force, 'affine_pairs')
+    grp = t.create_group(force, 'backbone_pairs')
 
     ref_pos = np.zeros((n_res,4,3))
     ref_pos[:,0] = (-1.19280531, -0.83127186,  0.)        # N
@@ -575,7 +575,7 @@ def populate_rama_maps(seq, rama_library_h5):
 
 
 def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
-    grp = t.create_group(force, 'hmm_pot')
+    grp = t.create_group(force, 'rama_hmm_pot')
     # first ID is previous C
     id = np.arange(2,n_atom-4,3)
     id = np.column_stack((id,id+1,id+2,id+3,id+4))
@@ -734,14 +734,14 @@ def write_sidechain_potential(fasta, library):
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 
-def write_attractive(fasta, library):
-    g = t.create_group(t.root.input.force, 'attractive')
+def write_sidechain_radial(fasta, library):
+    g = t.create_group(t.root.input.force, 'sidechain_radial')
     t.create_external_link(g, 'data', os.path.abspath(library)+':/params')
     create_array(g, 'restype', obj=map(str,fasta))
     create_array(g, 'id',      obj=np.arange(len(fasta)))
 
     # quick check to ensure the external link worked
-    assert len(t.get_node('/input/force/attractive/data/names').shape) == 1
+    assert len(t.get_node('/input/force/sidechain_radial/data/names').shape) == 1
     
 
 
@@ -790,14 +790,14 @@ def main():
             help='path to output the created .h5 file (default system.h5)')
     parser.add_argument('--residue-radius', type=float, default=0.,
             help='radius of residue for repulsive interaction (1 kT value)')
-    parser.add_argument('--affine', default=False, action='store_true',
-            help='use affine nonbonded')
+    parser.add_argument('--backbone', default=False, action='store_true',
+            help='use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--steric', default=None,
             help='use steric library')
-    parser.add_argument('--attractive', default=None,
-            help='use attractive library')
-    parser.add_argument('--sidechain-library', default=None, 
-            help='use sidechain density potential')
+    parser.add_argument('--sidechain-radial', default=None,
+            help='use sidechain radial potential library')
+    # parser.add_argument('--sidechain-library', default=None, 
+    #         help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
             help='Bond spring constant in units of energy/A^2 (default 48)')
     parser.add_argument('--angle-stiffness', default=175., type=float,
@@ -840,13 +840,10 @@ def main():
 
     args = parser.parse_args()
     if args.restraint_group and not (args.initial_structures or args.target_structures):
-        parser.error('must specify --initial-structures or --target-structuresto use --restraint-group')
+        parser.error('must specify --initial-structures or --target-structures to use --restraint-group')
 
-    if args.sidechain_library and not args.affine:
-        parser.error('must specify --affine to use --sidechain-library')
-
-    if args.steric and args.affine:
-        parser.error('--steric is incompatible with --affine.  You probably want just --steric.')
+    if args.steric and args.backbone:
+        parser.error('--steric is incompatible with --backbone since --steric includes backbone atoms.  You probably want just --steric.')
 
     fasta_seq = read_fasta(open(args.fasta))
 
@@ -905,21 +902,21 @@ def main():
 
         write_nonbonded(fasta_seq, Vfcns)
 
-    if args.affine:
+    if args.backbone:
         do_alignment = True
-        write_affine_pair(fasta_seq)
+        write_backbone_pair(fasta_seq)
 
-    if args.sidechain_library:
-        do_alignment = True
-        write_sidechain_potential(fasta_seq, args.sidechain_library)
+    # if args.sidechain_library:
+    #     do_alignment = True
+    #     write_sidechain_potential(fasta_seq, args.sidechain_library)
 
     if args.steric:
         do_alignment = True
         write_steric(fasta_seq, args.steric)
 
-    if args.attractive:
+    if args.sidechain_radial:
         do_alignment = True
-        write_attractive(fasta_seq, args.attractive)
+        write_sidechain_radial(fasta_seq, args.sidechain_radial)
 
     if args.contact_energies:
         do_alignment = True

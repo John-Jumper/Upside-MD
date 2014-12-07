@@ -78,7 +78,7 @@ unpack_atom(unsigned int packed_atom)
 
 
 template <typename AffineCoordT>
-inline void affine_pairs_body(
+inline void backbone_pairs_body(
         AffineCoordT &body1,
         AffineCoordT &body2,
         int n_atoms1, const float3* restrict rpos1,
@@ -104,7 +104,7 @@ inline void affine_pairs_body(
 
 }
 
-void affine_pairs(
+void backbone_pairs(
         const CoordArray rigid_body,
         const PackedRefPos* restrict ref_pos,
         const AffineParams* restrict params,
@@ -131,7 +131,7 @@ void affine_pairs(
         for(int nr1=0; nr1<n_res; ++nr1) {
             for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
                 if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
-                    affine_pairs_body(
+                    backbone_pairs_body(
                             coords[nr1],        coords[nr2], 
                             ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
                             ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);

@@ -1,26 +1,26 @@
-#include "attraction.h"
+#include "sidechain_radial.h"
 #include "affine.h"
 #include <cmath>
 #include <vector>
 
 using namespace std;
 
-struct AttractionResidue {
+struct SidechainRadialResidue {
     float3      interaction_center;
     int         restype;
     AffineCoord coord;
 };
 
-void attraction_pairs(
+void radial_pairs(
         const CoordArray             rigid_body,
-        const AttractionParams*      residue_param,
-        const AttractionInteraction* interaction_params,
+        const SidechainRadialParams*      residue_param,
+        const SidechainRadialInteraction* interaction_params,
         int n_types, float cutoff,
         int n_res, int n_system)
 {
     #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
-        vector<AttractionResidue> residues;  residues.reserve(n_res);
+        vector<SidechainRadialResidue> residues;  residues.reserve(n_res);
 
         for(int nr=0; nr<n_res; ++nr) {
             residues.emplace_back(); auto &r = residues.back();
@@ -30,13 +30,13 @@ void attraction_pairs(
         }
 
         for(int nr1=0; nr1<n_res; ++nr1) {
-            AttractionResidue &r1 = residues[nr1];
+            SidechainRadialResidue &r1 = residues[nr1];
 
             for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
-                AttractionResidue &r2 = residues[nr2];
+                SidechainRadialResidue &r2 = residues[nr2];
 
                 float3 disp = r1.interaction_center - r2.interaction_center;
-                AttractionInteraction at = interaction_params[r1.restype*n_types + r2.restype];
+                SidechainRadialInteraction at = interaction_params[r1.restype*n_types + r2.restype];
                 float dist2 = mag2(disp);
                 float reduced_coord = at.scale * (dist2 - at.r0_squared);
 

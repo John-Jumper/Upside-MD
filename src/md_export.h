@@ -40,7 +40,7 @@ void affine_alignment(
         const AffineAlignmentParams* restrict params,
         int n_res,
         int n_system);
-void affine_pairs(
+void backbone_pairs(
         const CoordArray rigid_body,
         const PackedRefPos* ref_pos,
         const AffineParams* params,

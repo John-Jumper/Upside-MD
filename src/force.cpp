@@ -1,4 +1,4 @@
-#include "attraction.h"
+#include "sidechain_radial.h"
 #include "hbond.h"
 #include "force.h"
 #include "md_export.h"
@@ -296,7 +296,7 @@ struct HMMPot : public DerivComputation
     }
 
     virtual void compute_germ() {
-        Timer timer(string("hmm"));
+        Timer timer(string("rama_hmm"));
         hmm(pos.coords(), params.host().data(),
                 trans_matrices.host().data(), n_bin, rama_maps.host().data(), 
                 n_residue, pos.n_system);
@@ -371,7 +371,7 @@ struct ComputeMyDeriv {
 };
 
 
-struct AffinePairs : public DerivComputation
+struct BackbonePairs : public DerivComputation
 {
     int n_residue;
     AffineAlignment& alignment;
@@ -380,7 +380,7 @@ struct AffinePairs : public DerivComputation
     float energy_scale;
     float dist_cutoff;
 
-    AffinePairs(hid_t grp, AffineAlignment& alignment_):
+    BackbonePairs(hid_t grp, AffineAlignment& alignment_):
         n_residue(get_dset_size<1>(grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
@@ -404,8 +404,8 @@ struct AffinePairs : public DerivComputation
     }
 
     virtual void compute_germ() {
-        Timer timer(string("affine_pairs"));
-        affine_pairs(
+        Timer timer(string("backbone_pairs"));
+        backbone_pairs(
                 alignment.coords(), 
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
                 alignment.pos.n_system);
@@ -454,18 +454,18 @@ struct ContactEnergy : public DerivComputation
 };
 
 
-struct AttractionPairs : public DerivComputation
+struct SidechainRadialPairs : public DerivComputation
 {
     map<string,int> name_map;
     int n_residue;
     int n_type;
     AffineAlignment& alignment;
 
-    vector<AttractionParams> params;
-    vector<AttractionInteraction> interaction_params;
+    vector<SidechainRadialParams> params;
+    vector<SidechainRadialInteraction> interaction_params;
     float cutoff;
 
-    AttractionPairs(hid_t grp, AffineAlignment& alignment_):
+    SidechainRadialPairs(hid_t grp, AffineAlignment& alignment_):
         n_residue(get_dset_size<1>(grp, "id"   )[0]), 
         n_type   (get_dset_size<1>(grp, "data/names")[0]),
         alignment(alignment_), 
@@ -512,8 +512,8 @@ struct AttractionPairs : public DerivComputation
     }
 
     virtual void compute_germ() {
-        Timer timer(string("attraction_pairs"));
-        attraction_pairs(
+        Timer timer(string("radial_pairs"));
+        radial_pairs(
                 alignment.coords(), 
                 params.data(), interaction_params.data(), n_type, cutoff, 
                 n_residue, alignment.pos.n_system);
@@ -898,15 +898,15 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         attempt_add_node<DistSpring,Pos>       (engine, force_group, "dist_spring",      "pos");
         attempt_add_node<AngleSpring,Pos>      (engine, force_group, "angle_spring",     "pos");
         attempt_add_node<DihedralSpring,Pos>   (engine, force_group, "dihedral_spring",  "pos");
-        attempt_add_node<HMMPot,Pos>           (engine, force_group, "hmm_pot",          "pos");
+        attempt_add_node<HMMPot,Pos>           (engine, force_group, "rama_hmm_pot",     "pos");
         attempt_add_node<AffineAlignment,Pos>  (engine, force_group, "affine_alignment", "pos");
-        attempt_add_node<AffinePairs,AffineAlignment>(engine, force_group, "affine_pairs", "affine_alignment");
+        attempt_add_node<BackbonePairs,AffineAlignment>(engine, force_group, "backbone", "affine_alignment");
         attempt_add_node<SidechainInteraction,AffineAlignment>
             (engine, force_group, "sidechain",    "affine_alignment");
         attempt_add_node<StericInteraction,AffineAlignment>
             (engine, force_group, "steric",    "affine_alignment");
-        attempt_add_node<AttractionPairs,AffineAlignment>
-            (engine, force_group, "attractive","affine_alignment");
+        attempt_add_node<SidechainRadialPairs,AffineAlignment>
+            (engine, force_group, "radial","affine_alignment");
         attempt_add_node<ContactEnergy,AffineAlignment>
             (engine, force_group, "contact",   "affine_alignment");
 

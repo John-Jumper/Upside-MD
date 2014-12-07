@@ -20,7 +20,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
-    attraction.cpp
+    sidechain_radial.cpp
     sidechain.cpp 
     h5_support.cpp 
     force.cpp 
@@ -51,7 +51,8 @@ macro(python_executable TARGET FILENAME)
     string(REGEX REPLACE "\\.py$" "" PYTHON_NEW_NAME ${FILENAME})
     add_custom_command(
 	OUTPUT   ${PYTHON_NEW_NAME}
-	COMMAND  ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME})
+	COMMAND  ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME}
+	DEPENDS  ${FILENAME})
     add_custom_target(${PYTHON_NEW_NAME}_PYTHON DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME})
     add_dependencies(${TARGET} ${PYTHON_NEW_NAME}_PYTHON)
 endmacro(python_executable)
