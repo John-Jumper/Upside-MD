@@ -213,8 +213,8 @@ try {
         state_logger.flush();
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
-        printf("\n\nfinished in %.1f seconds (%.2f us/systems/step)\n",
-                elapsed, elapsed*1e6/n_system/n_round/3);
+        printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.4f seconds/simulation_time_unit)\n",
+                elapsed, elapsed*1e6/n_system/n_round/3, elapsed/duration_arg.getValue());
 
         {
             auto sum_kin = vector<double>(n_system, 0.);
