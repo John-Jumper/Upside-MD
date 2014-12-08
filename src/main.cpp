@@ -123,6 +123,9 @@ try {
             false, -1., "float", cmd);
     ValueArg<double> thermostat_timescale_arg("", "thermostat-timescale", "timescale for the thermostat", 
             false, 5., "float", cmd);
+    SwitchArg disable_recenter_arg("", "disable-recentering", 
+            "Disable recentering of protein in the universe", 
+            cmd, false);
     ValueArg<double> equilibration_duration_arg("", "equilibration-duration", 
             "duration to limit max force for equilibration (also decreases thermostat interval)", 
             false, 0., "float", cmd);
@@ -193,10 +196,11 @@ try {
 
         int round_print_width = ceil(log(n_round)/log(10));
 
+        bool do_recenter = !disable_recenter_arg.getValue();
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
             if(!frame_interval || !(nr%frame_interval)) {
-                recenter(engine.pos->coords().value, n_atom, n_system);
+                if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
                 state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data());
                 printf("%*lu / %*lu rounds %5.1f hbonds\n", 
                         round_print_width, (unsigned long)nr, 
