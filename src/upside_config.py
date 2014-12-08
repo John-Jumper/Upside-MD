@@ -51,7 +51,7 @@ def create_array(grp, nm, obj=None):
 
 def write_backbone_pair(fasta):
     n_res = len(fasta)
-    grp = t.create_group(force, 'backbone_pairs')
+    grp = t.create_group(force, 'backbone')
 
     ref_pos = np.zeros((n_res,4,3))
     ref_pos[:,0] = (-1.19280531, -0.83127186,  0.)        # N
