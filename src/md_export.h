@@ -103,4 +103,9 @@ void hmm(
         const RamaMapGerm* rama_map_data,
         int n_residue, int n_system);
 
+void z_flat_bottom_spring(
+        const CoordArray pos,
+        const ZFlatBottomParams* params,
+        int n_terms, int n_system);
+
 #endif

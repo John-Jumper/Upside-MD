@@ -59,6 +59,27 @@ void dist_spring(
 }
 
 
+void z_flat_bottom_spring(
+        const CoordArray pos,
+        const ZFlatBottomParams* params,
+        int n_terms, int n_system)
+{
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_terms; ++nt) {
+            ZFlatBottomParams p = params[nt];
+            Coord<3> atom_pos(pos, ns, p.atom);
+            
+            float z = atom_pos.f3().z;
+            float3 deriv(0.f, 0.f, 0.f);
+            if(z-p.z0 >  p.radius) deriv.z = p.spring_constant * (z-p.z0 - p.radius);
+            if(z-p.z0 < -p.radius) deriv.z = p.spring_constant * (z-p.z0 + p.radius);
+            atom_pos.set_deriv(deriv);
+            atom_pos.flush();
+        }
+    }
+}
+
+
 template <typename CoordT>
 inline void angle_spring_body(
         CoordT &atom1,

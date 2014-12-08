@@ -146,6 +146,37 @@ struct PosSpring : public DerivComputation
 };
 
 
+struct ZFlatBottom : public DerivComputation
+{
+    int n_term;
+    Pos& pos;
+    vector<ZFlatBottomParams> params;
+
+    ZFlatBottom(hid_t hdf_group, Pos& pos_):
+        pos(pos_), params( get_dset_size<1>(hdf_group, "atom")[0] )
+    {
+        n_term = params.size();
+        check_size(hdf_group, "atom",            n_term);
+        check_size(hdf_group, "z0",              n_term);
+        check_size(hdf_group, "radius",          n_term);
+        check_size(hdf_group, "spring_constant", n_term);
+
+        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].atom.index=i;});
+        traverse_dset<1,float>(hdf_group, "z0", [&](size_t nt, float x) {params[nt].z0 = x;});
+        traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
+        traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
+                params[nt].spring_constant = x;});
+
+        for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].atom);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("z_flat_bottom"));
+        z_flat_bottom_spring(pos.coords(), params.data(), n_term, pos.n_system);
+    }
+};
+
+
 struct DistSpring : public DerivComputation
 {
     int n_elem;
@@ -898,6 +929,7 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         attempt_add_node<DistSpring,Pos>       (engine, force_group, "dist_spring",      "pos");
         attempt_add_node<AngleSpring,Pos>      (engine, force_group, "angle_spring",     "pos");
         attempt_add_node<DihedralSpring,Pos>   (engine, force_group, "dihedral_spring",  "pos");
+        attempt_add_node<ZFlatBottom,Pos>      (engine, force_group, "z_flat_bottom",    "pos");
         attempt_add_node<HMMPot,Pos>           (engine, force_group, "rama_hmm_pot",     "pos");
         attempt_add_node<AffineAlignment,Pos>  (engine, force_group, "affine_alignment", "pos");
         attempt_add_node<BackbonePairs,AffineAlignment>(engine, force_group, "backbone", "affine_alignment");

@@ -86,6 +86,13 @@ typedef struct {
     cl_int padding[4];
 } DistSpringParams;
 
+struct ZFlatBottomParams {
+    CoordPair atom;
+    float     z0;
+    float     radius;
+    float     spring_constant;
+};
+
 // struct is 5 words, padded to 8 words
 typedef struct {
     CoordPair atom[1];
