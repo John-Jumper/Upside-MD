@@ -76,7 +76,7 @@ EOF
 		    echo
         	    echo "It looks like you are on midway.  Configuring for midway."
         	    module add python/2.7-2014q3 git cmake gcc hdf5 eigen
-        	    easy_install --user numexpr cython cvxopt
+        	    easy_install --user numexpr cython cvxopt prody
         	    easy_install --user tables
         
         	    HDF5_ROOT=$HDF5_DIR cmake ../src
@@ -97,6 +97,7 @@ install using the following command.  If you are not the system
 administrator, please point him/her to README.md in this directory.
 
 sudo apt-get install cmake libhdf5-dev libeigen3-dev python-tables python-numpy python-scipy python-cvxopt
+sudo easy_install prody
 
 Assuming all dependencies are satisfied and beginning installation.
 If this fails with an error, just install the dependencies and rerun
@@ -120,7 +121,7 @@ package manager (http://brew.sh).  Assuming you have done this
 EOF
 
       brew install homebrew/science/hdf5 cmake eigen
-      easy_install --user numexpr cython cvxopt scipy
+      easy_install --user numexpr cython cvxopt scipy prody
       easy_install --user tables
 
       cmake ../src
