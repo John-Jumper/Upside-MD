@@ -47,7 +47,7 @@ def vmag(x):
     return np.sqrt(x[:,0]**2+x[:,1]**2+x[:,2]**2)
 
 def create_array(grp, nm, obj=None):
-    return t.create_carray(grp, nm, obj=obj, filters=default_filter)
+    return t.create_earray(grp, nm, obj=obj, filters=default_filter)
 
 def write_backbone_pair(fasta):
     n_res = len(fasta)
