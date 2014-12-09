@@ -109,8 +109,8 @@ try {
             false, 0.01, "float", cmd);
     ValueArg<double> duration_arg("", "duration", "duration of simulation", 
             true, -1., "float", cmd);
-    ValueArg<int> seed_arg("", "seed", "random seed (default 42)", 
-            false, 42, "int", cmd);
+    ValueArg<unsigned long> seed_arg("", "seed", "random seed (default 42)", 
+            false, 42l, "int", cmd);
     SwitchArg overwrite_output_arg("", "overwrite-output", 
             "overwrite the output group of the system file if present (default false)", 
             cmd, false);
@@ -167,6 +167,9 @@ try {
         int thermostat_interval = max(1.,round(thermostat_interval_arg.getValue() / (3*dt)));
         int frame_interval = max(1.,round(frame_interval_arg.getValue() / (3*dt)));
 
+        unsigned long big_prime = 4294967291ul;  // largest prime smaller than 2^32
+        uint32_t random_seed = uint32_t(seed_arg.getValue() % big_prime);
+
         float equil_duration = equilibration_duration_arg.getValue();
         // equilibration_max_force is set so that the change in momentum should not be more than
         // 20% of the equilibration magnitude over a single dt interval
@@ -175,8 +178,9 @@ try {
 
         // initialize thermostat and thermalize momentum
         vector<float> mom(n_atom*n_system*3, 0.f);
+        printf("random seed: %lu\n", (unsigned long)(random_seed));
         auto thermostat = OrnsteinUhlenbeckThermostat(
-                seed_arg.getValue(), 
+                random_seed,
                 thermostat_timescale_arg.getValue(),
                 temperature_arg.getValue(),
                 1e8);
