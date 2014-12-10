@@ -131,7 +131,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     return
 
 
-def make_restraint_group(group_num, residues, initial_pos):
+def make_restraint_group(group_num, residues, initial_pos, strength):
     np.random.seed(314159)  # make groups deterministic
 
     grp = t.root.input.force.dist_spring
@@ -158,7 +158,7 @@ def make_restraint_group(group_num, residues, initial_pos):
 
     create_array(grp, 'id',           obj=np.concatenate((id,          pairs),      axis=0))
     create_array(grp, 'equil_dist',   obj=np.concatenate((equil_dist,  pair_dists), axis=0))
-    create_array(grp, 'spring_const', obj=np.concatenate((spring_const,4.*np.ones(len(pairs))),axis=0))
+    create_array(grp, 'spring_const', obj=np.concatenate((spring_const,strength*np.ones(len(pairs))),axis=0))
     create_array(grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms,np.zeros(len(pairs),dtype='bool')),axis=0))
 
 
@@ -829,6 +829,8 @@ def main():
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
             'with different filenames.')
+    parser.add_argument('--restraint-spring-constant', default=4., type=float,
+            help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
     parser.add_argument('--contact-energies', default='', 
             help='Path to text file that defines a contact energy function.  The first line of the file should ' +
             'be a header containing "residue1 residue2 r0 width energy", and the remaining lines should contain '+
@@ -935,7 +937,7 @@ def main():
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
             print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
                                               for i,f in enumerate(fasta_one_letter)))
-            make_restraint_group(i,restrained_residues,target[:,:,0])
+            make_restraint_group(i,restrained_residues,target[:,:,0], args.restraint_spring_constant)
             
 
     t.close()
