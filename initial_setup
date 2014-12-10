@@ -46,6 +46,7 @@ EOF
                     PATH=/home/jumper/toolchains/bin:$PATH \
 			HDF5_ROOT=/home/jumper/toolchains \
 			cmake ../src \
+			-DARCH=core2 \
 			-DOLD_DWARF_FORMAT=1 \
 		        -DEIGEN3_INCLUDE_DIR=/home/jumper/eigen \
 		        -DCMAKE_EXE_LINKER_FLAGS='-Wl,-rpath,/home/jumper/toolchains/lib64'
