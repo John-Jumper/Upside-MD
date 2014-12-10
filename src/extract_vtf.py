@@ -53,6 +53,7 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
 
     # write structure information
     atom_id = 0
+    prev_C = None
     for ns in xrange(n_system):
         for nr in xrange(n_res):
             res = 'resid %i resname %s segid s%i' % (nr, sequence[nr], ns)
@@ -61,12 +62,12 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
             vtf.write('atom %i name CA %s\n' % (atom_id+1, res))
             vtf.write('atom %i name C  %s\n' % (atom_id+2, res))
 
-            if nr>1 : vtf.write('bond %i:%i\n' % (atom_id-3,atom_id+0))  # prevC->N  bond
-            if nr==1: vtf.write('bond %i:%i\n' % (atom_id-2,atom_id+0))  # prevC->N  bond
+            if prev_C is not None: 
+                vtf.write('bond %i:%i\n' % (prev_C,atom_id+0)) # prevC->N  bond
             vtf.write('bond %i:%i\n' % (atom_id+0,atom_id+1))  # N->CA bond
             vtf.write('bond %i:%i\n' % (atom_id+1,atom_id+2))  # CA->C bond
 
-            if nr==0:
+            if nr==0 or sequence[nr]=='PRO':
                 vtf.write('atom %i name O  %s\n' % (atom_id+3, res))
                 vtf.write('bond %i:%i\n' % (atom_id+2, atom_id+3))  # C->O bond
                 consumed = 4
@@ -79,8 +80,9 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
                 vtf.write('atom %i name O  %s\n' % (atom_id+4, res))
                 vtf.write('bond %i:%i\n' % (atom_id+0, atom_id+3))  # N->H bond
                 vtf.write('bond %i:%i\n' % (atom_id+2, atom_id+4))  # C->O bond
-                consumed = 5
+                consumed = 5;
 
+            prev_C = atom_id+2
             atom_id += consumed
 
     for f in range(len(traj)):
@@ -90,7 +92,8 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
                 vtf.write("%.3f %.3f %.3f\n" % (N [f,nr,0,ns], N [f,nr,1,ns], N [f,nr,2,ns]))
                 vtf.write("%.3f %.3f %.3f\n" % (CA[f,nr,0,ns], CA[f,nr,1,ns], CA[f,nr,2,ns]))
                 vtf.write("%.3f %.3f %.3f\n" % (C [f,nr,0,ns], C [f,nr,1,ns], C [f,nr,2,ns]))
-                if nr>0: vtf.write("%.3f %.3f %.3f\n" % (H[f,nr-1,0,ns], H[f,nr-1,1,ns], H[f,nr-1,2,ns]))
+                if nr>0 and sequence[nr]!='PRO': 
+                    vtf.write("%.3f %.3f %.3f\n" % (H[f,nr-1,0,ns], H[f,nr-1,1,ns], H[f,nr-1,2,ns]))
                 if nr<n_res-1: vtf.write("%.3f %.3f %.3f\n" % (O[f,nr,0,ns], O[f,nr,1,ns], O[f,nr,2,ns]))
 
 def main():
