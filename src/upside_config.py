@@ -734,15 +734,19 @@ def write_sidechain_potential(fasta, library):
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 
-def write_sidechain_radial(fasta, library):
+def write_sidechain_radial(fasta, library, scale_energy):
     g = t.create_group(t.root.input.force, 'sidechain_radial')
-    t.create_external_link(g, 'data', os.path.abspath(library)+':/params')
     create_array(g, 'restype', obj=map(str,fasta))
     create_array(g, 'id',      obj=np.arange(len(fasta)))
 
-    # quick check to ensure the external link worked
-    assert len(t.get_node('/input/force/sidechain_radial/data/names').shape) == 1
-    
+    params = tables.open_file(library)
+    data = t.create_group(g, 'data')
+    create_array(data, 'names',      obj=params.root.params.names[:])
+    create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
+    create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:])
+    create_array(data, 'sc_ref_pos', obj=params.root.params.sc_ref_pos[:])
+    create_array(data, 'scale',      obj=params.root.params.scale[:])
+    params.close()
 
 
 def write_steric(fasta, library):
@@ -796,6 +800,8 @@ def main():
             help='use steric library')
     parser.add_argument('--sidechain-radial', default=None,
             help='use sidechain radial potential library')
+    parser.add_argument('--sidechain-radial-scale-energy', default=1.0, type=float,
+            help='scale the sidechain radial energies')
     # parser.add_argument('--sidechain-library', default=None, 
     #         help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
@@ -918,7 +924,7 @@ def main():
 
     if args.sidechain_radial:
         do_alignment = True
-        write_sidechain_radial(fasta_seq, args.sidechain_radial)
+        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy)
 
     if args.contact_energies:
         do_alignment = True
