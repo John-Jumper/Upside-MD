@@ -20,27 +20,27 @@ deg=np.deg2rad(1)
 
 default_filter = tables.Filters(complib='zlib', complevel=5, fletcher32=True)
 
-base_sc_ref = \
-{'ALA': np.array([-0.019807 ,   1.5117411,   1.2068012]),
- 'ARG': np.array([-0.25952421,  3.43205428,  2.24589099]),
- 'ASN': np.array([-0.2700791 ,  2.28252364,  1.32357562]),
- 'ASP': np.array([-0.19024352,  2.2455347 ,  1.36711698]),
- 'CYS': np.array([-0.17887778,  1.94327737,  1.33380085]),
- 'GLN': np.array([-0.28785288,  2.84669658,  1.59386594]),
- 'GLU': np.array([-0.26834331,  2.809264  ,  1.70152681]),
- 'GLY': np.array([-0.019807  ,  0.56798484,  0.        ]),
- 'HIS': np.array([-0.32871673,  2.66801071,  1.42400533]),
- 'ILE': np.array([-0.24519931,  2.26386696,  1.4913392 ]),
- 'LEU': np.array([-0.24683502,  2.67214609,  1.30884661]),
- 'LYS': np.array([-0.25903788,  3.17968913,  1.87237359]),
- 'MET': np.array([-0.19761002,  2.7962938 ,  1.54052013]),
- 'PHE': np.array([-0.26930762,  2.83798775,  1.45306497]),
- 'PRO': np.array([-1.08975169,  0.91730521,  1.41514215]),
- 'SER': np.array([-0.01096021,  1.57254317,  1.47568677]),
- 'THR': np.array([-0.16045957,  1.80159775,  1.42475827]),
- 'TRP': np.array([-0.01513264,  3.06427424,  1.57177336]),
- 'TYR': np.array([-0.28912749,  3.02893674,  1.50062717]),
- 'VAL': np.array([-0.03010607,  1.9661081 ,  1.32514758])}
+base_sc_ref = {
+ 'ALA': np.array([-0.01648328,  1.50453228,  1.20193768]),
+ 'ARG': np.array([-0.27385093,  3.43874264,  2.24442499]),
+ 'ASN': np.array([-0.27119135,  2.28878532,  1.32214314]),
+ 'ASP': np.array([-0.19836569,  2.23864046,  1.36505725]),
+ 'CYS': np.array([-0.17532601,  1.92513503,  1.34296652]),
+ 'GLN': np.array([-0.28652696,  2.84800873,  1.60009894]),
+ 'GLU': np.array([-0.26377398,  2.80887008,  1.69621717]),
+ 'GLY': np.array([ -1.56136239e-02,   5.46052464e-01,  -5.67664281e-19]),
+ 'HIS': np.array([-0.32896151,  2.66635893,  1.42411271]),
+ 'ILE': np.array([-0.23956042,  2.26489309,  1.49776818]),
+ 'LEU': np.array([-0.23949426,  2.67123263,  1.3032201 ]),
+ 'LYS': np.array([-0.26626635,  3.18256448,  1.85836641]),
+ 'MET': np.array([-0.21000946,  2.79544428,  1.52568726]),
+ 'PHE': np.array([-0.27214755,  2.83761534,  1.45094383]),
+ 'PRO': np.array([-1.10993493,  0.89959734,  1.41005877]),
+ 'SER': np.array([-0.00692474,  1.56683138,  1.475341  ]),
+ 'THR': np.array([-0.14662723,  1.80061252,  1.42785569]),
+ 'TRP': np.array([-0.01433503,  3.07506159,  1.56167948]),
+ 'TYR': np.array([-0.2841611 ,  3.02555746,  1.50123341]),
+ 'VAL': np.array([-0.02436993,  1.97251406,  1.32782961])}
 
 def vmag(x):
     assert x.shape[-1]
@@ -708,6 +708,9 @@ def write_contact_energies(parser, fasta, contact_table):
 
     for i,f in enumerate(fields):
         id[i] = (int(f[0]), int(f[1]))
+        msg = 'Contact energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
+        if not (0 <= id[i,0] < len(fasta)): raise ValueError(msg % (id[i,0], len(fasta)))
+        if not (0 <= id[i,1] < len(fasta)): raise ValueError(msg % (id[i,1], len(fasta)))
         sc_ref_pos[i] = (base_sc_ref[fasta[id[i,0]]], base_sc_ref[fasta[id[i,1]]])
 
         r0[i]     =    float(f[2])
