@@ -34,6 +34,11 @@ void dynamic_dihedral_spring(
         const DihedralSpringParams* restrict params,
         int params_offset,
         int n_terms, int n_system);
+void dihedral_angle_range(
+        const CoordArray   pos,
+        const DihedralRangeParams* params,
+        int n_terms, 
+        int n_system);
 void affine_alignment(
         SysArray rigid_body,
         CoordArray pos,

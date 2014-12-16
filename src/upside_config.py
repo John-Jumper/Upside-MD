@@ -687,6 +687,53 @@ def read_fasta(file_obj):
     seq = np.array([three_letter_aa[a] for a in one_letter_seq])
     return seq
 
+def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
+    fields = [ln.split() for ln in open(dihedral_angle_table)]
+    if [x.lower() for x in fields[0]] != 'index angle_type start end width energy'.split():
+        parser.error('First line of dihedral angle energy table must be "index angle_type start end width energy"')
+    if not all(len(f)==6 for f in fields):
+        parser.error('Invalid format for dihedral angle energy file')
+    fields = fields[1:]
+    n_elem = len(fields)
+
+    grp = t.create_group(t.root.input.force, 'dihedral_range')
+
+    id          = np.zeros((n_elem,4), dtype = 'i')
+    angle_range = np.zeros((n_elem,2))
+    scale       = np.zeros((n_elem,))
+    energy      = np.zeros((n_elem,))
+ 
+    for i,f in enumerate(fields):
+        res_num = int(f[0])
+        good_res_num = (f[1]=='phi' and 0 < res_num <= n_res-1) or (f[1]=='psi' and 0 <= res_num < n_res-1) 
+
+        if not good_res_num:
+            raise ValueError("Cannot constrain dihedral angles for residue %i"%res_num)
+           
+        if f[1] == 'phi':
+            id[i,0] = 3*res_num - 1    # prev C
+ 	    id[i,1] = 3*res_num + 0    # N
+ 	    id[i,2] = 3*res_num + 1    # CA
+ 	    id[i,3] = 3*res_num + 2    # C
+        elif f[1] == 'psi':
+            id[i,0] = 3*res_num + 0    # N
+            id[i,1] = 3*res_num + 1    # CA
+            id[i,2] = 3*res_num + 2    # C
+            id[i,3] = 3*res_num + 3    # next N
+        else:
+ 	   raise ValueError('angle type %s not understood'%f[1])
+ 
+ 	angle_range[i,0] = float(f[2])*np.pi/180.0
+ 	angle_range[i,1] = float(f[3])*np.pi/180.0
+        if angle_range[i,0] > angle_range[i,1]:
+            raise ValueError("Lower dihedral angle bound for residue %i %s is greater than upper bound" % (res_num, f[1]))
+        scale[i]       = 1./(float(f[4])*np.pi/180.)
+        energy[i]      = float(f[5])
+ 
+    create_array(grp, 'id',          obj=id)
+    create_array(grp, 'angle_range', obj=angle_range)
+    create_array(grp, 'scale',       obj=scale)
+    create_array(grp, 'energy',      obj=energy)
 
 def write_contact_energies(parser, fasta, contact_table):
     fields = [ln.split() for ln in open(contact_table)]
@@ -840,13 +887,18 @@ def main():
             'with different filenames.')
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
+    parser.add_argument('--dihedral-range', default='',
+            help='Path to text file that defines a dihedral angle energy function.  The first line of the file should ' +
+            'be a header containing "index angletype start end width energy", where angletype is either "phi" or "psi" and the remaining lines should contain '+
+            'space separated values.  The form of the interaction is '+
+            'energy*(1/(1+exp[-(x-x_lowboundary)/width]))*(1/(1+exp[(x-x_upboundary)/width])). '+
+            'x is the dihedral angle, x_lowboundary and x_upboundary are the low and up boundaries.')
     parser.add_argument('--contact-energies', default='', 
             help='Path to text file that defines a contact energy function.  The first line of the file should ' +
             'be a header containing "residue1 residue2 r0 width energy", and the remaining lines should contain '+
             'space separated values.  The form of the interaction is '+
             'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
             'sidechain, typically a few angstroms above the CB.')
-
 
 
     args = parser.parse_args()
@@ -912,6 +964,9 @@ def main():
     #     Vfcns = dict(((aa1,aa2), V) for aa1 in aa_num for aa2 in aa_num)
 
     #     write_nonbonded(fasta_seq, Vfcns)
+
+    if args.dihedral_range:
+        write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)
 
     if args.backbone:
         do_alignment = True

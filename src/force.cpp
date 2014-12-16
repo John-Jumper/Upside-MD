@@ -444,6 +444,41 @@ struct BackbonePairs : public DerivComputation
 };
 
 
+struct DihedralRange : public DerivComputation
+{
+    int n_elem;
+    Pos& pos;
+    vector<DihedralRangeParams> params; // in sidechain_radial.h 
+    DihedralRange(hid_t grp, Pos& pos_):
+        n_elem(get_dset_size<2>(grp, "id")[0]),
+        pos(pos_),
+        params(n_elem)
+    {
+        check_size(grp, "id",          n_elem, 4);
+        check_size(grp, "angle_range", n_elem, 2);
+        check_size(grp, "scale",       n_elem);
+        check_size(grp, "energy",      n_elem);
+
+        traverse_dset<2,int  >(grp, "id",          [&](size_t nda, size_t i, int   x) {
+            if(x<0 || x>=pos.n_atom) throw string("illegal atom number ") + to_string(x);
+            params[nda].atom[i].index = x;});
+        traverse_dset<2,float>(grp, "angle_range", [&](size_t nda, size_t i, float x) {params[nda].angle_range[i]= x;});
+        traverse_dset<1,float>(grp, "scale",       [&](size_t nda, float x) {params[nda].scale  = x;});
+        traverse_dset<1,float>(grp, "energy",      [&](size_t nda, float x) {params[nda].energy = x;});
+
+        for(int j=0; j<4; ++j)
+            for(size_t i=0; i<params.size(); ++i)
+                pos.slot_machine.add_request(1, params[i].atom[j]);
+
+    }
+    virtual void compute_germ() {
+            Timer timer(string("dihedral_range"));
+            dihedral_angle_range(pos.coords(), params.data(),
+                           n_elem, pos.n_system);
+    }
+
+};
+
 struct ContactEnergy : public DerivComputation
 {
     int n_contact;
@@ -929,18 +964,16 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         attempt_add_node<DistSpring,Pos>       (engine, force_group, "dist_spring",      "pos");
         attempt_add_node<AngleSpring,Pos>      (engine, force_group, "angle_spring",     "pos");
         attempt_add_node<DihedralSpring,Pos>   (engine, force_group, "dihedral_spring",  "pos");
+        attempt_add_node<DihedralRange,Pos>    (engine, force_group, "dihedral_range",   "pos");
         attempt_add_node<ZFlatBottom,Pos>      (engine, force_group, "z_flat_bottom",    "pos");
         attempt_add_node<HMMPot,Pos>           (engine, force_group, "rama_hmm_pot",     "pos");
         attempt_add_node<AffineAlignment,Pos>  (engine, force_group, "affine_alignment", "pos");
-        attempt_add_node<BackbonePairs,AffineAlignment>(engine, force_group, "backbone", "affine_alignment");
-        attempt_add_node<SidechainInteraction,AffineAlignment>
-            (engine, force_group, "sidechain",    "affine_alignment");
-        attempt_add_node<StericInteraction,AffineAlignment>
-            (engine, force_group, "steric",    "affine_alignment");
-        attempt_add_node<SidechainRadialPairs,AffineAlignment>
-            (engine, force_group, "radial","affine_alignment");
-        attempt_add_node<ContactEnergy,AffineAlignment>
-            (engine, force_group, "contact",   "affine_alignment");
+
+        attempt_add_node<BackbonePairs,AffineAlignment>        (engine, force_group, "backbone", "affine_alignment");
+        attempt_add_node<SidechainInteraction,AffineAlignment> (engine, force_group, "sidechain","affine_alignment");
+        attempt_add_node<StericInteraction,AffineAlignment>    (engine, force_group, "steric",   "affine_alignment");
+        attempt_add_node<SidechainRadialPairs,AffineAlignment> (engine, force_group, "radial",   "affine_alignment");
+        attempt_add_node<ContactEnergy,AffineAlignment>        (engine, force_group, "contact",  "affine_alignment");
 
         string count_hbond = "count_hbond";
         attempt_add_node<Infer_H_O,Pos>        (engine, force_group, "infer_H_O",    "pos",       &count_hbond);

@@ -157,4 +157,12 @@ typedef struct {
     cl_ushort padding[5];
 } NH_CO_Params;
 
+
+struct DihedralRangeParams {
+    CoordPair atom[4];
+    float  angle_range[2];
+    float  scale;
+    float  energy;
+};
+
 #endif
