@@ -784,13 +784,20 @@ def write_sidechain_potential(fasta, library):
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 
-def write_sidechain_radial(fasta, library, scale_energy):
-    g = t.create_group(t.root.input.force, 'sidechain_radial')
-    create_array(g, 'restype', obj=map(str,fasta))
-    create_array(g, 'id',      obj=np.arange(len(fasta)))
+def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
+    g = t.create_group(t.root.input.force, 'radial')
+    for res_num in excluded_residues:
+        if not (0<=res_num<len(fasta)):
+            raise ValueError('Residue number %i is invalid'%res_num)
+
+    residues = sorted(set(np.arange(len(fasta))).difference(excluded_residues))
+
+    create_array(g, 'restype', obj=map(str,fasta[residues]))
+    create_array(g, 'id',      obj=np.array(residues))
 
     params = tables.open_file(library)
     data = t.create_group(g, 'data')
+    data._v_attrs.cutoff = 4.
     create_array(data, 'names',      obj=params.root.params.names[:])
     create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
     create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:])
@@ -850,6 +857,8 @@ def main():
             help='use steric library')
     parser.add_argument('--sidechain-radial', default=None,
             help='use sidechain radial potential library')
+    parser.add_argument('--sidechain-radial-exclude-residues', default=[], type=parse_segments,
+            help='Residues that do not participate in the --sidechain-radial potential (same format as --restraint-group)')
     parser.add_argument('--sidechain-radial-scale-energy', default=1.0, type=float,
             help='scale the sidechain radial energies')
     # parser.add_argument('--sidechain-library', default=None, 
@@ -864,7 +873,7 @@ def main():
             help='dimer basin probability library')
     parser.add_argument('--hbond-energy', default=0., type=float,
             help='energy for forming a hydrogen bond')
-    parser.add_argument('--hbond-excluded-residues', default=[], type=parse_segments,
+    parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
             help='hbond energy perturbation file for helices')
@@ -943,7 +952,7 @@ def main():
     write_dihedral_spring()
     # # write_rama_pot()
     if args.hbond_energy!=0.: 
-        write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation, args.hbond_excluded_residues)
+        write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation, args.hbond_exclude_residues)
 
     dimer_counts = cPickle.load(open(args.dimer_basin_library)) if args.dimer_basin_library else None
     write_hmm_pot(fasta_seq, args.rama_library, dimer_counts=dimer_counts)
@@ -982,7 +991,7 @@ def main():
 
     if args.sidechain_radial:
         do_alignment = True
-        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy)
+        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, args.sidechain_radial_exclude_residues)
 
     if args.contact_energies:
         do_alignment = True
