@@ -225,7 +225,6 @@ float count_hbond(
         int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
         const float hbond_energy, int n_system)
 {
-
     float tot_hbond = 0.f;
     
 #pragma omp parallel for reduction(+:tot_hbond)

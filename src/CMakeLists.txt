@@ -13,8 +13,8 @@ else()
 endif()
 
 set (OMP_FLAGS "") # "-fopenmp")
-set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
-set (OPT     " -O3 -ffast-math -march=${ARCH}")
+set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
+set (OPT     " -O3 -ffast-math -fno-finite-math-only -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
 
 set (CMAKE_CXX_FLAGS "${OMP_FLAGS} ${CMAKE_CXX_FLAGS} ${DEBUG_FLAGS} -std=c++11 ${DEFINES} ${OPT} ${WARN}" )
@@ -22,6 +22,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    backbone_dependent_sidechain.cpp
     sidechain_radial.cpp
     sidechain.cpp 
     h5_support.cpp 
@@ -64,3 +65,6 @@ python_executable(support extract_vtf.py)
 python_executable(support PDB_to_initial_structure.py)
 python_executable(support P_of_r.py)
 python_executable(support attr_overview.py)
+
+add_executable(rotamer_sidechain generate_from_rotamer.cpp test_rotamer.cpp)
+target_link_libraries(rotamer_sidechain stdc++ m ${HDF5_LIBRARIES})

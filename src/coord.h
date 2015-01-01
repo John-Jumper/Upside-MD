@@ -215,13 +215,13 @@ struct Coord
             case OverwriteWritePolicy:
                 for(int no=0; no<N_DIM_OUTPUT; ++no) 
                     for(int nd=0; nd<N_DIM; ++nd) 
-                        deriv_arr[no*N_DIM + nd] = d[no][nd];
+                        deriv_arr[no*N_DIM + nd]  = d[no][nd];
                 break;
 
             case SumWritePolicy:
                 for(int no=0; no<N_DIM_OUTPUT; ++no) 
                     for(int nd=0; nd<N_DIM; ++nd) 
-                        deriv_arr[no*N_DIM + nd] = d[no][nd];
+                        deriv_arr[no*N_DIM + nd] += d[no][nd];
                 break;
         }
     }

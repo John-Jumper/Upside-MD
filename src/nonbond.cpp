@@ -115,7 +115,7 @@ void backbone_pairs(
 #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         float dist_cutoff2 = dist_cutoff*dist_cutoff;
-        vector<AffineCoord> coords;
+        vector<AffineCoord<>> coords;
         coords.reserve(n_res);
         for(int nr=0; nr<n_res; ++nr) 
             coords.emplace_back(rigid_body, ns, params[nr].residue);
@@ -140,7 +140,7 @@ void backbone_pairs(
         }
 
         for(int nr=0; nr<n_res; ++nr) {
-            for(int d=0; d<6; ++d) coords[nr].d[d] *= energy_scale;
+            for(int d=0; d<6; ++d) coords[nr].d[0][d] *= energy_scale;
             coords[nr].flush();
         }
     }

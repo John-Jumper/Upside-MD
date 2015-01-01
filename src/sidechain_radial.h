@@ -6,7 +6,6 @@
 struct SidechainRadialParams {
     CoordPair loc;
     int       restype;
-    float3    sc_ref_pos;
 };
 
 

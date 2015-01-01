@@ -52,11 +52,12 @@ quat_to_rot(
 }
 }
 
+template <int NDIM_OUTPUT=1>
 struct AffineCoord
 {
     float t[3];
-    float U[9];   // store orthogonal matrix for easy application
-    float d[6];   // first three components are translation deriv, second 3 are torque deriv
+    float U[9];    // store orthogonal matrix for easy application
+    float d[NDIM_OUTPUT][6]; // first three components are translation deriv, second 3 are torque deriv
 
     float* deriv_arr;
 
@@ -74,7 +75,7 @@ struct AffineCoord
         for(int d=0; d<4; ++d) q[d] *= norm_factor;
         quat_to_rot(U,q);
 
-        for(int nd=0; nd<6; ++nd) d[nd] = 0.f;
+        for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) for(int nd=0; nd<6; ++nd) d[ndo][nd] = 0.f;
     }
 
     float3 apply(const float3& r) {
@@ -107,34 +108,41 @@ struct AffineCoord
 
     float3 tf3() const {return make_float3(t[0], t[1], t[2]);}
 
-    void add_deriv_at_location(const float3& r_lab_frame, const float3& r_deriv) {
+    void add_deriv_at_location(int ndo, const float3& r_lab_frame, const float3& r_deriv) {
         // add translation derivs
-        d[0] += r_deriv.x;
-        d[1] += r_deriv.y;
-        d[2] += r_deriv.z;
+        d[ndo][0] += r_deriv.x;
+        d[ndo][1] += r_deriv.y;
+        d[ndo][2] += r_deriv.z;
 
         // work relative to the center of the rigid body
         float3 r = r_lab_frame - tf3();
 
         // add torque derivs
-        d[3] += r.y*r_deriv.z - r.z*r_deriv.y;
-        d[4] += r.z*r_deriv.x - r.x*r_deriv.z;
-        d[5] += r.x*r_deriv.y - r.y*r_deriv.x;
+        d[ndo][3] += r.y*r_deriv.z - r.z*r_deriv.y;
+        d[ndo][4] += r.z*r_deriv.x - r.x*r_deriv.z;
+        d[ndo][5] += r.x*r_deriv.y - r.y*r_deriv.x;
+    }
+    void add_deriv_at_location(const float3& r_lab_frame, const float3& r_deriv) {
+        add_deriv_at_location(0, r_lab_frame, r_deriv);
     }
 
-    void add_deriv_and_torque(const float3& r_deriv, const float3& torque) {
-        d[0] += r_deriv.x;
-        d[1] += r_deriv.y;
-        d[2] += r_deriv.z;
+    void add_deriv_and_torque(int ndo, const float3& r_deriv, const float3& torque) {
+        d[ndo][0] += r_deriv.x;
+        d[ndo][1] += r_deriv.y;
+        d[ndo][2] += r_deriv.z;
 
-        d[3] += torque.x;
-        d[4] += torque.y;
-        d[5] += torque.z;
+        d[ndo][3] += torque.x;
+        d[ndo][4] += torque.y;
+        d[ndo][5] += torque.z;
+    }
+    void add_deriv_and_torque(const float3& r_deriv, const float3& torque) {
+        add_deriv_and_torque(0, r_deriv, torque);
     }
 
     void flush() const {
-        for(int nd=0; nd<6; ++nd) 
-            deriv_arr[nd] = d[nd];
+        for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) 
+            for(int nd=0; nd<6; ++nd) 
+                deriv_arr[ndo*6+nd] = d[ndo][nd];
     }
 };
 

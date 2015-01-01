@@ -93,6 +93,10 @@ struct ZFlatBottomParams {
     float     spring_constant;
 };
 
+struct RamaCoordParams {
+    CoordPair atom[5];
+};
+
 // struct is 5 words, padded to 8 words
 typedef struct {
     CoordPair atom[1];

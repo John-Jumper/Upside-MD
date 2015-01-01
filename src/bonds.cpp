@@ -26,6 +26,54 @@ void pos_spring(
     }
 }
 
+void rama_coord(
+        const SysArray output,
+        const CoordArray pos,
+        const RamaCoordParams* params,
+        const int n_term, const int n_system) 
+{
+    for(int ns=0; ns<n_system; ++ns) {
+        for(int nt=0; nt<n_term; ++nt) {
+            MutableCoord<2> rama_pos(output, ns, nt);
+            Coord<3,2> prev_C(pos, ns, params[nt].atom[0]);
+            Coord<3,2> N     (pos, ns, params[nt].atom[1]);
+            Coord<3,2> CA    (pos, ns, params[nt].atom[2]);
+            Coord<3,2> C     (pos, ns, params[nt].atom[3]);
+            Coord<3,2> next_N(pos, ns, params[nt].atom[4]);
+
+            {
+                float3 d1,d2,d3,d4;
+                rama_pos.v[0] = dihedral_germ(
+                        prev_C.f3(), N.f3(), CA.f3(), C.f3(),
+                        d1, d2, d3, d4);
+                prev_C.set_deriv(0,d1);
+                N     .set_deriv(0,d2);
+                CA    .set_deriv(0,d3);
+                C     .set_deriv(0,d4);
+                next_N.set_deriv(0,make_float3(0.f,0.f,0.f));
+            }
+
+            {
+                float3 d2,d3,d4,d5;
+                rama_pos.v[1] = dihedral_germ(
+                        N.f3(), CA.f3(), C.f3(), next_N.f3(),
+                        d2, d3, d4, d5);
+                prev_C.set_deriv(1,make_float3(0.f,0.f,0.f));
+                N     .set_deriv(1,d2);
+                CA    .set_deriv(1,d3);
+                C     .set_deriv(1,d4);
+                next_N.set_deriv(1,d5);
+            }
+
+            prev_C.flush();
+            N     .flush();
+            CA    .flush();
+            C     .flush();
+            next_N.flush();
+        }
+    }
+}
+
 
 template <typename CoordT>
 inline void dist_spring_body(

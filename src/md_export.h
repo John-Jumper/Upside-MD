@@ -25,6 +25,11 @@ void angle_spring(
         const CoordArray pos,
         const AngleSpringParams* params,
         int n_terms, int n_system);
+void rama_coord(
+        const SysArray output,
+        const CoordArray pos,
+        const RamaCoordParams* params,
+        const int n_term, const int n_system);
 void dihedral_spring(
         const CoordArray pos,
         const DihedralSpringParams* params,
