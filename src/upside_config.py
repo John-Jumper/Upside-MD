@@ -842,7 +842,8 @@ def parse_segments(s):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Prepare input file')
+    parser = argparse.ArgumentParser(description='Prepare input file',
+            usage='use "%(prog)s --help" for more information')
     parser.add_argument('--fasta', required=True,
             help='[required] FASTA sequence file')
     parser.add_argument('--n-system', type=int, default=1, required=False, 
