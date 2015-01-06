@@ -1,17 +1,7 @@
 #ifndef MD_EXPORT_H
 #define MD_EXPORT_H
 
-#include "md.h"
 #include "coord.h"
-
-void
-ornstein_uhlenbeck_thermostat(
-        SysArray mom,
-        const float mom_scale,
-        const float noise_scale,
-        int seed,
-        int n_atoms,
-        int n_round, int n_system);
 
 void
 integration_stage(

@@ -3,10 +3,49 @@
 #include "coord.h"
 #include "timing.h"
 #include <map>
+#include <algorithm>
 
 using namespace h5;
 
 using namespace std;
+
+void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn)
+{
+    auto& m = node_creation_map();
+
+    // No string in m can be a prefix of any other string in m, since 
+    //   the function node to call is determined by checking string prefixes
+    for(const auto& kv : m) {
+        if(is_prefix(kv.first, name_prefix)) {
+            auto s = std::string("Internal error.  Type name ") + kv.first + " is a prefix of " + name_prefix + ".";
+            fprintf(stderr, "%s\n", s.c_str());
+            throw s;
+        }
+        if(is_prefix(name_prefix, kv.first)) {
+            auto s = std::string("Internal error.  Type name ") + name_prefix + " is a prefix of " + kv.first + ".";
+            fprintf(stderr, "%s\n", s.c_str());
+            throw s;
+        }
+    }
+
+    m[name_prefix] = fcn;
+}
+
+bool is_prefix(const std::string& s1, const std::string& s2) {
+    return s1 == s2.substr(0,s1.size());
+}
+
+void check_elem_width(const CoordNode& node, int expected_elem_width) {
+    if(node.elem_width != expected_elem_width) 
+        throw std::string("expected argument with width ") + std::to_string(expected_elem_width) + 
+            " but received argument with width " + std::to_string(node.elem_width);
+}
+
+void check_arguments_length(const ArgList& arguments, int n_expected) {
+    if(int(arguments.size()) != n_expected) 
+        throw std::string("expected ") + std::to_string(n_expected) + 
+            " arguments but got " + std::to_string(arguments.size());
+}
 
 void Pos::propagate_deriv() {
     Timer timer(string("pos_deriv"));

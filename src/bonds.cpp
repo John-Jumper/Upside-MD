@@ -1,11 +1,44 @@
 #include "force.h"
-#include <string>
 #include "timing.h"
-#include "md.h"
 #include "coord.h"
 
 using namespace h5;
 using namespace std;
+
+struct DihedralSpringParams {
+    CoordPair atom[4];
+    float equil_dihedral;
+    float spring_constant;
+};
+
+struct AngleSpringParams {
+    CoordPair atom[3];
+    float equil_dp;
+    float spring_constant;
+};
+
+struct DistSpringParams {
+    CoordPair atom[2];
+    float equil_dist;
+    float spring_constant;
+};
+
+struct ZFlatBottomParams {
+    CoordPair atom;
+    float     z0;
+    float     radius;
+    float     spring_constant;
+};
+
+struct RamaCoordParams {
+    CoordPair atom[5];
+};
+
+struct PosSpringParams {
+    CoordPair atom[1];
+    float x,y,z;
+    float spring_constant;
+};
 
 template <typename CoordT>
 inline void pos_spring_body(

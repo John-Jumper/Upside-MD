@@ -22,29 +22,26 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
-    dihedral_range.cpp
-    backbone_dependent_sidechain.cpp
-    sidechain_radial.cpp
-    sidechain.cpp 
-    h5_support.cpp 
+    main.cpp
     force.cpp 
+    string_method.cpp
+    sidechain_radial.cpp
     nonbond.cpp 
-    md.cpp 
+    steric.cpp
+    bonds.cpp 
+    backbone_dependent_sidechain.cpp
+    hbond.cpp 
     hmm.cpp 
     eig.cpp 
-    hbond.cpp 
-    bonds.cpp 
+    dihedral_range.cpp
+    md.cpp 
     timing.cpp 
-    steric.cpp
-    main.cpp 
     thermostat.cpp
-    string.cpp)
+    h5_support.cpp 
+    )
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIRS})
 target_link_libraries(upside stdc++ ${HDF5_LIBRARIES})
-
-add_library(sidechain_interaction SHARED sidechain_interaction.cpp)
-target_link_libraries(sidechain_interaction stdc++)
 
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -69,3 +66,4 @@ python_executable(support attr_overview.py)
 
 add_executable(rotamer_sidechain generate_from_rotamer.cpp test_rotamer.cpp)
 target_link_libraries(rotamer_sidechain stdc++ m ${HDF5_LIBRARIES})
+set_target_properties(rotamer_sidechain PROPERTIES EXCLUDE_FROM_ALL 1)

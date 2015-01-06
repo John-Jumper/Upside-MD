@@ -1,11 +1,16 @@
 #include "force.h"
-#include <string>
 #include "timing.h"
-#include "md.h"
 #include "coord.h"
 
 using namespace h5;
 using namespace std;
+
+struct DihedralRangeParams {
+    CoordPair atom[4];
+    float  angle_range[2];
+    float  scale;
+    float  energy;
+};
 
 void dihedral_angle_range(
         const CoordArray   pos,
@@ -63,7 +68,7 @@ struct DihedralRange : public DerivComputation
 {
     int n_elem;
     CoordNode& pos;
-    vector<DihedralRangeParams> params; // in sidechain_radial.h 
+    vector<DihedralRangeParams> params;
     DihedralRange(hid_t grp, CoordNode& pos_):
         n_elem(get_dset_size<2>(grp, "id")[0]),
         pos(pos_),

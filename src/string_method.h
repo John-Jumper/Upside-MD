@@ -2,7 +2,6 @@
 #define STRING_H
 
 #include "coord.h"
-#include <vector>
 
 struct DihedralStringSystem {
     std::vector<int> id;

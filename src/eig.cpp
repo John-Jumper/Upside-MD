@@ -7,12 +7,10 @@
 // Computations, chapters 5 and 8
 
 #include "force.h"
-#include <string>
 #include "timing.h"
-#include <cmath>
 #include "coord.h"
-#include "md.h"
 #include "affine.h"
+
 using namespace h5;
 using namespace std;
 
@@ -20,6 +18,11 @@ using namespace std;
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #endif
+
+struct AffineAlignmentParams {
+    CoordPair atom[3];
+    float     ref_geom[9];
+} ;
 
 namespace {
 float house(

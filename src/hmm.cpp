@@ -1,15 +1,16 @@
 #include "force.h"
-#include <string>
 #include "timing.h"
-#include "md.h"
 #include "coord.h"
 
-#include <vector>
 using namespace h5;
 using namespace std;
 
 #define HMM_NORMALIZATION_INTERVAL 4
 #define N_STATE 5
+
+struct HMMParams {
+    CoordPair atom[5];
+};
 
 namespace {
 

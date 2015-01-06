@@ -9,6 +9,23 @@
 using namespace h5;
 using namespace std;
 
+struct VirtualParams {
+    CoordPair atom[3];
+    float bond_length;
+};
+
+struct VirtualHBondParams {
+    CoordPair id;
+    unsigned short residue_id;
+    float  helix_energy_bonus;
+};
+
+struct NH_CO_Params {
+    float H_bond_length, N_bond_length;
+    unsigned short Cprev, N, CA, C, Nnext;
+    unsigned short H_slots[9];
+    unsigned short O_slots[9];
+};
 
 
 namespace {

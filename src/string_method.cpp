@@ -1,4 +1,5 @@
-#include "string.h"
+#include "force.h"
+#include "string_method.h"
 #include "timing.h"
 #include <Eigen/Sparse>
 #include <algorithm>

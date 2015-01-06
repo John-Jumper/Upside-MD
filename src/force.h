@@ -2,13 +2,20 @@
 #define FORCE_H
 
 #include "h5_support.h"
-#include "md.h"
 #include <vector>
 #include <memory>
 #include <string>
 #include "coord.h"
 #include <functional>
+#include <initializer_list>
 #include <map>
+
+struct DerivRecord {
+    unsigned short atom, loc, output_width, unused;
+    DerivRecord(unsigned short atom_, unsigned short loc_, unsigned short output_width_):
+        atom(atom_), loc(loc_), output_width(output_width_) {}
+};
+
 
 struct SlotMachine
 {
@@ -33,6 +40,40 @@ struct SlotMachine
 
     SysArray accum_array() { return SysArray(accum.data(), offset); }
 };
+
+
+struct AutoDiffParams {
+    unsigned char  n_slots1, n_slots2;
+    unsigned short slots1[6];      
+    unsigned short slots2[5];        
+
+    AutoDiffParams(
+            const std::initializer_list<unsigned short> &slots1_,
+            const std::initializer_list<unsigned short> &slots2_):
+        n_slots1(slots1_.size()), n_slots2(slots2_.size()) 
+    {
+        unsigned loc1=0;
+        for(auto i: slots1_) slots1[loc1++] = i;
+        while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
+
+        unsigned loc2=0;
+        for(auto i: slots2_) slots1[loc2++] = i;
+        while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
+    }
+
+    explicit AutoDiffParams(const std::initializer_list<unsigned short> &slots1_):
+        n_slots1(slots1_.size()), n_slots2(0u)
+    { 
+        unsigned loc1=0;
+        for(auto i: slots1_) slots1[loc1++] = i;
+        while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
+
+        unsigned loc2=0;
+        // for(auto i: slots2_) slots1[loc2++] = i;
+        while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
+    }
+
+} ;  // struct for implementing reverse autodifferentiation
 
 struct DerivComputation 
 {
@@ -115,9 +156,8 @@ struct DerivEngine
 
     template <typename T>
     T& get_computation(const std::string& name) {
-        return *dynamic_cast<T*>(get(name).computation.get());
+        return dynamic_cast<T&>(*get(name).computation.get());
     }
-
 
     void compute();
     enum IntegratorType {Verlet=0, Predescu=1};
@@ -133,43 +173,10 @@ typedef std::function<DerivComputation*(hid_t, const ArgList&)> NodeCreationFunc
 typedef std::map<std::string, NodeCreationFunction> NodeCreationMap;
 NodeCreationMap& node_creation_map(); 
 
-static bool is_prefix(const std::string& s1, const std::string& s2) {
-    return s1 == s2.substr(0,s1.size());
-}
-
-static void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn) 
-{
-    auto& m = node_creation_map();
-
-    // No string in m can be a prefix of any other string in m, since 
-    //   the function node to call is determined by checking string prefixes
-    for(const auto& kv : m) {
-        if(is_prefix(kv.first, name_prefix)) {
-            auto s = std::string("Internal error.  Type name ") + kv.first + " is a prefix of " + name_prefix + ".";
-            fprintf(stderr, "%s\n", s.c_str());
-            throw s;
-        }
-        if(is_prefix(name_prefix, kv.first)) {
-            auto s = std::string("Internal error.  Type name ") + name_prefix + " is a prefix of " + kv.first + ".";
-            fprintf(stderr, "%s\n", s.c_str());
-            throw s;
-        }
-    }
-
-    m[name_prefix] = fcn;
-}
-
-static void check_elem_width(const CoordNode& node, int expected_elem_width) {
-    if(node.elem_width != expected_elem_width) 
-        throw std::string("expected argument with width ") + std::to_string(expected_elem_width) + 
-            " but received argument with width " + std::to_string(node.elem_width);
-}
-
-static void check_arguments_length(const ArgList& arguments, int n_expected) {
-    if(int(arguments.size()) != n_expected) 
-        throw std::string("expected ") + std::to_string(n_expected) + 
-            " arguments but got " + std::to_string(arguments.size());
-}
+bool is_prefix(const std::string& s1, const std::string& s2);
+void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn);
+void check_elem_width(const CoordNode& node, int expected_elem_width);
+void check_arguments_length(const ArgList& arguments, int n_expected);
 
 template <typename NodeClass, int n_args>
 struct RegisterNodeType {
@@ -205,46 +212,52 @@ struct RegisterNodeType<NodeClass,2> {
         add_node_creation_function(name_prefix, f);
     }
 };
-// Pos should not be registered, since it is of a special type
-
-/*
-#include "random.h"
-using namespace std;
 
 
-template <typename CoordT, typename FuncT>
-void finite_difference(FuncT& f, CoordT& x, float* expected, float eps = 1e-2) 
+template <int my_width, int width1, int width2>
+void reverse_autodiff(
+        const SysArray accum,
+        SysArray deriv1,
+        SysArray deriv2,
+        const DerivRecord* tape,
+        const AutoDiffParams* p,
+        int n_tape,
+        int n_atom, 
+        int n_system)
 {
-    int ndim_output = decltype(f(x))::n_dim;
-    auto y = x;
-    int ndim_input  = decltype(y)::n_dim;
+    for(int ns=0; ns<n_system; ++ns) {
+        std::vector<TempCoord<my_width>> sens(n_atom);
+        for(int nt=0; nt<n_tape; ++nt) {
+            auto tape_elem = tape[nt];
+            for(int rec=0; rec<tape_elem.output_width; ++rec) {
+                auto val = StaticCoord<my_width>(accum, ns, tape_elem.loc + rec);
+                for(int d=0; d<my_width; ++d)
+                    sens[tape_elem.atom].v[d] += val.v[d];
+            }
+        }
 
-    vector<float> ret(ndim_output*ndim_input);
-    for(int d=0; d<ndim_input; ++d) {
-        CoordT x_prime1 = x; x_prime1.v[d] += eps;
-        CoordT x_prime2 = x; x_prime2.v[d] -= eps;
+        for(int na=0; na<n_atom; ++na) {
+            if(width1) {
+                for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
+                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                        MutableCoord<width1> c(deriv1, ns, p[na].slots1[nsl]+sens_dim);
+                        for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
+                        c.flush();
+                    }
+                }
+            }
 
-        auto val1 = f(x_prime1);
-        auto val2 = f(x_prime2);
-        for(int no=0; no<ndim_output; ++no) ret[no*ndim_input+d] = (val1.v[no]-val2.v[no]) / (2*eps);
-    }
-    float z = 0.f;
-    for(int no=0; no<ndim_output; ++no) {
-        printf("exp:");
-        for(int ni=0; ni<ndim_input; ++ni) printf(" % f", expected[no*ndim_input+ni]);
-        printf("\n");
-
-        printf("fd: ");
-        for(int ni=0; ni<ndim_input; ++ni) printf(" % f", ret     [no*ndim_input+ni]);
-        printf("\n\n");
-        for(int ni=0; ni<ndim_input; ++ni) {
-            float t = expected[no*ndim_input+ni]-ret[no*ndim_input+ni];
-            z += t*t;
+            if(width2) {
+                for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
+                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                        MutableCoord<width2> c(deriv2, ns, p[na].slots2[nsl]+sens_dim);
+                        for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
+                        c.flush();
+                    }
+                }
+            }
         }
     }
-    printf("rmsd % f\n\n\n", sqrtf(z/ndim_output/ndim_input));
-
 }
-*/
 
 #endif

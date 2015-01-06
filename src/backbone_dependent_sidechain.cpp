@@ -1,11 +1,8 @@
 #include "force.h"
-#include <string>
 #include "timing.h"
 #include "affine.h"
 #include <vector>
 
-#include "md.h"
-#include "coord.h"
 using namespace std;
 using namespace h5;
 

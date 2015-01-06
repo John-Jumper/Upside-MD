@@ -1,13 +1,15 @@
 #include "force.h"
-#include <string>
 #include "timing.h"
 #include "coord.h"
 #include "affine.h"
-#include <cmath>
-#include <vector>
+#include <algorithm>
 
 using namespace std;
 using namespace h5;
+
+struct AffineParams {
+    CoordPair residue;
+};
 
 struct PackedRefPos {
     int32_t n_atoms;
