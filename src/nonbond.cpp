@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
 #include "affine.h"
@@ -157,7 +157,7 @@ void backbone_pairs(
 }
 
 
-struct BackbonePairs : public DerivComputation
+struct BackbonePairs : public PotentialNode
 {
     int n_residue;
     CoordNode& alignment;
@@ -191,7 +191,7 @@ struct BackbonePairs : public DerivComputation
         for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("backbone_pairs"));
         backbone_pairs(
                 alignment.coords(), 

@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
 
@@ -64,7 +64,7 @@ void pos_spring(
     }
 }
 
-struct PosSpring : public DerivComputation
+struct PosSpring : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -87,7 +87,7 @@ struct PosSpring : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("pos_spring")); 
         pos_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
 };
@@ -193,7 +193,7 @@ struct RamaCoord : public CoordNode
                 AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("rama_coord"));
         rama_coord(
                 coords().value,
@@ -247,7 +247,7 @@ void dist_spring(
 }
 
 
-struct DistSpring : public DerivComputation
+struct DistSpring : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -269,7 +269,7 @@ struct DistSpring : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("dist_spring"));
         dist_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
 };
@@ -297,7 +297,7 @@ void z_flat_bottom_spring(
 }
 
 
-struct ZFlatBottom : public DerivComputation
+struct ZFlatBottom : public PotentialNode
 {
     int n_term;
     CoordNode& pos;
@@ -321,7 +321,7 @@ struct ZFlatBottom : public DerivComputation
         for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].atom);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("z_flat_bottom"));
         z_flat_bottom_spring(pos.coords(), params.data(), n_term, pos.n_system);
     }
@@ -367,7 +367,7 @@ void angle_spring(
 }
 
 
-struct AngleSpring : public DerivComputation
+struct AngleSpring : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -389,7 +389,7 @@ struct AngleSpring : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("angle_spring"));
         angle_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
 };
@@ -442,7 +442,7 @@ void dynamic_dihedral_spring(
 }
 
 
-struct DynamicDihedralSpring : public DerivComputation
+struct DynamicDihedralSpring : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -468,7 +468,7 @@ struct DynamicDihedralSpring : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("dynamic_dihedral_spring"));
         dynamic_dihedral_spring(pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
     }
@@ -495,7 +495,7 @@ void dihedral_spring(
     }
 }
 
-struct DihedralSpring : public DerivComputation
+struct DihedralSpring : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -517,7 +517,7 @@ struct DihedralSpring : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("dihedral_spring"));
         dihedral_spring(pos.coords(), params.data(), n_elem, pos.n_system);
     }

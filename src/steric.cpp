@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include <string>
 #include "coord.h"
 #include "affine.h"
@@ -298,7 +298,7 @@ void steric_pairs(
 }
 
 
-struct StericInteraction : public DerivComputation
+struct StericInteraction : public PotentialNode
 {
     int n_res;
     CoordNode&  alignment;
@@ -396,7 +396,7 @@ struct StericInteraction : public DerivComputation
             for(int nr=0; nr<n_res; ++nr) alignment.slot_machine.add_request(1,params[nr].loc);
         }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("steric"));
         steric_pairs(
                 alignment.coords(),

@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "affine.h"
 #include <vector>
@@ -154,7 +154,7 @@ struct BackboneDependentPoint : public CoordNode
                 AutoDiffParams({p.rama_residue.slot}, {p.alignment_residue.slot}));
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("backbone_point"));
         BackbonePointMap bb_map;
         bb_map.n_bin = n_bin;

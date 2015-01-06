@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "md_export.h"
 #include "coord.h"
 #include "timing.h"
@@ -89,10 +89,10 @@ void DerivEngine::compute() {
     // for each BFS depth, each computation gets the stream ID of its parent
     // if the parents have multiple streams or another (sibling) computation has already taken the stream id,
     //   the computation gets a new stream ID and a synchronization wait event
-    // if the node has multiple children, it must record a compute_germ event for synchronization of the children
-    // the compute_deriv must run in the same stream as compute_germ
+    // if the node has multiple children, it must record a compute_value event for synchronization of the children
+    // the compute_deriv must run in the same stream as compute_value
     // if a node has multiple parents, it must record an event for compute_deriv
-    // pos_node is special since its compute_germ is empty
+    // pos_node is special since its compute_value is empty
 
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
@@ -106,7 +106,7 @@ void DerivEngine::compute() {
                         return exec_lvl!=-1 && exec_lvl!=lvl; // do not execute at same level as your parents
                         });
                 if(all_parents) {
-                    n.computation->compute_germ();
+                    n.computation->compute_value();
                     n.germ_exec_level = lvl;
                 }
             }

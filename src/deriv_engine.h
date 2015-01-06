@@ -77,8 +77,8 @@ struct AutoDiffParams {
 
 struct DerivComputation 
 {
-    virtual void compute_germ()    {};
-    virtual void propagate_deriv() {};
+    virtual void compute_value()   =0;
+    virtual void propagate_deriv() =0;
 };
 
 struct CoordNode : public DerivComputation
@@ -98,7 +98,13 @@ struct CoordNode : public DerivComputation
 };
 
 
-struct HBondCounter : public DerivComputation {
+struct PotentialNode : public DerivComputation
+{
+    virtual void propagate_deriv() {};
+};
+
+
+struct HBondCounter : public PotentialNode {
     float n_hbond;
     HBondCounter(): n_hbond(-1.f) {};
 };
@@ -114,6 +120,7 @@ struct Pos : public CoordNode
         n_atom(n_atom_), deriv(3*n_atom*n_system, 0.f)
     {}
 
+    virtual void compute_value() {};
     virtual void propagate_deriv();
     CoordArray coords() {
         return CoordArray(SysArray(output.data(), n_atom*3), slot_machine.accum_array());

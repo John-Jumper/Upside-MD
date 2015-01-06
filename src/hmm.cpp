@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
 
@@ -298,7 +298,7 @@ void hmm(
 }
 
 
-struct HMMPot : public DerivComputation
+struct HMMPot : public PotentialNode
 {
     int n_residue;
     CoordNode& pos;
@@ -329,7 +329,7 @@ struct HMMPot : public DerivComputation
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(1, params[i].atom[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("rama_hmm"));
         hmm(pos.coords(), params.data(),
                 trans_matrices.data(), n_bin, rama_maps.data(), 

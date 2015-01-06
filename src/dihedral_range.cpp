@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
 
@@ -64,7 +64,7 @@ void dihedral_angle_range(
 }
 
 
-struct DihedralRange : public DerivComputation
+struct DihedralRange : public PotentialNode
 {
     int n_elem;
     CoordNode& pos;
@@ -91,7 +91,7 @@ struct DihedralRange : public DerivComputation
                 pos.slot_machine.add_request(1, params[i].atom[j]);
 
     }
-    virtual void compute_germ() {
+    virtual void compute_value() {
             Timer timer(string("dihedral_range"));
             dihedral_angle_range(pos.coords(), params.data(),
                            n_elem, pos.n_system);

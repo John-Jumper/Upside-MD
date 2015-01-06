@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include <string>
 #include "timing.h"
 #include <math.h>
@@ -316,7 +316,7 @@ struct Infer_H_O : public CoordNode
         return CoordArray(SysArray(output.data(), n_virtual*6), slot_machine.accum_array());
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("infer_H_O"));
         infer_HN_OC_pos_and_dir(
                 SysArray(output.data(),n_virtual*6), pos.coords(), 
@@ -374,7 +374,7 @@ struct HBondEnergy : public HBondCounter
         for(auto &p: acc_params) infer.slot_machine.add_request(1, p.id);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("hbond_energy"));
         n_hbond = (1.f/hbond_energy) * count_hbond(
                 infer.coords(), 

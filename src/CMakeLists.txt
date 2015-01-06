@@ -23,7 +23,7 @@ include_directories(SYSTEM "include")
 
 add_executable (upside
     main.cpp
-    force.cpp 
+    deriv_engine.cpp 
     string_method.cpp
     sidechain_radial.cpp
     nonbond.cpp 

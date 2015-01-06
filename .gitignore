@@ -2,6 +2,7 @@ run/
 bin/
 data/
 analysis/
+doc/
 *~
 *.swp
 *.vtf

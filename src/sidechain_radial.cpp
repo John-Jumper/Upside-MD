@@ -1,4 +1,4 @@
-#include "force.h"
+#include "deriv_engine.h"
 #include <string>
 #include "timing.h"
 #include "coord.h"
@@ -120,7 +120,7 @@ void contact_energy(
 }
 
 
-struct SidechainRadialPairs : public DerivComputation
+struct SidechainRadialPairs : public PotentialNode
 {
     map<string,int> name_map;
     int n_residue;
@@ -169,7 +169,7 @@ struct SidechainRadialPairs : public DerivComputation
         for(size_t nr=0; nr<params.size(); ++nr) bb_point.slot_machine.add_request(1, params[nr].loc);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("radial_pairs"));
         radial_pairs(
                 bb_point.coords(), 
@@ -178,7 +178,7 @@ struct SidechainRadialPairs : public DerivComputation
     }
 };
 
-struct ContactEnergy : public DerivComputation
+struct ContactEnergy : public PotentialNode
 {
     int n_contact;
     CoordNode& alignment;
@@ -212,7 +212,7 @@ struct ContactEnergy : public DerivComputation
                 alignment.slot_machine.add_request(1, params[i].loc[j]);
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("contact_energy"));
         contact_energy(
                 alignment.coords(), params.data(), 

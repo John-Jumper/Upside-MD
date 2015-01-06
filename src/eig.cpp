@@ -6,7 +6,7 @@
 // Linear algebra based on algorithms in Golub and van Loan, Matrix
 // Computations, chapters 5 and 8
 
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
 #include "affine.h"
@@ -504,7 +504,7 @@ struct AffineAlignment : public CoordNode
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
-    virtual void compute_germ() {
+    virtual void compute_value() {
         Timer timer(string("affine_alignment"));
         affine_alignment(coords().value, pos.coords(), params.data(), 
                 n_elem, pos.n_system);}

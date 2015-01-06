@@ -1,6 +1,6 @@
 #include "h5_support.h"
 #include <tclap/CmdLine.h>
-#include "force.h"
+#include "deriv_engine.h"
 #include "timing.h"
 #include "thermostat.h"
 #include <chrono>
