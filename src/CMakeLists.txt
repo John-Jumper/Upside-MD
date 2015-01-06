@@ -22,6 +22,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    dihedral_range.cpp
     backbone_dependent_sidechain.cpp
     sidechain_radial.cpp
     sidechain.cpp 
