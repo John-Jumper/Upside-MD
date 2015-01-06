@@ -1,13 +1,81 @@
+#include "force.h"
+#include <string>
+#include "timing.h"
+#include "coord.h"
 #include "md_export.h"
 #include "affine.h"
 #include <cmath>
 #include "md.h"
 #include "affine.h"
-#include "sidechain.h"
 
 #include <random>
 
 using namespace std;
+using namespace h5;
+
+struct SidechainParams {
+    CoordPair res;
+    int restype; // index into sidechain array
+};
+
+
+struct Density3D {
+    const float3  corner;
+    const float3  side_length;
+    const float   bin_scale;
+    const int     nx,ny,nz;
+    const std::vector<float4> data;
+
+    Density3D(
+            const float3 corner_,
+            const float bin_scale_,
+            const int nx_, const int ny_, const int nz_,
+            const std::vector<float4> data_):
+       corner(corner_), 
+       side_length(make_float3((nx_-1)/bin_scale_*(1-1e-6),(ny_-1)/bin_scale_*(1-1e-6),(nz_-1)/bin_scale_*(1-1e-6))), 
+       bin_scale(bin_scale_), nx(nx_), ny(ny_), nz(nz_), data(data_)
+    { if(nx*ny*nz != (int)data.size()) throw std::string("improper side length"); }
+
+    float4 read_value(float3 point) const; 
+};
+
+
+struct Sidechain {
+    float3 density_center;     float density_radius;
+    float3 interaction_center; float interaction_radius;
+
+    // .w component is weight/probability of each center (sum to number of sidechain atoms)
+    std::vector<float4> density_kernel_centers;
+    Density3D interaction_pot;
+
+    Sidechain(const std::vector<float4>& density_kernel_centers_, const Density3D& interaction_pot_, float energy_cutoff=0.f):
+        density_kernel_centers(density_kernel_centers_), interaction_pot(interaction_pot_) {
+            density_center = make_float3(0.f,0.f,0.f);
+            for(auto& x: density_kernel_centers) density_center += xyz(x);
+            if(density_kernel_centers.size()) density_center *= 1.f/density_kernel_centers.size();
+
+            density_radius = 0.f;
+            for(auto& x: density_kernel_centers) {
+                float r = sqrtf(mag2(density_center-xyz(x)));
+                if(r>density_radius) density_radius = r;
+            }
+
+            auto &p = interaction_pot;
+            interaction_center = p.corner + 0.5*p.side_length;
+            interaction_radius = 0.f;
+
+            for(int ix=0; ix<p.nx; ++ix) {
+                for(int iy=0; iy<p.ny; ++iy) {
+                    for(int iz=0; iz<p.nz; ++iz) {
+                        auto pt = p.corner + make_float3(ix,iy,iz) * (1./p.bin_scale);
+                        float r = sqrtf(mag2(pt-interaction_center));
+                        if(r > interaction_radius && fabsf(p.data[ix*p.ny*p.nz + iy*p.nz + iz].w) > energy_cutoff)
+                            interaction_radius = r;
+                    }
+                }
+            }
+        };
+};
 
 float4 Density3D::read_value(float3 point) const {
     float3 shifted_point = point - corner;
@@ -170,3 +238,109 @@ void sidechain_pairs(
         }
     }
 }
+
+
+struct SidechainInteraction : public DerivComputation 
+{
+    int n_residue;
+    CoordNode&  alignment;
+    vector<Sidechain> sidechain_params;
+    float             dist_cutoff;
+    float             energy_cutoff;
+    map<string,int>   name_map;
+    vector<float>     density_data;
+    vector<float4>    center_data;
+    vector<SidechainParams> params;
+
+    SidechainInteraction(hid_t grp, CoordNode& alignment_):
+        n_residue(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
+        energy_cutoff(h5::read_attribute<float>(grp, "./sidechain_data", "energy_cutoff")),
+        params(n_residue)
+    {
+        traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
+                if(name_map.find(s) == end(name_map)) {
+                    sidechain_params.push_back(
+                        parse_sidechain(energy_cutoff,
+                            h5_obj(H5Gclose, 
+                                H5Gopen2(grp, (string("sidechain_data/")+s).c_str(), H5P_DEFAULT)).get()));
+                    name_map[s] = sidechain_params.size()-1;
+                }
+                params[nr].res.index  = nr;
+                params[nr].restype = name_map[s];
+            });
+
+        // find longest possible interaction
+        float max_interaction_radius = 0.f;
+        float max_density_radius = 0.f;
+        for(auto &sc: sidechain_params) {
+            // FIXME is the sidechain data in the correct reference frame
+            float interaction_maxdist = sc.interaction_radius+mag(sc.interaction_center);
+            float density_maxdist = sc.density_radius+mag(sc.density_center);
+            max_interaction_radius = max(max_interaction_radius, interaction_maxdist);
+            max_density_radius = max(max_density_radius, density_maxdist);
+            printf("%4.1f %4.1f %4.1f %4.1f\n", 
+                    mag(sc.interaction_center), sc.interaction_radius, 
+                    mag(sc.density_center), sc.density_radius);
+        }
+        dist_cutoff = max_interaction_radius + max_density_radius;
+        printf("total_cutoff: %4.1f\n", dist_cutoff);
+
+        if(n_residue != alignment.n_elem) throw string("invalid restype array");
+        for(int nr=0; nr<n_residue; ++nr) alignment.slot_machine.add_request(1,params[nr].res);
+    }
+
+    static Sidechain parse_sidechain(float energy_cutoff, hid_t grp) 
+    {
+        using namespace h5;
+        int nkernel = get_dset_size<2>(grp, "kernels")[0];
+        check_size(grp, "kernels", nkernel, 4);
+
+        auto kernels = vector<float4>(nkernel);
+
+        traverse_dset<2,float>(grp, "kernels", [&](size_t nk, size_t dim, float v) {
+                switch(dim) {
+                case 0: kernels[nk].x = v; break;
+                case 1: kernels[nk].y = v; break;
+                case 2: kernels[nk].z = v; break;
+                case 3: kernels[nk].w = v; break;
+                }});
+
+        auto dims = get_dset_size<4>(grp, "interaction");
+        check_size(grp, "interaction", dims[0], dims[1], dims[2], 4);
+
+        auto data = vector<float4>(dims[0]*dims[1]*dims[2]);
+        traverse_dset<4,float>(grp, "interaction", [&](size_t i, size_t j, size_t k, size_t dim, float v) {
+                int idx = i*dims[1]*dims[2] + j*dims[2] + k;
+                switch(dim) {
+                case 0: data[idx].x = v; break;
+                case 1: data[idx].y = v; break;
+                case 2: data[idx].z = v; break;
+                case 3: data[idx].w = v; break;
+                }});
+
+        check_size(grp, "corner_location", 3);
+        float3 corner;
+        traverse_dset<1,float>(grp, "corner_location", [&](size_t dim, float v) {
+                switch(dim) {
+                case 0: corner.x = v; break;
+                case 1: corner.y = v; break;
+                case 2: corner.z = v; break;
+                }});
+
+        auto bin_side_length = read_attribute<float>(grp, "interaction", "bin_side_length");
+
+        return Sidechain(
+                kernels, 
+                Density3D(corner, 1.f/bin_side_length, dims[0],dims[1],dims[2], data),
+                energy_cutoff);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("sidechain_pairs"));
+        sidechain_pairs(
+                alignment.coords(), 
+                sidechain_params.data(), params.data(), 
+                dist_cutoff, n_residue, alignment.n_system);
+    }
+};
+static RegisterNodeType<SidechainInteraction,1> sidechain_node("sidechain");

@@ -6,11 +6,15 @@
 // Linear algebra based on algorithms in Golub and van Loan, Matrix
 // Computations, chapters 5 and 8
 
+#include "force.h"
+#include <string>
+#include "timing.h"
 #include <cmath>
 #include "coord.h"
-#include "md_export.h"
 #include "md.h"
 #include "affine.h"
+using namespace h5;
+using namespace std;
 
 #if 0
 #include <Eigen/Dense>
@@ -473,3 +477,41 @@ affine_reverse_autodiff(
         }
     }
 }
+
+
+struct AffineAlignment : public CoordNode
+{
+    CoordNode& pos;
+    int n_system;
+    vector<AffineAlignmentParams> params;
+    vector<AutoDiffParams> autodiff_params;
+
+    AffineAlignment(hid_t grp, CoordNode& pos_):
+        CoordNode(pos_.n_system, get_dset_size<2>(grp, "atoms")[0], 7),
+        pos(pos_), params(n_elem)
+    {
+        int n_dep = 3;
+        check_size(grp, "atoms",    n_elem, n_dep);
+        check_size(grp, "ref_geom", n_elem, n_dep,3);
+
+        traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params[i].atom[j].index=x;});
+        traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params[i].ref_geom[na*n_dep+d]=x;});
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(7, params[i].atom[j]);
+        for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("affine_alignment"));
+        affine_alignment(coords().value, pos.coords(), params.data(), 
+                n_elem, pos.n_system);}
+
+    virtual void propagate_deriv() {
+        Timer timer(string("affine_alignment_deriv"));
+        affine_reverse_autodiff(
+                coords().value, coords().deriv, pos.slot_machine.accum_array(), 
+                slot_machine.deriv_tape.data(), autodiff_params.data(), 
+                slot_machine.deriv_tape.size(), 
+                n_elem, pos.n_system);}
+};
+static RegisterNodeType<AffineAlignment,1>_8("affine_alignment");

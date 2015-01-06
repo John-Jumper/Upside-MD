@@ -1,10 +1,18 @@
-#include "md_export.h"
+#include "force.h"
+#include <string>
+#include "timing.h"
 #include "coord.h"
 #include "affine.h"
 #include <cmath>
 #include <vector>
 
 using namespace std;
+using namespace h5;
+
+struct PackedRefPos {
+    int32_t n_atoms;
+    uint32_t pos[4];
+};
 
 uint32_t
 pack_atom(const float x[3]) {
@@ -145,3 +153,48 @@ void backbone_pairs(
         }
     }
 }
+
+
+struct BackbonePairs : public DerivComputation
+{
+    int n_residue;
+    CoordNode& alignment;
+    vector<AffineParams> params;
+    vector<PackedRefPos> ref_pos;
+    float energy_scale;
+    float dist_cutoff;
+
+    BackbonePairs(hid_t grp, CoordNode& alignment_):
+        n_residue(get_dset_size<1>(grp, "id")[0]), alignment(alignment_), 
+        params(n_residue), ref_pos(n_residue),
+        energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
+        dist_cutoff (read_attribute<float>(grp, ".", "dist_cutoff"))
+    {
+        check_elem_width(alignment, 7);
+
+        check_size(grp, "id",      n_residue);
+        check_size(grp, "ref_pos", n_residue, 4, 3);
+
+        traverse_dset<1,int  >(grp, "id", [&](size_t nr, int x) {params[nr].residue.index = x;});
+
+        // read and pack reference positions
+        float tmp[3];
+        traverse_dset<3,float>(grp, "ref_pos", [&](size_t nr, size_t na, size_t d, float x) {
+                tmp[d] = x;
+                if(d==2) ref_pos[nr].pos[na] = pack_atom(tmp);
+                });
+        for(auto &rp: ref_pos) 
+            rp.n_atoms = count_if(rp.pos, rp.pos+4, [](uint32_t i) {return i != uint32_t(-1);});
+
+        for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("backbone_pairs"));
+        backbone_pairs(
+                alignment.coords(), 
+                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
+                alignment.n_system);
+    }
+};
+static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

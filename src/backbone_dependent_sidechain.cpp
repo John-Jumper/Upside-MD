@@ -1,6 +1,25 @@
-#include "backbone_dependent_sidechain.h"
+#include "force.h"
+#include <string>
+#include "timing.h"
 #include "affine.h"
 #include <vector>
+
+#include "md.h"
+#include "coord.h"
+using namespace std;
+using namespace h5;
+
+struct BackboneSCParam {
+    CoordPair rama_residue;
+    CoordPair alignment_residue;
+    int       restype;
+};
+
+struct BackbonePointMap {
+    int    n_bin;
+    float* germ;
+};
+
 
 void read_backbone_dependent_point(
         float3& com, float3& dcom_dphi, float3 &dcom_dpsi, 
@@ -92,3 +111,71 @@ void backbone_dependent_point(
         }
     }
 }
+
+
+struct BackboneDependentPoint : public CoordNode
+{
+    CoordNode& rama;
+    CoordNode& alignment;
+
+    int n_restype;
+    int n_bin;
+    vector<float> backbone_point_map_data;
+
+    vector<BackboneSCParam> params;
+    vector<AutoDiffParams> autodiff_params;
+
+    BackboneDependentPoint(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
+        CoordNode(rama_.n_system, get_dset_size<1>(grp, "restype")[0], 3),
+        rama(rama_), alignment(alignment_),
+        n_restype(get_dset_size<5>(grp, "backbone_point_map")[0]),
+        n_bin    (get_dset_size<5>(grp, "backbone_point_map")[1]),
+        backbone_point_map_data(n_restype*n_bin*n_bin*3*3, 0.f),
+        params(n_elem)
+    {
+        check_elem_width(rama,     2);
+        check_elem_width(alignment, 7);
+
+        check_size(grp, "rama_residue",       n_elem);
+        check_size(grp, "alignment_residue",  n_elem);
+        check_size(grp, "restype",            n_elem);
+        check_size(grp, "backbone_point_map", n_restype, n_bin, n_bin, 3, 3);
+
+
+        traverse_dset<1,int>(grp, "rama_residue",      [&](size_t nr, int x) {params[nr].rama_residue.index = x;});
+        traverse_dset<1,int>(grp, "alignment_residue", [&](size_t nr, int x) {params[nr].alignment_residue.index = x;});
+        traverse_dset<1,int>(grp, "restype",           [&](size_t nr, int x) {params[nr].restype = x;});
+
+        traverse_dset<5,float>(grp, "backbone_point_map", 
+                [&](size_t rt, size_t nb1, size_t nb2, size_t val_or_dphi_or_dpsi, size_t d, float x) {
+                backbone_point_map_data[(((rt*n_bin + nb1)*n_bin + nb2)*3 + val_or_dphi_or_dpsi)*3 + d] = x;});
+
+        for(size_t i=0; i<params.size(); ++i) rama     .slot_machine.add_request(3, params[i].rama_residue);
+        for(size_t i=0; i<params.size(); ++i) alignment.slot_machine.add_request(3, params[i].alignment_residue);
+
+        for(auto &p: params) autodiff_params.push_back(
+                AutoDiffParams({p.rama_residue.slot}, {p.alignment_residue.slot}));
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("backbone_point"));
+        BackbonePointMap bb_map;
+        bb_map.n_bin = n_bin;
+        bb_map.germ = backbone_point_map_data.data();
+
+        backbone_dependent_point(
+                coords().value, rama.coords(), alignment.coords(),
+                params.data(), bb_map, n_elem, alignment.n_system);
+    }
+
+    virtual void propagate_deriv() {
+        Timer timer(string("backbone_point_deriv"));
+        reverse_autodiff<3,2,6>(
+                slot_machine.accum_array(), 
+                rama.slot_machine.accum_array(), alignment.slot_machine.accum_array(), 
+                slot_machine.deriv_tape.data(), autodiff_params.data(), 
+                slot_machine.deriv_tape.size(), 
+                n_elem, alignment.n_system);
+    }
+};
+static RegisterNodeType<BackboneDependentPoint,2> backbone_dependent_point_node("backbone_dependent_point");

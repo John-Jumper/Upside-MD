@@ -1,13 +1,23 @@
+#include "force.h"
+#include <string>
+#include "timing.h"
 #include "md.h"
 #include "coord.h"
-#include "md_export.h"
 
 #include <vector>
+using namespace h5;
+using namespace std;
 
 #define HMM_NORMALIZATION_INTERVAL 4
-
+#define N_STATE 5
 
 namespace {
+
+struct RamaMapGerm {
+    float val [N_STATE];
+    float dphi[N_STATE];
+    float dpsi[N_STATE];
+};
 
 struct HMMDeriv {
     float3 phi_x1;
@@ -285,3 +295,44 @@ void hmm(
         }
     }
 }
+
+
+struct HMMPot : public DerivComputation
+{
+    int n_residue;
+    CoordNode& pos;
+    vector<HMMParams> params;
+    int n_bin;
+    vector<float>       trans_matrices;
+    vector<RamaMapGerm> rama_maps;
+
+    HMMPot(hid_t grp, CoordNode& pos_):
+    n_residue(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_residue)
+    {
+        int n_dep = 5;  // number of atoms that each term depends on 
+        n_bin     = get_dset_size<5>(grp, "rama_deriv")[2];
+        rama_maps.resize(n_residue*N_STATE*n_bin*n_bin);
+
+        check_size(grp, "id",             n_residue,   n_dep);
+        check_size(grp, "trans_matrices", n_residue-1, N_STATE, N_STATE);
+        check_size(grp, "rama_deriv",     n_residue,   N_STATE, n_bin, n_bin, 3);
+
+        traverse_dset<2,int>  (grp, "id",             [&](size_t i, size_t j, int   x) { params[i].atom[j].index = x;});
+        traverse_dset<3,float>(grp, "trans_matrices", [&](size_t i, size_t j, size_t k, float x) {trans_matrices.push_back(x);});
+        traverse_dset<5,float>(grp, "rama_deriv",     [&](size_t i, size_t ns, size_t k, size_t l, size_t m, float x) {
+                if(m==0) rama_maps[i*n_bin*n_bin + k*n_bin + l].val [ns] = x;
+                if(m==1) rama_maps[i*n_bin*n_bin + k*n_bin + l].dphi[ns] = x;
+                if(m==2) rama_maps[i*n_bin*n_bin + k*n_bin + l].dpsi[ns] = x;
+                });
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(1, params[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("rama_hmm"));
+        hmm(pos.coords(), params.data(),
+                trans_matrices.data(), n_bin, rama_maps.data(), 
+                n_residue, pos.n_system);
+    }
+};
+static RegisterNodeType<HMMPot,1> rama_hmm_node("rama_hmm_pot");

@@ -1,6 +1,11 @@
+#include "force.h"
+#include <string>
+#include "timing.h"
 #include "md.h"
 #include "coord.h"
-#include "md_export.h"
+
+using namespace h5;
+using namespace std;
 
 template <typename CoordT>
 inline void pos_spring_body(
@@ -25,6 +30,36 @@ void pos_spring(
         }
     }
 }
+
+struct PosSpring : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    vector<PosSpringParams> params;
+
+    PosSpring(hid_t grp, CoordNode& pos_):
+    n_elem(get_dset_size<1>(grp, "id")[0]), pos(pos_), params(n_elem)
+    {
+        int n_dep = 2;  // number of atoms that each term depends on 
+        check_size(grp, "id", n_elem, n_dep);
+        for(auto& nm: {"x","y","z","spring_const"}) check_size(grp, nm, n_elem);
+
+        auto& p = params;
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
+        traverse_dset<1,float>(grp, "x",            [&](size_t i,           float x) { p[i].x = x;});
+        traverse_dset<1,float>(grp, "y",            [&](size_t i,           float x) { p[i].y = x;});
+        traverse_dset<1,float>(grp, "z",            [&](size_t i,           float x) { p[i].z = x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("pos_spring")); 
+        pos_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+};
+static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
+
 
 void rama_coord(
         const SysArray output,
@@ -91,6 +126,62 @@ void rama_coord(
 }
 
 
+struct RamaCoord : public CoordNode
+{
+    CoordNode& pos;
+    vector<RamaCoordParams> params;
+    vector<AutoDiffParams> autodiff_params;
+
+    RamaCoord(hid_t grp, CoordNode& pos_):
+        CoordNode(pos_.n_system, get_dset_size<2>(grp, "id")[0], 2),
+        pos(pos_),
+        params(n_elem)
+    {
+        int n_dep = 5;
+        check_size(grp, "id", n_elem, 5);
+
+        traverse_dset<2,int>(grp, "id", [&](size_t nr, size_t na, int x) {
+                params[nr].atom[na].index = x;});
+
+        typedef decltype(params[0].atom[0].index) index_t;
+        typedef decltype(params[0].atom[0].slot)  slot_t;
+
+        // an index of -1 is required for the fact the Rama coords are undefined for the termini
+        for(int j=0; j<n_dep; ++j) {
+            for(size_t i=0; i<params.size(); ++i) {
+                if(params[i].atom[j].index != index_t(-1))
+                    pos.slot_machine.add_request(2, params[i].atom[j]);
+                else
+                    params[i].atom[j].slot = slot_t(-1);
+            }
+        }
+
+        for(auto &p: params) autodiff_params.push_back(
+                AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("rama_coord"));
+        rama_coord(
+                coords().value,
+                pos.coords(),
+                params.data(),
+                n_elem, pos.n_system);
+    }
+
+    virtual void propagate_deriv() {
+        Timer timer(string("rama_coord_deriv"));
+        reverse_autodiff<2,3,0>(
+                slot_machine.accum_array(), 
+                pos.slot_machine.accum_array(), SysArray(), 
+                slot_machine.deriv_tape.data(), autodiff_params.data(), 
+                slot_machine.deriv_tape.size(), 
+                n_elem, pos.n_system);
+    }
+};
+static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
+
+
 template <typename CoordT>
 inline void dist_spring_body(
         CoordT &x1,
@@ -123,6 +214,35 @@ void dist_spring(
 }
 
 
+struct DistSpring : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    vector<DistSpringParams> params;
+
+    DistSpring(hid_t grp, CoordNode& pos_):
+    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    {
+        int n_dep = 2;  // number of atoms that each term depends on 
+        check_size(grp, "id",              n_elem, n_dep);
+        check_size(grp, "equil_dist",      n_elem);
+        check_size(grp, "spring_const", n_elem);
+
+        auto& p = params;
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
+        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dist = x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("dist_spring"));
+        dist_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+};
+static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
+
+
 void z_flat_bottom_spring(
         const CoordArray pos,
         const ZFlatBottomParams* params,
@@ -142,6 +262,38 @@ void z_flat_bottom_spring(
         }
     }
 }
+
+
+struct ZFlatBottom : public DerivComputation
+{
+    int n_term;
+    CoordNode& pos;
+    vector<ZFlatBottomParams> params;
+
+    ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
+        pos(pos_), params( get_dset_size<1>(hdf_group, "atom")[0] )
+    {
+        n_term = params.size();
+        check_size(hdf_group, "atom",            n_term);
+        check_size(hdf_group, "z0",              n_term);
+        check_size(hdf_group, "radius",          n_term);
+        check_size(hdf_group, "spring_constant", n_term);
+
+        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].atom.index=i;});
+        traverse_dset<1,float>(hdf_group, "z0", [&](size_t nt, float x) {params[nt].z0 = x;});
+        traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
+        traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
+                params[nt].spring_constant = x;});
+
+        for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].atom);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("z_flat_bottom"));
+        z_flat_bottom_spring(pos.coords(), params.data(), n_term, pos.n_system);
+    }
+};
+static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
 
 
 template <typename CoordT>
@@ -181,6 +333,34 @@ void angle_spring(
     }
 }
 
+
+struct AngleSpring : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    vector<AngleSpringParams> params;
+
+    AngleSpring(hid_t grp, CoordNode& pos_):
+    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    {
+        int n_dep = 3;  // number of atoms that each term depends on 
+        check_size(grp, "id",              n_elem, n_dep);
+        check_size(grp, "equil_dist",        n_elem);
+        check_size(grp, "spring_const", n_elem);
+
+        auto& p = params;
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
+        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dp = x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("angle_spring"));
+        angle_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+};
+static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
 
 
 template <typename CoordT>
@@ -229,6 +409,39 @@ void dynamic_dihedral_spring(
 }
 
 
+struct DynamicDihedralSpring : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    int params_offset;
+    vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
+
+    DynamicDihedralSpring(hid_t grp, CoordNode& pos_):
+    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
+    {
+        int n_dep = 4;  // number of atoms that each term depends on 
+        check_size(grp, "id", n_elem, n_dep, pos.n_system);  // only id is required for dynamic spring
+
+        auto& p = params;
+        traverse_dset<2,int>  (grp, "id", [&](size_t nt, size_t na, int x) {
+                for(int ns=0; ns<pos.n_system; ++ns) 
+                    p[ns*n_elem+nt].atom[na].index = x;});
+
+        for(auto& p: params) {
+            p.equil_dihedral  = 0.f;
+            p.spring_constant = 0.f;
+        }
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("dynamic_dihedral_spring"));
+        dynamic_dihedral_spring(pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
+    }
+};
+
+
 void dihedral_spring(
         const CoordArray pos,
         const DihedralSpringParams* restrict params,
@@ -248,6 +461,35 @@ void dihedral_spring(
         }
     }
 }
+
+struct DihedralSpring : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    vector<DihedralSpringParams> params;
+
+    DihedralSpring(hid_t grp, CoordNode& pos_):
+    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    {
+        int n_dep = 4;  // number of atoms that each term depends on 
+        check_size(grp, "id",           n_elem, n_dep);
+        check_size(grp, "equil_dist",   n_elem);
+        check_size(grp, "spring_const", n_elem);
+
+        auto& p = params;
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j].index  =x;});
+        traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) {p[i].equil_dihedral =x;});
+        traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) {p[i].spring_constant=x;});
+
+        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+    }
+
+    virtual void compute_germ() {
+        Timer timer(string("dihedral_spring"));
+        dihedral_spring(pos.coords(), params.data(), n_elem, pos.n_system);
+    }
+};
+static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");
 
 
 void dihedral_angle_range(
@@ -300,3 +542,40 @@ void dihedral_angle_range(
         }
     }
 }
+
+
+struct DihedralRange : public DerivComputation
+{
+    int n_elem;
+    CoordNode& pos;
+    vector<DihedralRangeParams> params; // in sidechain_radial.h 
+    DihedralRange(hid_t grp, CoordNode& pos_):
+        n_elem(get_dset_size<2>(grp, "id")[0]),
+        pos(pos_),
+        params(n_elem)
+    {
+        check_size(grp, "id",          n_elem, 4);
+        check_size(grp, "angle_range", n_elem, 2);
+        check_size(grp, "scale",       n_elem);
+        check_size(grp, "energy",      n_elem);
+
+        traverse_dset<2,int  >(grp, "id",          [&](size_t nda, size_t i, int   x) {
+            if(x<0 || x>=pos.n_elem) throw string("illegal atom number ") + to_string(x);
+            params[nda].atom[i].index = x;});
+        traverse_dset<2,float>(grp, "angle_range", [&](size_t nda, size_t i, float x) {params[nda].angle_range[i]= x;});
+        traverse_dset<1,float>(grp, "scale",       [&](size_t nda, float x) {params[nda].scale  = x;});
+        traverse_dset<1,float>(grp, "energy",      [&](size_t nda, float x) {params[nda].energy = x;});
+
+        for(int j=0; j<4; ++j)
+            for(size_t i=0; i<params.size(); ++i)
+                pos.slot_machine.add_request(1, params[i].atom[j]);
+
+    }
+    virtual void compute_germ() {
+            Timer timer(string("dihedral_range"));
+            dihedral_angle_range(pos.coords(), params.data(),
+                           n_elem, pos.n_system);
+    }
+
+};
+static RegisterNodeType<DihedralRange,1>  dihedral_range_node("dihedral_range");

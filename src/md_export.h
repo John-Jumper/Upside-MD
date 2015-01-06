@@ -4,74 +4,6 @@
 #include "md.h"
 #include "coord.h"
 
-#define N_STATE 5
-
-struct RamaMapGerm {
-    float val [N_STATE];
-    float dphi[N_STATE];
-    float dpsi[N_STATE];
-};
-
-struct PackedRefPos {
-    int32_t n_atoms;
-    uint32_t pos[4];
-};
-
-void dist_spring(
-        const CoordArray pos,
-        const DistSpringParams* params,
-        int n_terms, int n_system);
-void angle_spring(
-        const CoordArray pos,
-        const AngleSpringParams* params,
-        int n_terms, int n_system);
-void rama_coord(
-        const SysArray output,
-        const CoordArray pos,
-        const RamaCoordParams* params,
-        const int n_term, const int n_system);
-void dihedral_spring(
-        const CoordArray pos,
-        const DihedralSpringParams* params,
-        int n_terms, int n_system);
-void dynamic_dihedral_spring(
-        const CoordArray pos,
-        const DihedralSpringParams* restrict params,
-        int params_offset,
-        int n_terms, int n_system);
-void dihedral_angle_range(
-        const CoordArray   pos,
-        const DihedralRangeParams* params,
-        int n_terms, 
-        int n_system);
-void affine_alignment(
-        SysArray rigid_body,
-        CoordArray pos,
-        const AffineAlignmentParams* restrict params,
-        int n_res,
-        int n_system);
-void backbone_pairs(
-        const CoordArray rigid_body,
-        const PackedRefPos* ref_pos,
-        const AffineParams* params,
-        float energy_scale,
-        float dist_cutoff2,
-        int n_res, int n_system);
-void pos_spring(
-        const CoordArray pos,
-        const PosSpringParams* restrict params,
-        int n_terms, int n_system);
-void affine_reverse_autodiff(
-        const SysArray affine,
-        const SysArray affine_accum,
-        SysArray pos_deriv,
-        const DerivRecord* tape,
-        const AutoDiffParams* p,
-        int n_tape,
-        int n_atom, int n_system);
-
-uint32_t pack_atom(const float x[3]);
-
 void
 ornstein_uhlenbeck_thermostat(
         SysArray mom,
@@ -104,18 +36,4 @@ recenter(
         SysArray pos,
         int n_atom, int n_system
         );
-
-void hmm(
-        const CoordArray pos,
-        const HMMParams* params,
-        const float* trans_matrices,
-        int n_bin,
-        const RamaMapGerm* rama_map_data,
-        int n_residue, int n_system);
-
-void z_flat_bottom_spring(
-        const CoordArray pos,
-        const ZFlatBottomParams* params,
-        int n_terms, int n_system);
-
 #endif
