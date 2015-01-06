@@ -35,17 +35,27 @@ void rama_coord(
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<2> rama_pos(output, ns, nt);
-            Coord<3,2> prev_C(pos, ns, params[nt].atom[0]);
+
+            bool has_prev = params[nt].atom[0].index != index_t(-1);
+            bool has_next = params[nt].atom[4].index != index_t(-1);
+
+            Coord<3,2> prev_C(pos, ns, has_prev ? params[nt].atom[0] : CoordPair(0,0));
             Coord<3,2> N     (pos, ns, params[nt].atom[1]);
             Coord<3,2> CA    (pos, ns, params[nt].atom[2]);
             Coord<3,2> C     (pos, ns, params[nt].atom[3]);
-            Coord<3,2> next_N(pos, ns, params[nt].atom[4]);
+            Coord<3,2> next_N(pos, ns, has_next ? params[nt].atom[4] : CoordPair(0,0));
 
             {
                 float3 d1,d2,d3,d4;
-                rama_pos.v[0] = dihedral_germ(
-                        prev_C.f3(), N.f3(), CA.f3(), C.f3(),
-                        d1, d2, d3, d4);
+                if(has_prev) {
+                    rama_pos.v[0] = dihedral_germ(
+                            prev_C.f3(), N.f3(), CA.f3(), C.f3(),
+                            d1, d2, d3, d4);
+                } else {
+                    rama_pos.v[0] = -1.3963f;  // -80 degrees
+                    d1 = d2 = d3 = d4 = make_float3(0.f,0.f,0.f);
+                }
+
                 prev_C.set_deriv(0,d1);
                 N     .set_deriv(0,d2);
                 CA    .set_deriv(0,d3);
@@ -55,9 +65,15 @@ void rama_coord(
 
             {
                 float3 d2,d3,d4,d5;
-                rama_pos.v[1] = dihedral_germ(
-                        N.f3(), CA.f3(), C.f3(), next_N.f3(),
-                        d2, d3, d4, d5);
+                if(has_next) {
+                    rama_pos.v[1] = dihedral_germ(
+                            N.f3(), CA.f3(), C.f3(), next_N.f3(),
+                            d2, d3, d4, d5);
+                } else {
+                    rama_pos.v[1] = -1.3963f;  // -80 degrees
+                    d2 = d3 = d4 = d5 = make_float3(0.f,0.f,0.f);
+                }
+
                 prev_C.set_deriv(1,make_float3(0.f,0.f,0.f));
                 N     .set_deriv(1,d2);
                 CA    .set_deriv(1,d3);
@@ -65,11 +81,11 @@ void rama_coord(
                 next_N.set_deriv(1,d5);
             }
 
-            prev_C.flush();
-            N     .flush();
-            CA    .flush();
-            C     .flush();
-            next_N.flush();
+            if(has_prev) prev_C.flush();
+            N .flush();
+            CA.flush();
+            C .flush();
+            if(has_next) next_N.flush();
         }
     }
 }

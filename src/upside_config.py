@@ -51,7 +51,8 @@ def create_array(grp, nm, obj=None):
 
 def write_backbone_pair(fasta):
     n_res = len(fasta)
-    grp = t.create_group(force, 'backbone')
+    grp = t.create_group(force, 'backbone_pairs')
+    grp._v_attrs.arguments = np.array(['affine_alignment'])
 
     ref_pos = np.zeros((n_res,4,3))
     ref_pos[:,0] = (-1.19280531, -0.83127186,  0.)        # N
@@ -69,6 +70,7 @@ def write_backbone_pair(fasta):
 
 def write_affine_alignment(n_res):
     grp = t.create_group(force, 'affine_alignment')
+    grp._v_attrs.arguments = np.array(['pos'])
 
     ref_geom = np.zeros((n_res,3,3))
     ref_geom[:,0] = (-1.19280531, -0.83127186, 0.)  # N
@@ -89,12 +91,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     n_res = len(fasta)
     if hbond_energy > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
-    grp = t.create_group(force, 'count_hbond')
-    grp._v_attrs.hbond_energy = hbond_energy
 
-    # split into donors and acceptors
-    donors = t.create_group(grp, 'donors')
-    acceptors = t.create_group(grp, 'acceptors')
 
     # note that proline is not an hbond donor since it has no NH
     excluded_residues = set(excluded_residues)
@@ -107,15 +104,6 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     H_bond_length = 0.88
     O_bond_length = 1.24
 
-    create_array(donors,    'bond_length', obj=H_bond_length*np.ones(len(   donor_residues)))
-    create_array(acceptors, 'bond_length', obj=O_bond_length*np.ones(len(acceptor_residues)))
-
-    create_array(donors,    'id', obj=np.array((-1,0,1))[None,:] + 3*donor_residues   [:,None])
-    create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
-
-    create_array(donors,    'residue_id', obj=   donor_residues)
-    create_array(acceptors, 'residue_id', obj=acceptor_residues)
-
     if helix_energy_perturbation is None:
         don_bonus = np.zeros(len(   donor_residues))
         acc_bonus = np.zeros(len(acceptor_residues))
@@ -125,6 +113,32 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
         d = dict(zip(bonus['aa'],zip(bonus['U_donor'],bonus['U_acceptor'])))
         don_bonus = np.array([d[fasta[nr]][0] for nr in    donor_residues])
         acc_bonus = np.array([d[fasta[nr]][1] for nr in acceptor_residues])
+
+    # FIXME yes, this is scandalous
+    # I really need to separate the Infer and the HBondEnergy, but I am busy right now
+
+    grp = t.create_group(force, 'infer_H_O')
+    grp._v_attrs.arguments = np.array(['pos'])
+
+    donors    = t.create_group(grp, 'donors')
+    acceptors = t.create_group(grp, 'acceptors')
+
+    create_array(donors,    'bond_length', obj=H_bond_length*np.ones(len(   donor_residues)))
+    create_array(acceptors, 'bond_length', obj=O_bond_length*np.ones(len(acceptor_residues)))
+
+    create_array(donors,    'id', obj=np.array((-1,0,1))[None,:] + 3*donor_residues   [:,None])
+    create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
+
+
+    grp = t.create_group(force, 'hbond_energy')
+    grp._v_attrs.arguments = np.array(['infer_H_O'])
+    grp._v_attrs.hbond_energy = hbond_energy
+
+    donors    = t.create_group(grp, 'donors')
+    acceptors = t.create_group(grp, 'acceptors')
+
+    create_array(donors,    'residue_id', obj=   donor_residues)
+    create_array(acceptors, 'residue_id', obj=acceptor_residues)
 
     create_array(donors,    'helix_energy_bonus', obj=don_bonus)
     create_array(acceptors, 'helix_energy_bonus', obj=acc_bonus)
@@ -229,6 +243,7 @@ def random_initial_config(n_res):
 def write_dist_spring(args):
     # create a linear chain
     grp = t.create_group(force, 'dist_spring')
+    grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(n_atom-1)
     id = np.column_stack((id,id+1))
 
@@ -243,6 +258,7 @@ def write_dist_spring(args):
 
 def write_angle_spring(args):
     grp = t.create_group(force, 'angle_spring')
+    grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(n_atom-2)
     id = np.column_stack((id,id+2,id+1))
     equil_angles = np.zeros(id.shape[0])
@@ -257,50 +273,13 @@ def write_angle_spring(args):
 def write_dihedral_spring():
     # this is primarily used for omega bonds
     grp = t.create_group(force, 'dihedral_spring')
+    grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(1,n_atom-3,3)  # start at CA atom
     id = np.column_stack((id,id+1,id+2,id+3))
 
     create_array(grp, 'id', obj=id)
     create_array(grp, 'equil_dist',   obj=180*deg*np.ones(id.shape[0]))
     create_array(grp, 'spring_const', obj=30.0*np.ones(id.shape[0]))
-
-# def write_rama_pot():
-#     grp = t.create_group(force, 'rama_pot')
-#     # first ID is previous C
-#     id = np.arange(2,n_atom-4,3)
-#     id = np.column_stack((id,id+1,id+2,id+3,id+4))
-#     n_bin=72
-#     # x_deriv + 1j * y_deriv for convenient packing
-#     rama_deriv = np.zeros((id.shape[0],n_bin,n_bin)).astype(np.complex128)
-# 
-#     d=cPickle.load(open(os.path.join(args.data_dir, 'ubq.rama.pkl')))
-#     import scipy.interpolate as interp
-#     phi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
-#     psi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
-#     def find_deriv(i):
-#         rmap = np.tile(d['rama_maps'][i], (3,3))  # tiling helps to ensure periodicity
-#         h=d['phi']/180.*np.pi
-#         s=d['psi']/180.*np.pi
-#         rmap_spline = interp.RectBivariateSpline(
-#                 np.concatenate((h-2*np.pi, h, h+2*np.pi)),
-#                 np.concatenate((s-2*np.pi, s, s+2*np.pi)),
-#                 rmap*1.0)
-# 
-#         eps = 1e-8
-#         dx = (rmap_spline(phi+eps,psi    )-rmap_spline(phi-eps,psi    ))/(2.*eps)
-#         dy = (rmap_spline(phi    ,psi+eps)-rmap_spline(phi,    psi-eps))/(2.*eps)
-#         return dx+1j*dy
-# 
-#     for nr in 1+np.arange(rama_deriv.shape[0]):
-#         rama_deriv[nr-1] = find_deriv(nr).T
-# 
-#     idx_to_map = np.arange(id.shape[0])
-# 
-#     create_array(grp, 'id', obj=id)
-#     create_array(grp, 'rama_deriv', obj=rama_deriv)
-#     create_array(grp, 'rama_pot',   obj=d['rama_maps'])
-#     create_array(grp, 'idx_to_map', obj=idx_to_map)
-
 
 def basin_cond_prob_fcns(a_phi, a_psi):
     def basin_box(phi0,phi1, psi0,psi1):
@@ -576,6 +555,7 @@ def populate_rama_maps(seq, rama_library_h5):
 
 def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
     grp = t.create_group(force, 'rama_hmm_pot')
+    grp._v_attrs.arguments = np.array(['pos'])
     # first ID is previous C
     id = np.arange(2,n_atom-4,3)
     id = np.column_stack((id,id+1,id+2,id+3,id+4))
@@ -697,6 +677,7 @@ def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     n_elem = len(fields)
 
     grp = t.create_group(t.root.input.force, 'dihedral_range')
+    grp._v_attrs.arguments = np.array(['pos'])
 
     id          = np.zeros((n_elem,4), dtype = 'i')
     angle_range = np.zeros((n_elem,2))
@@ -745,6 +726,7 @@ def write_contact_energies(parser, fasta, contact_table):
     n_contact = len(fields)
 
     g = t.create_group(t.root.input.force, 'contact')
+    g._v_attrs.arguments = np.array(['affine_alignment'])
     g._v_attrs.cutoff = 6.   # in units of width
 
     id         = np.zeros((n_contact,2), dtype='i')
@@ -777,15 +759,54 @@ def write_contact_energies(parser, fasta, contact_table):
 
 def write_sidechain_potential(fasta, library):
     g = t.create_group(t.root.input.force, 'sidechain')
+    g._v_attrs.arguments = np.array(['affine_alignment'])
     t.create_external_link(g, 'sidechain_data', os.path.abspath(library)+':/params')
     create_array(g, 'restype', map(str,fasta))
 
     # quick check to ensure the external link worked
     assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
+def write_rama_coord():
+    grp = t.create_group(force, 'rama_coord')
+    grp._v_attrs.arguments = np.array(['pos'])
+    # first ID is previous C
+    id = np.arange(-1,n_atom-4,3)
+    id = np.column_stack((id,id+1,id+2,id+3,id+4))
+    id[id>=n_atom] = -1  # last atom is non-existent (as is first)
+                         #   and non-existence is indicated by -1
+    create_array(grp, 'id', id)
+
+
+def write_backbone_dependent_point(fasta, library):
+    grp = t.create_group(force, 'backbone_dependent_point')
+    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+
+    data = tables.open_file(library)
+
+    n_restype = len(aa_num)
+    n_bin = data.get_node('/ALA/centers').shape[0]
+    point_map = np.zeros((n_restype,n_bin,n_bin, 3,3),dtype='f4')  
+
+    for rname,idx in sorted(aa_num.items()):
+        point_map[idx,:,:, 0,:] = data.get_node('/%s/centers'%rname)[:]
+
+    counter = np.arange(n_bin)
+    up_loc  = (counter+1)%n_bin
+    dn_loc  = (counter-1)%n_bin
+
+    # compute central difference derivatives
+    point_map[:,:,:, 1] = point_map[:,up_loc,:, 0] - point_map[:,dn_loc,:, 0]
+    point_map[:,:,:, 2] = point_map[:,:,up_loc, 0] - point_map[:,:,dn_loc, 0]
+
+    create_array(grp, 'rama_residue',       np.arange(len(fasta)))
+    create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
+    create_array(grp, 'restype',            np.array([aa_num[s] for s in fasta]))
+    create_array(grp, 'backbone_point_map', point_map)
+
 
 def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
     g = t.create_group(t.root.input.force, 'radial')
+    g._v_attrs.arguments = np.array(['backbone_dependent_point'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -801,13 +822,13 @@ def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
     create_array(data, 'names',      obj=params.root.params.names[:])
     create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
     create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:])
-    create_array(data, 'sc_ref_pos', obj=params.root.params.sc_ref_pos[:])
     create_array(data, 'scale',      obj=params.root.params.scale[:])
     params.close()
 
 
 def write_steric(fasta, library):
     g = t.create_group(t.root.input.force, 'steric')
+    g._v_attrs.arguments = np.array(['affine_alignment'])
     t.create_external_link(g, 'residue_data',     os.path.abspath(library)+':/residue_data')
     t.create_external_link(g, 'atom_interaction', os.path.abspath(library)+':/atom_interaction')
     create_array(g, 'restype', map(str,fasta))

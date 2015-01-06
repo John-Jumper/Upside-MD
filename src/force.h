@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 #include "coord.h"
+#include <functional>
+#include <map>
 
 struct SlotMachine
 {
@@ -38,17 +40,32 @@ struct DerivComputation
     virtual void propagate_deriv() {};
 };
 
-struct Pos : public DerivComputation
+struct CoordNode : public DerivComputation
+{
+    int n_system;
+    int n_elem;
+    int elem_width;
+    std::vector<float> output;
+    SlotMachine slot_machine;
+    CoordNode(int n_system_, int n_elem_, int elem_width_):
+        n_system(n_system_), n_elem(n_elem_), elem_width(elem_width_), 
+        output(n_system*n_elem*elem_width, 0.f), 
+        slot_machine(elem_width, n_elem, n_system) {}
+    virtual CoordArray coords() {
+        return CoordArray(SysArray(output.data(), n_elem*elem_width), slot_machine.accum_array());
+    }
+};
+
+
+
+struct Pos : public CoordNode
 {
     int n_atom;
-    int n_system;
-    SlotMachine slot_machine;
-    std::vector<float> output;
     std::vector<float> deriv;
 
     Pos(int n_atom_, int n_system_):
-        n_atom(n_atom_), n_system(n_system_), slot_machine(3, n_atom, n_system), 
-        output(3*n_atom*n_system, 0.f), deriv(3*n_atom*n_system, 0.f)
+        CoordNode(n_system_, n_atom_, 3), 
+        n_atom(n_atom_), deriv(3*n_atom*n_system, 0.f)
     {}
 
     virtual void propagate_deriv();
@@ -86,7 +103,7 @@ struct DerivEngine
     void add_node(
             const std::string& name, 
             std::unique_ptr<DerivComputation>&& fcn, 
-            std::initializer_list<std::string> argument_names);
+            std::vector<std::string> argument_names);
 
     Node& get(const std::string& name);
     int get_idx(const std::string& name, bool must_exist=true);
@@ -104,4 +121,85 @@ struct DerivEngine
 
 double get_n_hbond(DerivEngine &engine);
 DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group);
+
+// note that there are no null points in the vector of CoordNode*
+typedef std::vector<CoordNode*> ArgList;
+typedef std::function<DerivComputation*(hid_t, const ArgList&)> NodeCreationFunction;
+typedef std::map<std::string, NodeCreationFunction> NodeCreationMap;
+NodeCreationMap& node_creation_map(); 
+
+static bool is_prefix(const std::string& s1, const std::string& s2) {
+    return s1 == s2.substr(0,s1.size());
+}
+
+static void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn) 
+{
+    auto& m = node_creation_map();
+
+    // No string in m can be a prefix of any other string in m, since 
+    //   the function node to call is determined by checking string prefixes
+    for(const auto& kv : m) {
+        if(is_prefix(kv.first, name_prefix)) {
+            auto s = std::string("Internal error.  Type name ") + kv.first + " is a prefix of " + name_prefix + ".";
+            fprintf(stderr, "%s\n", s.c_str());
+            throw s;
+        }
+        if(is_prefix(name_prefix, kv.first)) {
+            auto s = std::string("Internal error.  Type name ") + name_prefix + " is a prefix of " + kv.first + ".";
+            fprintf(stderr, "%s\n", s.c_str());
+            throw s;
+        }
+    }
+
+    m[name_prefix] = fcn;
+}
+
+static void check_elem_width(const CoordNode& node, int expected_elem_width) {
+    if(node.elem_width != expected_elem_width) 
+        throw std::string("expected argument with width ") + std::to_string(expected_elem_width) + 
+            " but received argument with width " + std::to_string(node.elem_width);
+}
+
+static void check_arguments_length(const ArgList& arguments, int n_expected) {
+    if(int(arguments.size()) != n_expected) 
+        throw std::string("expected ") + std::to_string(n_expected) + 
+            " arguments but got " + std::to_string(arguments.size());
+}
+
+template <typename NodeClass, int n_args>
+struct RegisterNodeType {
+    RegisterNodeType(std::string name_prefix);
+};
+
+template <typename NodeClass>
+struct RegisterNodeType<NodeClass,0> {
+    RegisterNodeType(std::string name_prefix){
+        NodeCreationFunction f = [](hid_t grp, const ArgList& args) {
+            check_arguments_length(args,0); 
+            return new NodeClass(grp);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+
+template <typename NodeClass>
+struct RegisterNodeType<NodeClass,1> {
+    RegisterNodeType(std::string name_prefix){
+        NodeCreationFunction f = [](hid_t grp, const ArgList& args) {
+            check_arguments_length(args,1); 
+            return new NodeClass(grp, *args[0]);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+
+template <typename NodeClass>
+struct RegisterNodeType<NodeClass,2> {
+    RegisterNodeType(std::string name_prefix){
+        NodeCreationFunction f = [](hid_t grp, const ArgList& args) {
+            check_arguments_length(args,2); 
+            return new NodeClass(grp, *args[0], *args[1]);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+
+// Pos should not be registered, since it is of a special type
 #endif

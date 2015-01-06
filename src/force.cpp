@@ -24,7 +24,7 @@ void Pos::propagate_deriv() {
 void DerivEngine::add_node(
         const string& name, 
         unique_ptr<DerivComputation>&& fcn, 
-        initializer_list<string> argument_names) 
+        vector<string> argument_names) 
 {
     if(any_of(nodes.begin(), nodes.end(), [&](const Node& n) {return n.name==name;})) 
         throw string("name conflict in DerivEngine");
@@ -121,10 +121,10 @@ void DerivEngine::integration_cycle(float* mom, float dt, float max_force, Integ
 struct PosSpring : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     shared_vector<PosSpringParams> params;
 
-    PosSpring(hid_t grp, Pos& pos_):
+    PosSpring(hid_t grp, CoordNode& pos_):
     n_elem(get_dset_size<1>(grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
@@ -150,10 +150,10 @@ struct PosSpring : public DerivComputation
 struct ZFlatBottom : public DerivComputation
 {
     int n_term;
-    Pos& pos;
+    CoordNode& pos;
     vector<ZFlatBottomParams> params;
 
-    ZFlatBottom(hid_t hdf_group, Pos& pos_):
+    ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
         pos(pos_), params( get_dset_size<1>(hdf_group, "atom")[0] )
     {
         n_term = params.size();
@@ -181,10 +181,10 @@ struct ZFlatBottom : public DerivComputation
 struct DistSpring : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     shared_vector<DistSpringParams> params;
 
-    DistSpring(hid_t grp, Pos& pos_):
+    DistSpring(hid_t grp, CoordNode& pos_):
     n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
@@ -209,10 +209,10 @@ struct DistSpring : public DerivComputation
 struct AngleSpring : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     shared_vector<AngleSpringParams> params;
 
-    AngleSpring(hid_t grp, Pos& pos_):
+    AngleSpring(hid_t grp, CoordNode& pos_):
     n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 3;  // number of atoms that each term depends on 
@@ -236,10 +236,10 @@ struct AngleSpring : public DerivComputation
 struct DihedralSpring : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     shared_vector<DihedralSpringParams> params;
 
-    DihedralSpring(hid_t grp, Pos& pos_):
+    DihedralSpring(hid_t grp, CoordNode& pos_):
     n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
@@ -265,11 +265,11 @@ struct DihedralSpring : public DerivComputation
 struct DynamicDihedralSpring : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     int params_offset;
     shared_vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
 
-    DynamicDihedralSpring(hid_t grp, Pos& pos_):
+    DynamicDihedralSpring(hid_t grp, CoordNode& pos_):
     n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
@@ -294,28 +294,36 @@ struct DynamicDihedralSpring : public DerivComputation
     }
 };
 
-struct RamaCoord : public DerivComputation
+struct RamaCoord : public CoordNode
 {
-    int n_residue;
-    Pos& pos;
+    CoordNode& pos;
     vector<RamaCoordParams> params;
-    vector<float> output;
     vector<AutoDiffParams> autodiff_params;
-    SlotMachine slot_machine;
 
-    RamaCoord(hid_t grp, Pos& pos_):
-        n_residue(get_dset_size<2>(grp, "id")[0]),
+    RamaCoord(hid_t grp, CoordNode& pos_):
+        CoordNode(pos_.n_system, get_dset_size<2>(grp, "id")[0], 2),
         pos(pos_),
-        params(n_residue),
-        output(2*n_residue*pos.n_system, 0.f),
-        slot_machine(2, n_residue, pos.n_system)
+        params(n_elem)
     {
         int n_dep = 5;
-        check_size(grp, "id", n_residue, 5);
+        check_size(grp, "id", n_elem, 5);
 
-        traverse_dset<2,int>(grp, "id", [&](size_t nr, size_t na, int x) {params[nr].atom[na].index = x;});
+        traverse_dset<2,int>(grp, "id", [&](size_t nr, size_t na, int x) {
+                params[nr].atom[na].index = x;});
 
-        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(2, params[i].atom[j]);
+        typedef decltype(params[0].atom[0].index) index_t;
+        typedef decltype(params[0].atom[0].slot)  slot_t;
+
+        // an index of -1 is required for the fact the Rama coords are undefined for the termini
+        for(int j=0; j<n_dep; ++j) {
+            for(size_t i=0; i<params.size(); ++i) {
+                if(params[i].atom[j].index != index_t(-1))
+                    pos.slot_machine.add_request(2, params[i].atom[j]);
+                else
+                    params[i].atom[j].slot = slot_t(-1);
+            }
+        }
+
         for(auto &p: params) autodiff_params.push_back(
                 AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
     }
@@ -326,7 +334,7 @@ struct RamaCoord : public DerivComputation
                 coords().value,
                 pos.coords(),
                 params.data(),
-                n_residue, pos.n_system);
+                n_elem, pos.n_system);
     }
 
     virtual void propagate_deriv() {
@@ -336,11 +344,7 @@ struct RamaCoord : public DerivComputation
                 pos.slot_machine.accum_array(), SysArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_residue, pos.n_system);
-    }
-
-    CoordArray coords() {
-        return CoordArray(SysArray(output.data(), n_residue*2), slot_machine.accum_array());
+                n_elem, pos.n_system);
     }
 };
 
@@ -348,13 +352,13 @@ struct RamaCoord : public DerivComputation
 struct HMMPot : public DerivComputation
 {
     int n_residue;
-    Pos& pos;
+    CoordNode& pos;
     shared_vector<HMMParams> params;
     int n_bin;
     shared_vector<float>       trans_matrices;
     shared_vector<RamaMapGerm> rama_maps;
 
-    HMMPot(hid_t grp, Pos& pos_):
+    HMMPot(hid_t grp, CoordNode& pos_):
     n_residue(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_residue)
     {
         int n_dep = 5;  // number of atoms that each term depends on 
@@ -385,23 +389,20 @@ struct HMMPot : public DerivComputation
 };
 
 
-struct AffineAlignment : public DerivComputation
+struct AffineAlignment : public CoordNode
 {
-    Pos& pos;
-    int n_residue;
+    CoordNode& pos;
     int n_system;
     shared_vector<AffineAlignmentParams> params;
     shared_vector<AutoDiffParams> autodiff_params;
-    shared_vector<float> output;
-    SlotMachine slot_machine;
 
-    AffineAlignment(hid_t grp, Pos& pos_):
-        pos(pos_), n_residue(get_dset_size<2>(grp, "atoms")[0]), n_system(pos.n_system), params(n_residue),
-        output(7*n_residue*pos.n_system), slot_machine(6, n_residue, pos.n_system)
+    AffineAlignment(hid_t grp, CoordNode& pos_):
+        CoordNode(pos_.n_system, get_dset_size<2>(grp, "atoms")[0], 7),
+        pos(pos_), params(n_elem)
     {
         int n_dep = 3;
-        check_size(grp, "atoms",    n_residue, n_dep);
-        check_size(grp, "ref_geom", n_residue, n_dep,3);
+        check_size(grp, "atoms",    n_elem, n_dep);
+        check_size(grp, "ref_geom", n_elem, n_dep,3);
 
         traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params.host()[i].atom[j].index=x;});
         traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params.host()[i].ref_geom[na*n_dep+d]=x;});
@@ -410,14 +411,10 @@ struct AffineAlignment : public DerivComputation
         for(auto &p: params.host()) autodiff_params.host().push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
-    CoordArray coords() {
-        return CoordArray(SysArray(output.host().data(), n_residue*7), slot_machine.accum_array());
-    }
-
     virtual void compute_germ() {
         Timer timer(string("affine_alignment"));
         affine_alignment(coords().value, pos.coords(), params.host().data(), 
-                n_residue, pos.n_system);}
+                n_elem, pos.n_system);}
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
@@ -425,40 +422,38 @@ struct AffineAlignment : public DerivComputation
                 coords().value, coords().deriv, pos.slot_machine.accum_array(), 
                 slot_machine.deriv_tape.data(), autodiff_params.host().data(), 
                 slot_machine.deriv_tape.size(), 
-                n_residue, pos.n_system);}
+                n_elem, pos.n_system);}
 };
 
 
-struct BackboneDependentPoint : public DerivComputation
+struct BackboneDependentPoint : public CoordNode
 {
-    int n_residue;
-    RamaCoord& rama;
-    AffineAlignment& alignment;
+    CoordNode& rama;
+    CoordNode& alignment;
 
     int n_restype;
     int n_bin;
     vector<float> backbone_point_map_data;
 
     vector<BackboneSCParam> params;
-    vector<float> output;
-
     vector<AutoDiffParams> autodiff_params;
-    SlotMachine slot_machine;
 
-    BackboneDependentPoint(hid_t grp, RamaCoord& rama_, AffineAlignment& alignment_):
-        n_residue(get_dset_size<1>(grp, "restype")[0]),
+    BackboneDependentPoint(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
+        CoordNode(rama_.n_system, get_dset_size<1>(grp, "restype")[0], 3),
         rama(rama_), alignment(alignment_),
         n_restype(get_dset_size<5>(grp, "backbone_point_map")[0]),
         n_bin    (get_dset_size<5>(grp, "backbone_point_map")[1]),
         backbone_point_map_data(n_restype*n_bin*n_bin*3*3, 0.f),
-        params(n_residue),
-        output(3*n_residue*alignment.n_system, 0.f),
-        slot_machine(3, n_residue, alignment.n_system)
+        params(n_elem)
     {
-        check_size(grp, "rama_residue",       n_residue);
-        check_size(grp, "alignment_residue",  n_residue);
-        check_size(grp, "restype",            n_residue);
+        check_elem_width(rama,     2);
+        check_elem_width(alignment, 7);
+
+        check_size(grp, "rama_residue",       n_elem);
+        check_size(grp, "alignment_residue",  n_elem);
+        check_size(grp, "restype",            n_elem);
         check_size(grp, "backbone_point_map", n_restype, n_bin, n_bin, 3, 3);
+
 
         traverse_dset<1,int>(grp, "rama_residue",      [&](size_t nr, int x) {params[nr].rama_residue.index = x;});
         traverse_dset<1,int>(grp, "alignment_residue", [&](size_t nr, int x) {params[nr].alignment_residue.index = x;});
@@ -483,7 +478,7 @@ struct BackboneDependentPoint : public DerivComputation
 
         backbone_dependent_point(
                 coords().value, rama.coords(), alignment.coords(),
-                params.data(), bb_map, n_residue, alignment.n_system);
+                params.data(), bb_map, n_elem, alignment.n_system);
     }
 
     virtual void propagate_deriv() {
@@ -493,11 +488,7 @@ struct BackboneDependentPoint : public DerivComputation
                 rama.slot_machine.accum_array(), alignment.slot_machine.accum_array(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_residue, alignment.n_system);
-    }
-
-    CoordArray coords() {
-        return CoordArray(SysArray(output.data(), n_residue*3), slot_machine.accum_array());
+                n_elem, alignment.n_system);
     }
 };
 
@@ -529,18 +520,20 @@ struct ComputeMyDeriv {
 struct BackbonePairs : public DerivComputation
 {
     int n_residue;
-    AffineAlignment& alignment;
+    CoordNode& alignment;
     vector<AffineParams> params;
     vector<PackedRefPos> ref_pos;
     float energy_scale;
     float dist_cutoff;
 
-    BackbonePairs(hid_t grp, AffineAlignment& alignment_):
+    BackbonePairs(hid_t grp, CoordNode& alignment_):
         n_residue(get_dset_size<1>(grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
         dist_cutoff (read_attribute<float>(grp, ".", "dist_cutoff"))
     {
+        check_elem_width(alignment, 7);
+
         check_size(grp, "id",      n_residue);
         check_size(grp, "ref_pos", n_residue, 4, 3);
 
@@ -563,7 +556,7 @@ struct BackbonePairs : public DerivComputation
         backbone_pairs(
                 alignment.coords(), 
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
-                alignment.pos.n_system);
+                alignment.n_system);
     }
 };
 
@@ -571,9 +564,9 @@ struct BackbonePairs : public DerivComputation
 struct DihedralRange : public DerivComputation
 {
     int n_elem;
-    Pos& pos;
+    CoordNode& pos;
     vector<DihedralRangeParams> params; // in sidechain_radial.h 
-    DihedralRange(hid_t grp, Pos& pos_):
+    DihedralRange(hid_t grp, CoordNode& pos_):
         n_elem(get_dset_size<2>(grp, "id")[0]),
         pos(pos_),
         params(n_elem)
@@ -584,7 +577,7 @@ struct DihedralRange : public DerivComputation
         check_size(grp, "energy",      n_elem);
 
         traverse_dset<2,int  >(grp, "id",          [&](size_t nda, size_t i, int   x) {
-            if(x<0 || x>=pos.n_atom) throw string("illegal atom number ") + to_string(x);
+            if(x<0 || x>=pos.n_elem) throw string("illegal atom number ") + to_string(x);
             params[nda].atom[i].index = x;});
         traverse_dset<2,float>(grp, "angle_range", [&](size_t nda, size_t i, float x) {params[nda].angle_range[i]= x;});
         traverse_dset<1,float>(grp, "scale",       [&](size_t nda, float x) {params[nda].scale  = x;});
@@ -606,16 +599,18 @@ struct DihedralRange : public DerivComputation
 struct ContactEnergy : public DerivComputation
 {
     int n_contact;
-    AffineAlignment& alignment;
+    CoordNode& alignment;
     vector<ContactPair> params;
     float cutoff;
 
-    ContactEnergy(hid_t grp, AffineAlignment& alignment_):
+    ContactEnergy(hid_t grp, CoordNode& alignment_):
         n_contact(get_dset_size<2>(grp, "id")[0]),
         alignment(alignment_), 
         params(n_contact),
         cutoff(read_attribute<float>(grp, ".", "cutoff"))
     {
+        check_elem_width(alignment, 7);
+
         check_size(grp, "id",         n_contact, 2);
         check_size(grp, "sc_ref_pos", n_contact, 2, 3);
         check_size(grp, "r0",         n_contact);
@@ -639,7 +634,7 @@ struct ContactEnergy : public DerivComputation
         Timer timer(string("contact_energy"));
         contact_energy(
                 alignment.coords(), params.data(), 
-                n_contact, cutoff, alignment.pos.n_system);
+                n_contact, cutoff, alignment.n_system);
     }
 };
 
@@ -649,13 +644,13 @@ struct SidechainRadialPairs : public DerivComputation
     map<string,int> name_map;
     int n_residue;
     int n_type;
-    BackboneDependentPoint& bb_point;
+    CoordNode& bb_point;
 
     vector<SidechainRadialParams> params;
     vector<SidechainRadialInteraction> interaction_params;
     float cutoff;
 
-    SidechainRadialPairs(hid_t grp, BackboneDependentPoint& bb_point_):
+    SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
         n_residue(get_dset_size<1>(grp, "id"   )[0]), 
         n_type   (get_dset_size<1>(grp, "data/names")[0]),
         bb_point(bb_point_), 
@@ -663,6 +658,8 @@ struct SidechainRadialPairs : public DerivComputation
         params(n_residue), interaction_params(n_type*n_type),
         cutoff(read_attribute<float>(grp, "data", "cutoff"))
     {
+        check_elem_width(bb_point, 3);
+
         check_size(grp, "id",      n_residue);
         check_size(grp, "restype", n_residue);
 
@@ -696,22 +693,22 @@ struct SidechainRadialPairs : public DerivComputation
         radial_pairs(
                 bb_point.coords(), 
                 params.data(), interaction_params.data(), n_type, cutoff, 
-                n_residue, bb_point.alignment.n_system);
+                n_residue, bb_point.n_system);
     }
 };
 
-struct Infer_H_O : public DerivComputation
+struct Infer_H_O : public CoordNode
 {
-    Pos& pos;
+    CoordNode& pos;
     int n_donor, n_acceptor, n_virtual;
     vector<VirtualParams> params;
     vector<AutoDiffParams> autodiff_params;
-    vector<float> output;
-    SlotMachine slot_machine;
 
-    Infer_H_O(hid_t grp, Pos& pos_):
+    Infer_H_O(hid_t grp, CoordNode& pos_):
+        CoordNode(pos_.n_system, 
+                get_dset_size<2>(grp, "donors/id")[0]+get_dset_size<2>(grp, "acceptors/id")[0], 6),
         pos(pos_), n_donor(get_dset_size<2>(grp, "donors/id")[0]), n_acceptor(get_dset_size<2>(grp, "acceptors/id")[0]),
-        n_virtual(n_donor+n_acceptor), params(n_virtual), output(6*n_virtual*pos.n_system), slot_machine(6, n_virtual, pos.n_system)
+        n_virtual(n_donor+n_acceptor), params(n_virtual)
     {
         int n_dep = 3;
         auto don = h5_obj(H5Gclose, H5Gopen2(grp, "donors",    H5P_DEFAULT));
@@ -756,13 +753,13 @@ struct Infer_H_O : public DerivComputation
 struct HBondEnergy : public DerivComputation
 {
     int n_donor, n_acceptor;
-    Infer_H_O& infer;
+    CoordNode& infer;
     vector<VirtualHBondParams> don_params;
     vector<VirtualHBondParams> acc_params;
     float hbond_energy;
     float n_hbond;
 
-    HBondEnergy(hid_t grp, Infer_H_O& infer_):
+    HBondEnergy(hid_t grp, CoordNode& infer_):
         n_donor   (get_dset_size<1>(grp, "donors/residue_id")[0]), 
         n_acceptor(get_dset_size<1>(grp, "acceptors/residue_id")[0]),
         infer(infer_), 
@@ -770,6 +767,8 @@ struct HBondEnergy : public DerivComputation
         hbond_energy(        read_attribute<float>(grp, ".", "hbond_energy")), 
         n_hbond(-1.f)
     {
+        check_elem_width(infer, 6);
+
         auto don = h5_obj(H5Gclose, H5Gopen2(grp, "donors",    H5P_DEFAULT));
         auto acc = h5_obj(H5Gclose, H5Gopen2(grp, "acceptors", H5P_DEFAULT));
         
@@ -797,7 +796,7 @@ struct HBondEnergy : public DerivComputation
         n_hbond = (1.f/hbond_energy) * count_hbond(
                 infer.coords(), 
                 n_donor, don_params.data(), n_acceptor, acc_params.data(),
-                hbond_energy, infer.pos.n_system);
+                hbond_energy, infer.n_system);
     }
 };
 
@@ -805,7 +804,7 @@ struct HBondEnergy : public DerivComputation
 struct StericInteraction : public DerivComputation
 {
     int n_res;
-    AffineAlignment&  alignment;
+    CoordNode&  alignment;
     map<string,int>   name_map;
 
     vector<StericParams>  params;
@@ -850,12 +849,13 @@ struct StericInteraction : public DerivComputation
         r.radius = radius;
     }
 
-    StericInteraction(hid_t grp, AffineAlignment& alignment_):
+    StericInteraction(hid_t grp, CoordNode& alignment_):
         n_res(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
         params(n_res),
         pot(get_dset_size<2>     (grp, "atom_interaction/cutoff")[0], 
             get_dset_size<3>     (grp, "atom_interaction/potential")[2], 
             read_attribute<float>(grp, "atom_interaction", "dx")) {
+            check_elem_width(alignment, 7);
 
             traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
                 if(name_map.find(s) == end(name_map)) {
@@ -895,7 +895,7 @@ struct StericInteraction : public DerivComputation
             for(auto& p: params)
                 point_starts.push_back(point_starts.back()+ref_res.at(p.restype).n_pts);
 
-            if(n_res!= alignment.n_residue) throw string("invalid restype array");
+            if(n_res!= alignment.n_elem) throw string("invalid restype array");
             for(int nr=0; nr<n_res; ++nr) alignment.slot_machine.add_request(1,params[nr].loc);
         }
 
@@ -908,7 +908,7 @@ struct StericInteraction : public DerivComputation
                 ref_point.data(),
                 pot,
                 point_starts.data(),
-                n_res, alignment.pos.n_system);
+                n_res, alignment.n_system);
     }
 
 };
@@ -917,7 +917,7 @@ struct StericInteraction : public DerivComputation
 struct SidechainInteraction : public DerivComputation 
 {
     int n_residue;
-    AffineAlignment&  alignment;
+    CoordNode&  alignment;
     vector<Sidechain> sidechain_params;
     float             dist_cutoff;
     float             energy_cutoff;
@@ -926,7 +926,7 @@ struct SidechainInteraction : public DerivComputation
     vector<float4>    center_data;
     vector<SidechainParams> params;
 
-    SidechainInteraction(hid_t grp, AffineAlignment& alignment_):
+    SidechainInteraction(hid_t grp, CoordNode& alignment_):
         n_residue(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
         energy_cutoff(h5::read_attribute<float>(grp, "./sidechain_data", "energy_cutoff")),
         params(n_residue)
@@ -959,7 +959,7 @@ struct SidechainInteraction : public DerivComputation
         dist_cutoff = max_interaction_radius + max_density_radius;
         printf("total_cutoff: %4.1f\n", dist_cutoff);
 
-        if(n_residue != alignment.n_residue) throw string("invalid restype array");
+        if(n_residue != alignment.n_elem) throw string("invalid restype array");
         for(int nr=0; nr<n_residue; ++nr) alignment.slot_machine.add_request(1,params[nr].res);
     }
 
@@ -1014,7 +1014,7 @@ struct SidechainInteraction : public DerivComputation
         sidechain_pairs(
                 alignment.coords(), 
                 sidechain_params.data(), params.data(), 
-                dist_cutoff, n_residue, alignment.pos.n_system);
+                dist_cutoff, n_residue, alignment.n_system);
     }
 };
 
@@ -1073,35 +1073,94 @@ void attempt_add_node(
 DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group)
 {
     auto engine = DerivEngine(n_atom, n_system);
-    try {
-        attempt_add_node<PosSpring,Pos>        (engine, force_group, "pos_spring",       "pos");
-        attempt_add_node<DistSpring,Pos>       (engine, force_group, "dist_spring",      "pos");
-        attempt_add_node<AngleSpring,Pos>      (engine, force_group, "angle_spring",     "pos");
-        attempt_add_node<DihedralSpring,Pos>   (engine, force_group, "dihedral_spring",  "pos");
-        attempt_add_node<DihedralRange,Pos>    (engine, force_group, "dihedral_range",   "pos");
-        attempt_add_node<ZFlatBottom,Pos>      (engine, force_group, "z_flat_bottom",    "pos");
-        attempt_add_node<HMMPot,Pos>           (engine, force_group, "rama_hmm_pot",     "pos");
-        attempt_add_node<AffineAlignment,Pos>  (engine, force_group, "affine_alignment", "pos");
+    auto& m = node_creation_map();
 
-        attempt_add_node<BackbonePairs,AffineAlignment>        (engine, force_group, "backbone", "affine_alignment");
-        attempt_add_node<SidechainInteraction,AffineAlignment> (engine, force_group, "sidechain","affine_alignment");
-        attempt_add_node<StericInteraction,AffineAlignment>    (engine, force_group, "steric",   "affine_alignment");
-        // attempt_add_node<SidechainRadialPairs,AffineAlignment> (engine, force_group, "radial",   "affine_alignment");
-        attempt_add_node<ContactEnergy,AffineAlignment>        (engine, force_group, "contact",  "affine_alignment");
+    map<string, vector<string>> dep_graph;
+    dep_graph["pos"] = vector<string>();
+    for(const auto &name : node_names_in_group(force_group, "."))
+        dep_graph[name] = read_attribute<vector<string>>(force_group, name.c_str(), "arguments");
 
-        attempt_add_node<RamaCoord,Pos> (engine, force_group, "rama", "pos");
-        attempt_add_node<BackboneDependentPoint,RamaCoord,AffineAlignment> 
-            (engine, force_group, "backbone_dependent_point", "rama", "affine_alignment");
-        attempt_add_node<SidechainRadialPairs,BackboneDependentPoint>
-            (engine, force_group, "radial", "backbone_dependent_point");
-
-        string count_hbond = "count_hbond";
-        attempt_add_node<Infer_H_O,Pos>        (engine, force_group, "infer_H_O",    "pos",       &count_hbond);
-        attempt_add_node<HBondEnergy,Infer_H_O>(engine, force_group, "hbond_energy", "infer_H_O", &count_hbond);
-    } catch(const string &e) {
-        throw;
+    for(auto &kv : dep_graph) {
+        for(auto& dep_name : kv.second) {
+            if(dep_graph.find(dep_name) == end(dep_graph)) 
+                throw string("Node ") + kv.first + " takes " + dep_name + 
+                    " as an argument, but no node of that name can be found.";
+        }
     }
+
+    vector<string> topo_order;
+    auto in_topo = [&](const string &name) {
+        return find(begin(topo_order), end(topo_order), name) != end(topo_order);};
+
+    int graph_size = dep_graph.size();
+    for(int round_num=0; round_num<graph_size; ++round_num) {
+        for(auto it=begin(dep_graph); it!=end(dep_graph); ++it) {
+            if(all_of(begin(it->second), end(it->second), in_topo)) {
+                topo_order.push_back(it->first);
+                dep_graph.erase(it);
+            }
+        }
+    }
+    if(dep_graph.size()) throw string("Unsatisfiable dependency in force computation");
+
+    // using topo_order here ensures that a node is only parsed after all its arguments
+    for(auto &nm : topo_order) {
+        if(nm=="pos") continue;  // pos node is added specially
+        // some name in the node_creation_map must be a prefix of this name
+        string node_type_name = "";
+        for(auto &kv : m) {
+            if(is_prefix(kv.first, nm))
+                node_type_name = kv.first;
+        }
+        if(node_type_name == "") throw string("No node type found for name '") + nm + "'";
+        NodeCreationFunction& node_func = m[node_type_name];
+
+        auto argument_names = read_attribute<vector<string>>(force_group, nm.c_str(), "arguments");
+        ArgList arguments;
+        for(const auto& arg_name : argument_names)  {
+            // if the node is not a CoordNode, a null pointer will be returned from dynamic_cast
+            arguments.push_back(dynamic_cast<CoordNode*>(engine.get(arg_name).computation.get()));
+            if(!arguments.back()) 
+                throw arg_name + " is not an intermediate value, but it is an argument of " + nm;
+        }
+
+        auto grp = open_group(force_group,nm.c_str());
+        auto computation = unique_ptr<DerivComputation>(node_func(grp.get(),arguments));
+        engine.add_node(nm, move(computation), argument_names);
+    }
+
     return engine;
+}
+
+static RegisterNodeType<PosSpring,1>      _1("atom_pos_spring");
+static RegisterNodeType<DistSpring,1>     _2("dist_spring");
+static RegisterNodeType<AngleSpring,1>    _3("angle_spring");
+static RegisterNodeType<DihedralSpring,1> _4("dihedral_spring");
+static RegisterNodeType<DihedralRange,1>  _5("dihedral_range");
+static RegisterNodeType<ZFlatBottom,1>    _6("z_flat_bottom");
+static RegisterNodeType<HMMPot,1>         _7("rama_hmm_pot");
+static RegisterNodeType<AffineAlignment,1>_8("affine_alignment");
+
+static RegisterNodeType<BackbonePairs,1>         _9 ("backbone_pairs");
+static RegisterNodeType<SidechainInteraction,1>  _10("sidechain");
+static RegisterNodeType<StericInteraction,1>     _11("steric");
+static RegisterNodeType<ContactEnergy,1>         _12("contact");
+static RegisterNodeType<RamaCoord,1>             _13("rama_coord");
+static RegisterNodeType<BackboneDependentPoint,2>_14("backbone_dependent_point");
+static RegisterNodeType<SidechainRadialPairs,1>  _15("radial");
+
+static RegisterNodeType<Infer_H_O,1>  _16("infer_H_O");
+static RegisterNodeType<HBondEnergy,1>_17("hbond_energy");
+
+NodeCreationMap& node_creation_map() 
+{
+    static NodeCreationMap m;
+    if(!m.size()) {
+        m[string("pos")] = NodeCreationFunction([](hid_t grp, const ArgList& arguments) {
+                throw string("Cannot create pos-type node");
+                return nullptr; });
+    }
+    return m;
 }
 
 

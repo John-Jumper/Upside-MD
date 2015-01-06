@@ -27,8 +27,11 @@ struct DerivRecord {
         atom(atom_), loc(loc_), output_width(output_width_) {}
 };
 
+typedef unsigned short index_t;
+typedef unsigned short slot_t;
 struct CoordPair {
-    unsigned short index, slot;
+    index_t index;
+    slot_t slot;
     CoordPair(unsigned short index_, unsigned short slot_):
         index(index_), slot(slot_) {}
     CoordPair(): index(-1), slot(-1) {}
