@@ -51,6 +51,52 @@ bool h5_exists(hid_t base, const char* nm, bool check_valid=true);
 
 std::vector<hsize_t> get_dset_size(int ndims, hid_t group, const char* name);
 
+
+
+template<class T>
+T read_attribute(hid_t h5, const char* path, const char* attr_name) 
+try {
+    T retval;
+    h5_noerr(H5LTget_attribute(h5, path, attr_name, select_predtype<T>(), &retval));
+    return retval;
+} catch(const std::string &e) {
+    throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
+}
+
+template<>
+std::vector<std::string> read_attribute<std::vector<std::string>>
+(hid_t h5, const char* path, const char* attr_name);
+
+void check_size(hid_t group, const char* name, std::vector<size_t> sz);
+void check_size(hid_t group, const char* name, size_t sz);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5);
+
+H5Obj ensure_group(hid_t loc, const char* nm);
+H5Obj open_group(hid_t loc, const char* nm);
+void ensure_not_exist(hid_t loc, const char* nm);
+
+
+H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
+        const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
+        const std::initializer_list<int> &chunk_dims,
+        bool compression_level=0);  // 1 is often recommended
+
+
+void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, const void* new_data, int append_dim);
+
+
+template <typename T>
+void append_to_dset(hid_t dset, const std::vector<T> &new_data, int append_dim) {
+    append_to_dset(dset, select_predtype<T>(), new_data.size(), (const void*)(new_data.data()), append_dim);}
+
+
+std::vector<std::string> 
+node_names_in_group(const hid_t loc, const std::string grp_name);
+
+
 template <int ndim, typename T, typename F>
 struct traverse_dataset_iteraction_helper { 
     void operator()(T* data, hsize_t* dims, const F& f, size_t stride=1) {T::NO_SPECIALIZATION_AVAILABLE();}
@@ -171,115 +217,6 @@ try {
 } catch(const std::string &e) {
     throw "while traversing '" + std::string(name) + "', " + e;
 }
-
-
-template<class T>
-T read_attribute(hid_t h5, const char* path, const char* attr_name) 
-try {
-    T retval;
-    h5_noerr(H5LTget_attribute(h5, path, attr_name, select_predtype<T>(), &retval));
-    return retval;
-} catch(const std::string &e) {
-    throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
-}
-
-template<>
-std::vector<std::string> read_attribute<std::vector<std::string>>
-(hid_t h5, const char* path, const char* attr_name);
-
-void check_size(hid_t group, const char* name, std::vector<size_t> sz);
-void check_size(hid_t group, const char* name, size_t sz);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5);
-
-H5Obj ensure_group(hid_t loc, const char* nm);
-H5Obj open_group(hid_t loc, const char* nm);
-void ensure_not_exist(hid_t loc, const char* nm);
-
-
-H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
-        const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
-        const std::initializer_list<int> &chunk_dims,
-        bool compression_level=0);  // 1 is often recommended
-
-
-// I will check that the vector size is cleanly divided by the product of all other dimensions
-template <typename T>
-void append_to_dset(hid_t dset, const std::vector<T> &new_data, int append_dim)
-try {
-    // Load current data size
-    auto space = h5_obj(H5Sclose, H5Dget_space(dset));
-    int ndims = h5_noerr(H5Sget_simple_extent_ndims(space.get()));
-    std::vector<hsize_t> dims(ndims);
-    h5_noerr("H5Sget_simple_extent_dims", H5Sget_simple_extent_dims(space.get(), dims.data(), NULL));
-
-    // Compute number of records in new_data
-    long int record_size = 1;  // product of all dim sizes except the append_dim
-    for(int nd=0; nd<(int)dims.size(); ++nd) if(nd!=append_dim) record_size *= dims[nd];
-
-    long int n_records = new_data.size() / record_size;
-    if(n_records*record_size != (long)new_data.size()) 
-        throw std::string("new data is not an integer number of records long");
-
-    // Enlarge dataset for new data
-    auto enlarged_dims = dims;
-    enlarged_dims[append_dim] += n_records;
-    h5_noerr("H5Dset_extent", H5Dset_extent(dset, enlarged_dims.data()));
-    auto enlarged_space = h5_obj(H5Sclose, H5Dget_space(dset));
-
-    // Dataspaces are required for the source and destination
-
-    // Source is just a simple dataspace
-    auto mem_dims = dims;
-    mem_dims[append_dim] = n_records;
-    auto mem_space = h5_obj(H5Sclose, H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL));
-
-    // Destination is a hyperslab selection starting at the old length in the append direction
-    std::vector<hsize_t> starts(ndims); 
-    for(int d=0; d<ndims; ++d) starts[d] = (d==append_dim) ? dims[d] : 0u;
-
-    h5_noerr("H5Sselect_hyperslab", 
-            H5Sselect_hyperslab(enlarged_space.get(), H5S_SELECT_SET, starts.data(), nullptr, mem_dims.data(), nullptr));
-
-    // Perform write
-    h5_noerr(H5Dwrite(dset, select_predtype<T>(), mem_space.get(), enlarged_space.get(), H5P_DEFAULT, new_data.data()));
-}
-catch(const std::string &e) {
-    throw "while appending to '" + std::string("a dataset") + "', " + e;
-}
-
-
-static std::vector<std::string> 
-node_names_in_group(const hid_t loc, const std::string grp_name) {
-    std::vector<std::string> names;
-
-    H5G_info_t info;
-    h5_noerr(H5Gget_info_by_name(loc, grp_name.c_str(), &info, H5P_DEFAULT));
-
-    for(int i=0; i<int(info.nlinks); ++i) {
-        // 1+ is for NULL terminator
-        size_t name_size = 1 + h5_noerr(
-                 H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
-                    nullptr, 0, H5P_DEFAULT));
-
-        auto tmp = std::unique_ptr<char[]>(new char[name_size]);
-        h5_noerr(H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
-                    tmp.get(), name_size, H5P_DEFAULT));
-
-        names.emplace_back(tmp.get());
-    }
-    return names;
-}
-
-
-
-
-
-
-
-
 
 }
 #endif

@@ -155,5 +155,70 @@ H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
                 H5P_DEFAULT, dcpl_id.get(), H5P_DEFAULT));
 }
 
+void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, const void* new_data, int append_dim)
+try {
+    // Load current data size
+    auto space = h5_obj(H5Sclose, H5Dget_space(dset));
+    int ndims = h5_noerr(H5Sget_simple_extent_ndims(space.get()));
+    std::vector<hsize_t> dims(ndims);
+    h5_noerr("H5Sget_simple_extent_dims", H5Sget_simple_extent_dims(space.get(), dims.data(), NULL));
+
+    // Compute number of records in new_data
+    long int record_size = 1;  // product of all dim sizes except the append_dim
+    for(int nd=0; nd<(int)dims.size(); ++nd) if(nd!=append_dim) record_size *= dims[nd];
+
+    long int n_records = n_new_data_elems / record_size;
+    if(n_records*record_size != (long)n_new_data_elems) 
+        throw std::string("new data is not an integer number of records long");
+
+    // Enlarge dataset for new data
+    auto enlarged_dims = dims;
+    enlarged_dims[append_dim] += n_records;
+    h5_noerr("H5Dset_extent", H5Dset_extent(dset, enlarged_dims.data()));
+    auto enlarged_space = h5_obj(H5Sclose, H5Dget_space(dset));
+
+    // Dataspaces are required for the source and destination
+
+    // Source is just a simple dataspace
+    auto mem_dims = dims;
+    mem_dims[append_dim] = n_records;
+    auto mem_space = h5_obj(H5Sclose, H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL));
+
+    // Destination is a hyperslab selection starting at the old length in the append direction
+    std::vector<hsize_t> starts(ndims); 
+    for(int d=0; d<ndims; ++d) starts[d] = (d==append_dim) ? dims[d] : 0u;
+
+    h5_noerr("H5Sselect_hyperslab", 
+            H5Sselect_hyperslab(enlarged_space.get(), H5S_SELECT_SET, starts.data(), nullptr, mem_dims.data(), nullptr));
+
+    // Perform write
+    h5_noerr(H5Dwrite(dset, hdf_predtype, mem_space.get(), enlarged_space.get(), H5P_DEFAULT, new_data));
+}
+catch(const std::string &e) {
+    throw "while appending to '" + std::string("a dataset") + "', " + e;
+}
+
+
+std::vector<std::string> 
+node_names_in_group(const hid_t loc, const std::string grp_name) {
+    std::vector<std::string> names;
+
+    H5G_info_t info;
+    h5_noerr(H5Gget_info_by_name(loc, grp_name.c_str(), &info, H5P_DEFAULT));
+
+    for(int i=0; i<int(info.nlinks); ++i) {
+        // 1+ is for NULL terminator
+        size_t name_size = 1 + h5_noerr(
+                 H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
+                    nullptr, 0, H5P_DEFAULT));
+
+        auto tmp = std::unique_ptr<char[]>(new char[name_size]);
+        h5_noerr(H5Lget_name_by_idx(loc, grp_name.c_str(), H5_INDEX_NAME, H5_ITER_INC, i,
+                    tmp.get(), name_size, H5P_DEFAULT));
+
+        names.emplace_back(tmp.get());
+    }
+    return names;
+}
 
 }
