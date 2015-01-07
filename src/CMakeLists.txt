@@ -29,8 +29,8 @@ add_executable (upside
     nonbond.cpp 
     steric.cpp
     bonds.cpp 
-    backbone_dependent_sidechain.cpp
     hbond.cpp 
+    backbone_dependent_sidechain.cpp
     hmm.cpp 
     eig.cpp 
     dihedral_range.cpp

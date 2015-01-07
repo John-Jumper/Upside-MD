@@ -132,8 +132,8 @@ struct SidechainRadialPairs : public PotentialNode
     float cutoff;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
-        n_residue(get_dset_size<1>(grp, "id"   )[0]), 
-        n_type   (get_dset_size<1>(grp, "data/names")[0]),
+        n_residue(get_dset_size(1, grp, "id"   )[0]), 
+        n_type   (get_dset_size(1, grp, "data/names")[0]),
         bb_point(bb_point_), 
 
         params(n_residue), interaction_params(n_type*n_type),
@@ -186,7 +186,7 @@ struct ContactEnergy : public PotentialNode
     float cutoff;
 
     ContactEnergy(hid_t grp, CoordNode& alignment_):
-        n_contact(get_dset_size<2>(grp, "id")[0]),
+        n_contact(get_dset_size(2, grp, "id")[0]),
         alignment(alignment_), 
         params(n_contact),
         cutoff(read_attribute<float>(grp, ".", "cutoff"))

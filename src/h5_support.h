@@ -19,22 +19,8 @@ template<> inline const hid_t select_predtype<double>(){ return H5T_NATIVE_DOUBL
 template<> inline const hid_t select_predtype<int>   (){ return H5T_NATIVE_INT;    }
 template<> inline const hid_t select_predtype<long>  (){ return H5T_NATIVE_LONG;    }
 
-inline int h5_noerr(int i) {
-    if(i<0) {
-        // H5Eprint2(H5E_DEFAULT, stderr);
-        throw std::string("error " + std::to_string(i));
-    }
-    return i;
-}
-
-inline int h5_noerr(const char* nm, int i) {
-    if(i<0) {
-        // H5Eprint2(H5E_DEFAULT, stderr);
-        throw std::string("error " + std::to_string(i) + " in " + nm);
-    }
-    return i;
-}
-
+int h5_noerr(int i);
+int h5_noerr(const char* nm, int i);
 
 struct Hid_t {   // special type for saner hid_t
     hid_t ref;
@@ -60,32 +46,10 @@ struct H5Deleter
 
 typedef std::unique_ptr<Hid_t,H5Deleter> H5Obj;
 
+H5Obj h5_obj(H5DeleterFunc &deleter, hid_t obj);
+bool h5_exists(hid_t base, const char* nm, bool check_valid=true);
 
-inline H5Obj h5_obj(H5DeleterFunc &deleter, hid_t obj)
-{
-    return H5Obj(h5_noerr(obj), H5Deleter(&deleter));
-}
-
-
-inline bool h5_exists(hid_t base, const char* nm, bool check_valid=true) {
-    return h5_noerr(H5LTpath_valid(base, nm, check_valid));
-}
-
-template <int ndims>
-std::array<hsize_t,ndims> get_dset_size(hid_t group, const char* name) 
-try {
-    std::array<hsize_t,ndims> ret;
-    auto dset  = h5_obj(H5Dclose, H5Dopen2(group, name, H5P_DEFAULT));
-    auto space = h5_obj(H5Sclose, H5Dget_space(dset.get()));
-
-    if(h5_noerr(H5Sget_simple_extent_ndims(space.get())) != ndims) throw std::string("wrong number of dimensions");
-    h5_noerr("H5Sget_simple_extent_dims", H5Sget_simple_extent_dims(space.get(), ret.data(), NULL));
-    return ret;
-} catch(const std::string &e) {
-    throw "while getting size of '" + std::string(name) + "', " + e;
-}
-
-
+std::vector<hsize_t> get_dset_size(int ndims, hid_t group, const char* name);
 
 template <int ndim, typename T, typename F>
 struct traverse_dataset_iteraction_helper { 
@@ -223,83 +187,22 @@ template<>
 std::vector<std::string> read_attribute<std::vector<std::string>>
 (hid_t h5, const char* path, const char* attr_name);
 
-template <size_t ndim>
-inline void check_size(hid_t group, const char* name, std::array<size_t,ndim> sz)
-{
-    auto dims = get_dset_size<ndim>(group, name);
-    for(size_t d=0; d<ndim; ++d) {
-        if(dims[d] != sz[d]) {
-            std::string msg = std::string("dimensions of '") + name + std::string("', expected (");
-            for(size_t i=0; i<ndim; ++i) msg += std::to_string(sz  [i]) + std::string((i<ndim-1) ? ", " : "");
-            msg += ") but got (";
-            for(size_t i=0; i<ndim; ++i) msg += std::to_string(dims[i]) + std::string((i<ndim-1) ? ", " : "");
-            msg += ")";
-            throw msg;
-        }
-    }
-}
+void check_size(hid_t group, const char* name, std::vector<size_t> sz);
+void check_size(hid_t group, const char* name, size_t sz);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4);
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5);
 
-inline void check_size(hid_t group, const char* name, size_t sz) 
-{ check_size(group, name, std::array<size_t,1>{{sz}}); }
-
-inline void check_size(hid_t group, const char* name, size_t sz1, size_t sz2) 
-{ check_size(group, name, std::array<size_t,2>{{sz1,sz2}}); }
-
-inline void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3) 
-{ check_size(group, name, std::array<size_t,3>{{sz1,sz2,sz3}}); }
-
-inline void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4) 
-{ check_size(group, name, std::array<size_t,4>{{sz1,sz2,sz3,sz4}}); }
-
-inline void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5) 
-{ check_size(group, name, std::array<size_t,5>{{sz1,sz2,sz3,sz4,sz5}}); }
+H5Obj ensure_group(hid_t loc, const char* nm);
+H5Obj open_group(hid_t loc, const char* nm);
+void ensure_not_exist(hid_t loc, const char* nm);
 
 
-inline H5Obj ensure_group(hid_t loc, const char* nm) {
-    return h5_obj(H5Gclose, h5_exists(loc, nm) 
-            ? H5Gopen2(loc, nm, H5P_DEFAULT)
-            : H5Gcreate2(loc, nm, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
-}
-
-inline H5Obj open_group(hid_t loc, const char* nm) {
-    return h5_obj(H5Gclose, H5Gopen2(loc, nm, H5P_DEFAULT));
-}
-
-inline void ensure_not_exist(hid_t loc, const char* nm) {
-    if(h5_exists(loc, nm)) H5Ldelete(loc, nm, H5P_DEFAULT);
-}
-
-
-inline H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
+H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
         const std::initializer_list<int> &chunk_dims,
-        bool compression_level=0)  // 1 is often recommended
-{
-    if(dims.size() != chunk_dims.size()) throw std::string("invalid chunk dims");
-
-    hsize_t ndims = dims.size();
-    std::vector<hsize_t> dims_v(ndims);
-    std::vector<hsize_t> max_dims_v(ndims);
-    std::vector<hsize_t> chunk_dims_v(ndims);
-
-    for(size_t d=0; d<ndims; ++d) {
-        dims_v[d]       = *(begin(dims      )+d);
-        max_dims_v[d]   = dims_v[d] ? dims_v[d] : H5S_UNLIMITED;
-        chunk_dims_v[d] = *(begin(chunk_dims)+d);
-    }
-
-    auto space_id = h5_obj(H5Sclose, H5Screate_simple(ndims, dims_v.data(), max_dims_v.data()));
-
-    // setup chunked, possibly compressed storage
-    auto dcpl_id = h5_obj(H5Pclose, H5Pcreate(H5P_DATASET_CREATE));
-    h5_noerr(H5Pset_chunk(dcpl_id.get(), ndims, chunk_dims_v.data()));
-    h5_noerr(H5Pset_shuffle(dcpl_id.get()));     // improves data compression
-    h5_noerr(H5Pset_fletcher32(dcpl_id.get()));  // for verifying data integrity
-    if(compression_level) h5_noerr(H5Pset_deflate(dcpl_id.get(), compression_level));
-
-    return h5_obj(H5Dclose, H5Dcreate2(group, name, dtype, space_id.get(), 
-                H5P_DEFAULT, dcpl_id.get(), H5P_DEFAULT));
-}
+        bool compression_level=0);  // 1 is often recommended
 
 
 // I will check that the vector size is cleanly divided by the product of all other dimensions

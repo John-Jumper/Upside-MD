@@ -313,7 +313,7 @@ struct StericInteraction : public PotentialNode
     void pushback_residue(hid_t grp) {
         ref_res.push_back(StericResidue());  auto& r = ref_res.back();
         r.start_point = ref_point.size();
-        r.n_pts = get_dset_size<1>(grp, "weight")[0];
+        r.n_pts = get_dset_size(1, grp, "weight")[0];
 
         for(int np=0; np<r.n_pts; ++np) ref_point.push_back(StericPoint());
 
@@ -347,10 +347,10 @@ struct StericInteraction : public PotentialNode
     }
 
     StericInteraction(hid_t grp, CoordNode& alignment_):
-        n_res(h5::get_dset_size<1>(grp, "restype")[0]), alignment(alignment_),
+        n_res(h5::get_dset_size(1, grp, "restype")[0]), alignment(alignment_),
         params(n_res),
-        pot(get_dset_size<2>     (grp, "atom_interaction/cutoff")[0], 
-            get_dset_size<3>     (grp, "atom_interaction/potential")[2], 
+        pot(get_dset_size(2, grp, "atom_interaction/cutoff")[0], 
+            get_dset_size(3, grp, "atom_interaction/potential")[2], 
             read_attribute<float>(grp, "atom_interaction", "dx")) {
             check_elem_width(alignment, 7);
 

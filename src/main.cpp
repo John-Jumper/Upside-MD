@@ -148,7 +148,7 @@ try {
             throw string("Unable to open configuration file at ") + config_arg.getValue();
         }
 
-        auto pos_shape = get_dset_size<3>(config.get(), "/input/pos");
+        auto pos_shape = get_dset_size(3, config.get(), "/input/pos");
         int  n_atom   = pos_shape[0];
         int  n_system = pos_shape[2];
         if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");

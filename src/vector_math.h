@@ -3,18 +3,21 @@
 
 #include <cmath>
 
+//! Two dimensional vector (x,y)
 struct float2 {
     float x,y;
     float2(): x(0.f),y(0.f) {};
     float2(float x_, float y_):
         x(x_), y(y_){}
 };
+//! Three dimensional vector (x,y,z)
 struct float3 {
     float x,y,z;
     float3(): x(0.f),y(0.f),z(0.f) {};
     float3(float x_, float y_, float z_):
         x(x_), y(y_), z(z_) {}
 };
+//! Four dimensional vector (x,y,z,w)
 struct float4 {
     float x,y,z,w;
     float4(): x(0.f),y(0.f),z(0.f),w(0.f) {};
@@ -22,6 +25,10 @@ struct float4 {
         x(x_), y(y_), z(z_), w(w_) {}
 };
 
+//! Get component of float3 by index
+
+//! component(v,0) == v.x, component(v,1) == v.y, component(v,2) == v.z,
+//! any other value for dim is an error
 inline float& component(float3 &v, int dim) {
     switch(dim) {
         case 0: return v.x;
@@ -32,18 +39,36 @@ inline float& component(float3 &v, int dim) {
     return v.x;  
 }
 
+//! Get component of float4 by index
 
-namespace{
-static const float M_PI_F   = 3.141592653589793f;
-static const float M_1_PI_F = 0.3183098861837907f;
+//! component(v,0) == v.x, component(v,1) == v.y, component(v,2) == v.z, component(v,3) == v.w,
+//! any other value for dim is an error
+inline float& component(float4 &v, int dim) {
+    switch(dim) {
+        case 0: return v.x;
+        case 1: return v.y;
+        case 2: return v.z;
+        case 3: return v.w;
+    }
+    throw -1;  // abort and die
+    return v.x;  
+}
 
-inline float rsqrtf(float x) {return 1.f/sqrtf(x);}
 
-inline float2 make_float2(float x, float y                  ) { return float2(x,y);     }
-inline float3 make_float3(float x, float y, float z         ) { return float3(x,y,z);   }
-inline float4 make_float4(float x, float y, float z, float w) { return float4(x,y,z,w); }
-inline float4 make_float4(float3 v, float w) { return make_float4(v.x,v.y,v.z,w); }
+static const float M_PI_F   = 3.141592653589793f;   //!< value of pi as float
+static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
+inline float rsqrtf(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
+
+
+inline float2 make_float2(float x, float y                  ) { return float2(x,y);     } //!< make float2 from scalars
+inline float3 make_float3(float x, float y, float z         ) { return float3(x,y,z);   } //!< make float3 from scalars
+inline float4 make_float4(float x, float y, float z, float w) { return float4(x,y,z,w); } //!< make float4 from scalars
+inline float4 make_float4(float3 v, float w) { return make_float4(v.x,v.y,v.z,w); } //!< make float4 from float3 (as x,y,z) and scalar (as w)
+
+inline float3 xyz(const float4& x) { return make_float3(x.x,x.y,x.z); } //!< return x,y,z as float3 from a float4
+
+//! \cond
 inline float2 operator*(float a, const float2 &b) { return make_float2(a*b.x, a*b.y); }
 inline float2 operator+(float a, const float2 &b) { return make_float2(a+b.x, a+b.y); }
 inline float2 operator-(float a, const float2 &b) { return make_float2(a-b.x, a-b.y); }
@@ -53,9 +78,6 @@ inline float2 operator*(const float2 &a, const float2 &b) { return make_float2(a
 inline float2 operator+(const float2 &a, const float2 &b) { return make_float2(a.x+b.x, a.y+b.y); }
 inline float2 operator-(const float2 &a, const float2 &b) { return make_float2(a.x-b.x, a.y-b.y); }
 inline float2 operator/(const float2 &a, const float2 &b) { return make_float2(a.x/b.x, a.y/b.y); }
-
-inline float3 float3_from_float4(const float4& x) { return make_float3(x.x,x.y,x.z); }
-inline float3 xyz(const float4& x) { return make_float3(x.x,x.y,x.z); }
 
 inline float3 operator*(const float  &a, const float3 &b) { return make_float3(a*b.x, a*b.y, a*b.z); }
 inline float3 operator+(const float  &a, const float3 &b) { return make_float3(a+b.x, a+b.y, a+b.z); }
@@ -109,9 +131,11 @@ inline float4 operator/=(      float4 &a, const float4 &b) { a.x/=b.x; a.y/=b.y;
 
 inline float3 operator-(const float3 &a) {return make_float3(-a.x, -a.y, -a.z);}
 inline float4 operator-(const float4 &a) {return make_float4(-a.x, -a.y, -a.z, -a.w);}
+//! \endcond
 
-inline float inv_mag(float3 a){return rsqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}
+inline float inv_mag(float3 a){return rsqrtf(a.x*a.x + a.y*a.y + a.z*a.z);} //!< 1/sqrt(|v|), where |v| is the magnitude of v
 
+//! cross-product of the vectors a and b
 inline float3 cross(float3 a, float3 b){
     return make_float3(
         a.y*b.z - a.z*b.y,
@@ -119,16 +143,20 @@ inline float3 cross(float3 a, float3 b){
         a.x*b.y - a.y*b.x);
 }
 
-inline float mag(float3 a){return sqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}
+inline float mag(float3 a){return sqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}  //!< vector magnitude
 
-inline float mag2(float3 a){return a.x*a.x + a.y*a.y + a.z*a.z;}
+inline float mag2(float3 a){return a.x*a.x + a.y*a.y + a.z*a.z;} //!< vector magnitude squared (faster than mag)
 
-inline float inv_mag2(float3 a){float m=inv_mag(a); return m*m;}
+inline float inv_mag2(float3 a){float m=inv_mag(a); return m*m;} //!< reciprocal of vector magnitude squared (1/|v|^2)
 
-inline float3 normalize3(float3 a){return a*inv_mag(a);}
+inline float3 normalize3(float3 a){return a*inv_mag(a);} //!< unit vector (v/|v|)
 
-inline float dot(float3 a, float3 b){return a.x*b.x + a.y*b.y + a.z*b.z;}
+inline float dot(float3 a, float3 b){return a.x*b.x + a.y*b.y + a.z*b.z;} //!< dot product of vectors
 
+//! sigmoid function and its derivative 
+
+//! Value of function is 1/(1+exp(x)) and the derivative is 
+//! exp(x)/(1+exp(x))^2
 inline float2 sigmoid(float x) {
 #ifdef APPROX_SIGMOID
     float z = rsqrtf(4.f+x*x);
@@ -141,7 +169,12 @@ inline float2 sigmoid(float x) {
 #endif
 }
 
-inline float dihedral_germ(
+//! Compute a dihedral angle and its derivative from four positions
+
+//! The angle is always in the range [-pi,pi].  If the arguments are NaN or Inf, the result is undefined.
+//! The arguments d1,d2,d3,d4 are output values, and d1 corresponds to the derivative of the dihedral angle
+//! with respect to r1.
+static float dihedral_germ(
         float3  r1, float3  r2, float3  r3, float3  r4,
         float3 &d1, float3 &d2, float3 &d3, float3 &d4)
     // Formulas and notation taken from Blondel and Karplus, 1995
@@ -170,6 +203,5 @@ inline float dihedral_germ(
     d3 = -d4 - f_mid;
 
     return atan2(dot(C,G), dot(A,B) * Gmag);
-}
 }
 #endif

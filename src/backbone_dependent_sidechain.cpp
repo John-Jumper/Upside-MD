@@ -123,10 +123,10 @@ struct BackboneDependentPoint : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     BackboneDependentPoint(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
-        CoordNode(rama_.n_system, get_dset_size<1>(grp, "restype")[0], 3),
+        CoordNode(rama_.n_system, get_dset_size(1, grp, "restype")[0], 3),
         rama(rama_), alignment(alignment_),
-        n_restype(get_dset_size<5>(grp, "backbone_point_map")[0]),
-        n_bin    (get_dset_size<5>(grp, "backbone_point_map")[1]),
+        n_restype(get_dset_size(5, grp, "backbone_point_map")[0]),
+        n_bin    (get_dset_size(5, grp, "backbone_point_map")[1]),
         backbone_point_map_data(n_restype*n_bin*n_bin*3*3, 0.f),
         params(n_elem)
     {

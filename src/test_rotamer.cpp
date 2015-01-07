@@ -220,8 +220,8 @@ Affine3f rigid_alignment(
 //         
 //         std::vector<ModelResidue> res;
 // 
-//         int n_res  = get_dset_size<3>(residues.get(), (rname+"/pos").c_str())[0];
-//         int n_atom = get_dset_size<3>(residues.get(), (rname+"/pos").c_str())[1];
+//         int n_res  = get_dset_size(3, residues.get(), (rname+"/pos").c_str())[0];
+//         int n_atom = get_dset_size(3, residues.get(), (rname+"/pos").c_str())[1];
 // 
 //         check_size(residues.get(), (rname+"/rama").c_str(), n_res, 2);
 //         check_size(residues.get(), (rname+"/pos").c_str(),  n_res, n_atom, 3);
@@ -308,8 +308,8 @@ int main(int argc, char** argv) try {
         } else {
             auto grp     = open_group  (config.get(), rname.c_str());
 
-            // int n_bin = get_dset_size<3>(grp.get(), "rama_index_range")[0];
-            int n_res_total = get_dset_size<2>(grp.get(), "chi")[0];
+            // int n_bin = get_dset_size(3, grp.get(), "rama_index_range")[0];
+            int n_res_total = get_dset_size(2, grp.get(), "chi")[0];
 
             check_size(grp.get(), "rama_index_range", n_bin, n_bin, 2);
             check_size(grp.get(), "chi",  n_res_total, 4);
@@ -403,7 +403,7 @@ int main(int argc, char** argv) try {
 // 
 //     auto prot = h5_obj(H5Fclose, H5Fopen(file_path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
 // 
-//     int n_res = get_dset_size<1>(prot.get(), "fasta")[0];
+//     int n_res = get_dset_size(1, prot.get(), "fasta")[0];
 //     printf("found %i residues\n", n_res);
 //     vector<string> fasta(n_res);
 //     MatrixXf       atom_pos(3*n_res,3);
@@ -481,7 +481,7 @@ int main(int argc, char** argv) try {
 //     
 //     vector<string> residue_names = node_names_in_group(residues.get(), ".");
 //     for(auto &nm: residue_names) {
-//         auto pos_shape = get_dset_size<3>(residues.get(), (nm+"/pos").c_str());
+//         auto pos_shape = get_dset_size(3, residues.get(), (nm+"/pos").c_str());
 //         int n_atom = pos_shape[1] - 1; // don't count oxygen atom
 // 
 //         MatrixXf atom_pos = MatrixXf::Zero(pos_shape[0], n_atom*3);

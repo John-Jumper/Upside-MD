@@ -167,7 +167,7 @@ struct BackbonePairs : public PotentialNode
     float dist_cutoff;
 
     BackbonePairs(hid_t grp, CoordNode& alignment_):
-        n_residue(get_dset_size<1>(grp, "id")[0]), alignment(alignment_), 
+        n_residue(get_dset_size(1, grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
         dist_cutoff (read_attribute<float>(grp, ".", "dist_cutoff"))

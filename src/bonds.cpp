@@ -71,7 +71,7 @@ struct PosSpring : public PotentialNode
     vector<PosSpringParams> params;
 
     PosSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size<1>(grp, "id")[0]), pos(pos_), params(n_elem)
+    n_elem(get_dset_size(1, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
         check_size(grp, "id", n_elem, n_dep);
@@ -166,7 +166,7 @@ struct RamaCoord : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     RamaCoord(hid_t grp, CoordNode& pos_):
-        CoordNode(pos_.n_system, get_dset_size<2>(grp, "id")[0], 2),
+        CoordNode(pos_.n_system, get_dset_size(2, grp, "id")[0], 2),
         pos(pos_),
         params(n_elem)
     {
@@ -254,7 +254,7 @@ struct DistSpring : public PotentialNode
     vector<DistSpringParams> params;
 
     DistSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
         check_size(grp, "id",              n_elem, n_dep);
@@ -304,7 +304,7 @@ struct ZFlatBottom : public PotentialNode
     vector<ZFlatBottomParams> params;
 
     ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
-        pos(pos_), params( get_dset_size<1>(hdf_group, "atom")[0] )
+        pos(pos_), params( get_dset_size(1, hdf_group, "atom")[0] )
     {
         n_term = params.size();
         check_size(hdf_group, "atom",            n_term);
@@ -374,7 +374,7 @@ struct AngleSpring : public PotentialNode
     vector<AngleSpringParams> params;
 
     AngleSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 3;  // number of atoms that each term depends on 
         check_size(grp, "id",              n_elem, n_dep);
@@ -450,7 +450,7 @@ struct DynamicDihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
 
     DynamicDihedralSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
+    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
         check_size(grp, "id", n_elem, n_dep, pos.n_system);  // only id is required for dynamic spring
@@ -502,7 +502,7 @@ struct DihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;
 
     DihedralSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_elem)
+    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
         check_size(grp, "id",           n_elem, n_dep);

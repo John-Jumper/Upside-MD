@@ -235,7 +235,9 @@ def random_initial_config(n_res):
     angles[:,1] = 120.0*deg  # C->N->CA angle
     angles[:,2] = 109.5*deg  # N->CA->C angle
 
-    lengths[:] = 1.4
+    lengths[:,0] = 1.453
+    lengths[:,1] = 1.526
+    lengths[:,2] = 1.300
     return construct_equilibrium_structure(rama, angles, lengths)
 
 
@@ -247,10 +249,10 @@ def write_dist_spring(args):
     id = np.arange(n_atom-1)
     id = np.column_stack((id,id+1))
 
-    equil_dist   =  np.zeros(id.shape[0])
+    equil_dist = np.zeros(id.shape[0])
     equil_dist[0::3] = 1.453
-    equil_dist[0::3] = 1.526
-    equil_dist[0::3] = 1.300
+    equil_dist[1::3] = 1.526
+    equil_dist[2::3] = 1.300
 
     spring_const = args.bond_stiffness*np.ones(id.shape[0])
     bonded_atoms = np.ones(id.shape[0], dtype='bool')
@@ -907,7 +909,7 @@ def main():
             help='Pickle file for initial structures for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
             'requested, structures will be recycled.  If not provided, a ' +
-            'freely-jointed chain with a bond length of 1.4 A will be used ' +
+            'freely-jointed chain with good bond lengths and angles but bad dihedrals will be used ' +
             'instead.')
     parser.add_argument('--target-structures', default='', 
             help='Pickle file for target structures for the simulation.  ' +

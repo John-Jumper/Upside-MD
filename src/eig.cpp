@@ -490,7 +490,7 @@ struct AffineAlignment : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     AffineAlignment(hid_t grp, CoordNode& pos_):
-        CoordNode(pos_.n_system, get_dset_size<2>(grp, "atoms")[0], 7),
+        CoordNode(pos_.n_system, get_dset_size(2, grp, "atoms")[0], 7),
         pos(pos_), params(n_elem)
     {
         int n_dep = 3;

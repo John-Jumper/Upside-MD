@@ -175,57 +175,6 @@ struct ComputeMyDeriv {
 };
 
 
-
-template <typename ComputationT, typename ArgumentT> 
-void attempt_add_node(
-        DerivEngine& engine,
-        hid_t force_group,
-        const string  name,
-        const string  argument_name,
-        const string* table_name_if_different = nullptr) 
-{
-    auto table_name = table_name_if_different ? *table_name_if_different : name;
-    if(!h5_noerr(H5LTpath_valid(force_group, table_name.c_str(), 1))) return;
-    auto grp = h5_obj(H5Gclose, H5Gopen2(force_group, table_name.c_str(), H5P_DEFAULT));
-    printf("initializing %s\n", name.c_str());
-
-    // note that the unique_ptr holds the object by a superclass pointer
-    try {
-        auto& argument = dynamic_cast<ArgumentT&>(*engine.get(argument_name).computation);
-        auto computation = unique_ptr<DerivComputation>(new ComputationT(grp.get(), argument));
-        engine.add_node(name, move(computation), {argument_name});
-    } catch(const string &e) {
-        throw "while adding '" + name + "', " + e;
-    }
-}
-
-template <typename ComputationT, typename Argument1T, typename Argument2T> 
-void attempt_add_node(
-        DerivEngine& engine,
-        hid_t force_group,
-        const string  name,
-        const string  argument_name1,
-        const string  argument_name2,
-        const string* table_name_if_different = nullptr) 
-{
-    auto table_name = table_name_if_different ? *table_name_if_different : name;
-    if(!h5_noerr(H5LTpath_valid(force_group, table_name.c_str(), 1))) return;
-    auto grp = h5_obj(H5Gclose, H5Gopen2(force_group, table_name.c_str(), H5P_DEFAULT));
-    printf("initializing %s\n", name.c_str());
-
-    // note that the unique_ptr holds the object by a superclass pointer
-    try {
-        auto& argument1 = dynamic_cast<Argument1T&>(*engine.get(argument_name1).computation);
-        auto& argument2 = dynamic_cast<Argument2T&>(*engine.get(argument_name2).computation);
-        auto computation = unique_ptr<DerivComputation>(new ComputationT(grp.get(), argument1, argument2));
-
-        engine.add_node(name, move(computation), {argument_name1, argument_name2});
-    } catch(const string &e) {
-        throw "while adding '" + name + "', " + e;
-    }
-}
-
-
 DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group)
 {
     auto engine = DerivEngine(n_atom, n_system);
@@ -280,9 +229,13 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
                 throw arg_name + " is not an intermediate value, but it is an argument of " + nm;
         }
 
-        auto grp = open_group(force_group,nm.c_str());
-        auto computation = unique_ptr<DerivComputation>(node_func(grp.get(),arguments));
-        engine.add_node(nm, move(computation), argument_names);
+        try {
+            auto grp = open_group(force_group,nm.c_str());
+            auto computation = unique_ptr<DerivComputation>(node_func(grp.get(),arguments));
+            engine.add_node(nm, move(computation), argument_names);
+        } catch(const string &e) {
+            throw "while adding '" + nm + "', " + e;
+        }
     }
 
     return engine;

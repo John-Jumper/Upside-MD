@@ -70,7 +70,7 @@ struct DihedralRange : public PotentialNode
     CoordNode& pos;
     vector<DihedralRangeParams> params;
     DihedralRange(hid_t grp, CoordNode& pos_):
-        n_elem(get_dset_size<2>(grp, "id")[0]),
+        n_elem(get_dset_size(2, grp, "id")[0]),
         pos(pos_),
         params(n_elem)
     {

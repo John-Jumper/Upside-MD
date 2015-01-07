@@ -308,10 +308,10 @@ struct HMMPot : public PotentialNode
     vector<RamaMapGerm> rama_maps;
 
     HMMPot(hid_t grp, CoordNode& pos_):
-    n_residue(get_dset_size<2>(grp, "id")[0]), pos(pos_), params(n_residue)
+    n_residue(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_residue)
     {
         int n_dep = 5;  // number of atoms that each term depends on 
-        n_bin     = get_dset_size<5>(grp, "rama_deriv")[2];
+        n_bin     = get_dset_size(5, grp, "rama_deriv")[2];
         rama_maps.resize(n_residue*N_STATE*n_bin*n_bin);
 
         check_size(grp, "id",             n_residue,   n_dep);

@@ -290,8 +290,8 @@ struct Infer_H_O : public CoordNode
 
     Infer_H_O(hid_t grp, CoordNode& pos_):
         CoordNode(pos_.n_system, 
-                get_dset_size<2>(grp, "donors/id")[0]+get_dset_size<2>(grp, "acceptors/id")[0], 6),
-        pos(pos_), n_donor(get_dset_size<2>(grp, "donors/id")[0]), n_acceptor(get_dset_size<2>(grp, "acceptors/id")[0]),
+                get_dset_size(2, grp, "donors/id")[0]+get_dset_size(2, grp, "acceptors/id")[0], 6),
+        pos(pos_), n_donor(get_dset_size(2, grp, "donors/id")[0]), n_acceptor(get_dset_size(2, grp, "acceptors/id")[0]),
         n_virtual(n_donor+n_acceptor), params(n_virtual)
     {
         int n_dep = 3;
@@ -344,8 +344,8 @@ struct HBondEnergy : public HBondCounter
 
     HBondEnergy(hid_t grp, CoordNode& infer_):
         HBondCounter(),
-        n_donor   (get_dset_size<1>(grp, "donors/residue_id")[0]), 
-        n_acceptor(get_dset_size<1>(grp, "acceptors/residue_id")[0]),
+        n_donor   (get_dset_size(1, grp, "donors/residue_id")[0]), 
+        n_acceptor(get_dset_size(1, grp, "acceptors/residue_id")[0]),
         infer(infer_), 
         don_params(n_donor), acc_params(n_acceptor), 
         hbond_energy(        read_attribute<float>(grp, ".", "hbond_energy"))
