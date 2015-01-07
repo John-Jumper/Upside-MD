@@ -247,7 +247,11 @@ def write_dist_spring(args):
     id = np.arange(n_atom-1)
     id = np.column_stack((id,id+1))
 
-    equil_dist   =  1.4*np.ones(id.shape[0])
+    equil_dist   =  np.zeros(id.shape[0])
+    equil_dist[0::3] = 1.453
+    equil_dist[0::3] = 1.526
+    equil_dist[0::3] = 1.300
+
     spring_const = args.bond_stiffness*np.ones(id.shape[0])
     bonded_atoms = np.ones(id.shape[0], dtype='bool')
 
