@@ -12,16 +12,19 @@
 
 namespace h5 {
 
+//! \cond
 template <typename T> // DO NOT ADD BOOL TO THIS TYPE -- unwitting users might hit vector<bool>
 inline const hid_t select_predtype () { return T::NO_SPECIALIZATION_AVAILABLE; }
 template<> inline const hid_t select_predtype<float> (){ return H5T_NATIVE_FLOAT;  }
 template<> inline const hid_t select_predtype<double>(){ return H5T_NATIVE_DOUBLE; }
 template<> inline const hid_t select_predtype<int>   (){ return H5T_NATIVE_INT;    }
 template<> inline const hid_t select_predtype<long>  (){ return H5T_NATIVE_LONG;    }
+//! \endcond
 
-int h5_noerr(int i);
-int h5_noerr(const char* nm, int i);
+int h5_noerr(int i); //!< if i<0 (signalling failed H5 function), throw an error
+int h5_noerr(const char* nm, int i); //!< if i<0 (signalling failed H5 function), throw an error
 
+//! Wrapper to make hid_t compatible with smart pointers
 struct Hid_t {   // special type for saner hid_t
     hid_t ref;
     Hid_t(std::nullptr_t = nullptr): ref(-1) {}
@@ -33,7 +36,9 @@ struct Hid_t {   // special type for saner hid_t
 };
 
 
+//! Type of a function to delete a hid_t reference
 typedef herr_t H5DeleterFunc(hid_t);
+//! Custom deleter for hid_t references
 struct H5Deleter
 {
     typedef Hid_t  pointer;
@@ -44,15 +49,27 @@ struct H5Deleter
     void operator()(pointer p) {if(deleter) (*deleter)(p);} // no error check since destructors can't throw
 };
 
+//! Wrapper for hid_t reference with custom deleter
 typedef std::unique_ptr<Hid_t,H5Deleter> H5Obj;
 
+//! Wrap a raw hid_t reference so that the object is released when it is not needed
+
+//! The argument deleter is most commonly a function 
+//! such as H5Gclose or h5Dclose
 H5Obj h5_obj(H5DeleterFunc &deleter, hid_t obj);
+
+//! Check that an HDF object exists at a given path
+
+//! If check_valid is true, then the function will also 
+//! ensure that the path is not a dangling link.
 bool h5_exists(hid_t base, const char* nm, bool check_valid=true);
 
+// Read the dimension sizes of a dataset
 std::vector<hsize_t> get_dset_size(int ndims, hid_t group, const char* name);
 
 
 
+//! Read a scalar attribute
 template<class T>
 T read_attribute(hid_t h5, const char* path, const char* attr_name) 
 try {
@@ -63,40 +80,46 @@ try {
     throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
 }
 
+//! Read an attribute containing a list of strings
 template<>
 std::vector<std::string> read_attribute<std::vector<std::string>>
 (hid_t h5, const char* path, const char* attr_name);
 
-void check_size(hid_t group, const char* name, std::vector<size_t> sz);
-void check_size(hid_t group, const char* name, size_t sz);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4);
-void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5);
+void check_size(hid_t group, const char* name, std::vector<size_t> sz); //!< Check the dimension sizes of an arbitrary dataset
+void check_size(hid_t group, const char* name, size_t sz); //!< Check the dimension sizes of an 1D dataset
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2); //!< Check the dimension sizes of an 2D dataset
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3); //!< Check the dimension sizes of an 3D dataset
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4); //!< Check the dimension sizes of an 4D dataset
+void check_size(hid_t group, const char* name, size_t sz1, size_t sz2, size_t sz3, size_t sz4, size_t sz5); //!< Check the dimension sizes of an 5D dataset
 
-H5Obj ensure_group(hid_t loc, const char* nm);
-H5Obj open_group(hid_t loc, const char* nm);
-void ensure_not_exist(hid_t loc, const char* nm);
+H5Obj ensure_group(hid_t loc, const char* nm);    //!< Ensure that a group of a specific name exists
+H5Obj open_group(hid_t loc, const char* nm);      //!< Open an existing group
+void ensure_not_exist(hid_t loc, const char* nm); //!< Delete a group if it exists
 
 
+//! Create a new dataset
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
         const std::initializer_list<int> &chunk_dims,
         bool compression_level=0);  // 1 is often recommended
 
 
+//! Append a raw data buffer to a dataset
 void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, const void* new_data, int append_dim);
 
 
+//! Append vector of data to a dataset
 template <typename T>
 void append_to_dset(hid_t dset, const std::vector<T> &new_data, int append_dim) {
     append_to_dset(dset, select_predtype<T>(), new_data.size(), (const void*)(new_data.data()), append_dim);}
 
 
+//! Read list of names within a group
 std::vector<std::string> 
 node_names_in_group(const hid_t loc, const std::string grp_name);
 
 
+//! \cond
 template <int ndim, typename T, typename F>
 struct traverse_dataset_iteraction_helper { 
     void operator()(T* data, hsize_t* dims, const F& f, size_t stride=1) {T::NO_SPECIALIZATION_AVAILABLE();}
@@ -157,11 +180,12 @@ struct traverse_dataset_iteraction_helper<5,T,F> {
                             f(i0,i1,i2,i3,i4, data[stride*loc++]);
     }
 };
+//! \endcond
 
 
+//! Execute a function f for each element of a dataset
 template<int ndims, typename T, typename F>
-void traverse_dset(
-        hid_t group, const char* name, const F& f)
+void traverse_dset(hid_t group, const char* name, const F& f)
 try {
     auto dset  = h5_obj(H5Dclose, H5Dopen2(group, name, H5P_DEFAULT));
     auto space = h5_obj(H5Sclose, H5Dget_space(dset.get()));
@@ -181,8 +205,7 @@ try {
 }
 
 
-// Partial specialization would be better, but that is forbidden for functions.  In the 
-// future, this should be wrapped in a class
+//! Execute a function f for each string in a dataset
 template<int ndims, typename F>
 void traverse_string_dset(
         hid_t group, const char* name, const F& f)
