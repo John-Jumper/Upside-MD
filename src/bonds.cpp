@@ -30,10 +30,6 @@ struct ZFlatBottomParams {
     float     spring_constant;
 };
 
-struct RamaCoordParams {
-    CoordPair atom[5];
-};
-
 struct PosSpringParams {
     CoordPair atom[1];
     float x,y,z;
@@ -93,6 +89,10 @@ struct PosSpring : public PotentialNode
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 
+
+struct RamaCoordParams {
+    CoordPair atom[5];
+};
 
 void rama_coord(
         const SysArray output,

@@ -775,9 +775,9 @@ def write_sidechain_potential(fasta, library):
 def write_rama_coord():
     grp = t.create_group(force, 'rama_coord')
     grp._v_attrs.arguments = np.array(['pos'])
-    # first ID is previous C
-    id = np.arange(-1,n_atom-4,3)
-    id = np.column_stack((id,id+1,id+2,id+3,id+4))
+    n_res = n_atom/3
+    N_id = 3*np.arange(n_res)
+    id = np.column_stack((N_id-1,N_id,N_id+1,N_id+2,N_id+3))
     id[id>=n_atom] = -1  # last atom is non-existent (as is first)
                          #   and non-existence is indicated by -1
     create_array(grp, 'id', id)
@@ -790,19 +790,20 @@ def write_backbone_dependent_point(fasta, library):
     data = tables.open_file(library)
 
     n_restype = len(aa_num)
-    n_bin = data.get_node('/ALA/centers').shape[0]
+    n_bin = data.get_node('/ALA/center').shape[0]
     point_map = np.zeros((n_restype,n_bin,n_bin, 3,3),dtype='f4')  
 
     for rname,idx in sorted(aa_num.items()):
-        point_map[idx,:,:, 0,:] = data.get_node('/%s/centers'%rname)[:]
+        point_map[idx,:,:, 0,:] = data.get_node('/%s/center'%rname)[:]
 
     counter = np.arange(n_bin)
     up_loc  = (counter+1)%n_bin
     dn_loc  = (counter-1)%n_bin
+    dx = 2*np.pi/(n_bin-1)
 
     # compute central difference derivatives
-    point_map[:,:,:, 1] = point_map[:,up_loc,:, 0] - point_map[:,dn_loc,:, 0]
-    point_map[:,:,:, 2] = point_map[:,:,up_loc, 0] - point_map[:,:,dn_loc, 0]
+    point_map[:,:,:, 1,:] = (point_map[:,up_loc,:][:,:,:, 0,:]-point_map[:,dn_loc,:][:,:,:, 0,:])/(2.*dx)
+    point_map[:,:,:, 2,:] = (point_map[:,:,up_loc][:,:,:, 0,:]-point_map[:,:,dn_loc][:,:,:, 0,:])/(2.*dx)
 
     create_array(grp, 'rama_residue',       np.arange(len(fasta)))
     create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
@@ -883,6 +884,8 @@ def main():
             help='use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--steric', default=None,
             help='use steric library')
+    parser.add_argument('--backbone-dependent-point', default=None,
+            help='use backbone-depedent sidechain location library')
     parser.add_argument('--sidechain-radial', default=None,
             help='use sidechain radial potential library')
     parser.add_argument('--sidechain-radial-exclude-residues', default=[], type=parse_segments,
@@ -944,6 +947,9 @@ def main():
 
     if args.steric and args.backbone:
         parser.error('--steric is incompatible with --backbone since --steric includes backbone atoms.  You probably want just --steric.')
+
+    if args.sidechain_radial and not args.backbone_dependent_point:
+        parser.error('--sidechain-radial requires --backbone-dependent-point')
 
     fasta_seq = read_fasta(open(args.fasta))
 
@@ -1018,8 +1024,13 @@ def main():
         write_steric(fasta_seq, args.steric)
 
     if args.sidechain_radial:
+        print 'SIDECHAIN_RADIAL IS CURRENTLY BROKEN.  DO NOT USE.'
+        return;
         do_alignment = True
-        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, args.sidechain_radial_exclude_residues)
+        write_rama_coord()
+        write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
+        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 
+                args.sidechain_radial_exclude_residues)
 
     if args.contact_energies:
         do_alignment = True

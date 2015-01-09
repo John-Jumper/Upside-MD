@@ -59,7 +59,7 @@ try {
     if(H5Sget_simple_extent_ndims(space.get()) != 1) throw std::string("wrong size for attribute");
     hsize_t dims[1]; h5_noerr(H5Sget_simple_extent_dims(space.get(), dims, NULL));
 
-    auto tmp = std::unique_ptr<char>(new char[dims[0]*maxchars+1]);
+    auto tmp = std::unique_ptr<char[]>(new char[dims[0]*maxchars+1]);
     std::fill(tmp.get(), tmp.get()+dims[0]*maxchars+1, '\0');
     h5_noerr(H5Aread(attr.get(), dtype.get(), tmp.get()));
 

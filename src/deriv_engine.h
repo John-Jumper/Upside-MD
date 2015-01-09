@@ -49,27 +49,29 @@ struct AutoDiffParams {
 
     AutoDiffParams(
             const std::initializer_list<unsigned short> &slots1_,
-            const std::initializer_list<unsigned short> &slots2_):
-        n_slots1(slots1_.size()), n_slots2(slots2_.size()) 
+            const std::initializer_list<unsigned short> &slots2_)
     {
         unsigned loc1=0;
-        for(auto i: slots1_) slots1[loc1++] = i;
+        for(auto i: slots1_) if(i!=(unsigned short)(-1)) slots1[loc1++] = i;
+        n_slots1 = loc1;
         while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
 
         unsigned loc2=0;
-        for(auto i: slots2_) slots1[loc2++] = i;
+        for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots1[loc2++] = i;
+        n_slots2 = loc2;
         while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
     }
 
-    explicit AutoDiffParams(const std::initializer_list<unsigned short> &slots1_):
-        n_slots1(slots1_.size()), n_slots2(0u)
+    explicit AutoDiffParams(const std::initializer_list<unsigned short> &slots1_)
     { 
         unsigned loc1=0;
-        for(auto i: slots1_) slots1[loc1++] = i;
+        for(auto i: slots1_) if(i!=(unsigned short)(-1)) slots1[loc1++] = i;
+        n_slots1 = loc1;
         while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
 
         unsigned loc2=0;
-        // for(auto i: slots2_) slots1[loc2++] = i;
+        // for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots1[loc2++] = i;
+        n_slots2 = loc2;
         while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
     }
 
@@ -172,7 +174,7 @@ struct DerivEngine
 };
 
 double get_n_hbond(DerivEngine &engine);
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group);
+DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group, bool quiet=false);
 
 // note that there are no null points in the vector of CoordNode*
 typedef std::vector<CoordNode*> ArgList;
@@ -267,4 +269,8 @@ void reverse_autodiff(
     }
 }
 
+
+
+std::vector<float> central_difference_deriviative(
+        const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output);
 #endif

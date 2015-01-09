@@ -175,18 +175,18 @@ struct ComputeMyDeriv {
 };
 
 
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group)
+DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group, bool quiet)
 {
     auto engine = DerivEngine(n_atom, n_system);
     auto& m = node_creation_map();
 
-    map<string, vector<string>> dep_graph;
-    dep_graph["pos"] = vector<string>();
+    map<string, pair<bool,vector<string>>> dep_graph;  // bool indicates node is active
+    dep_graph["pos"] = make_pair(true, vector<string>());
     for(const auto &name : node_names_in_group(force_group, "."))
-        dep_graph[name] = read_attribute<vector<string>>(force_group, name.c_str(), "arguments");
+        dep_graph[name] = make_pair(true, read_attribute<vector<string>>(force_group, name.c_str(), "arguments"));
 
     for(auto &kv : dep_graph) {
-        for(auto& dep_name : kv.second) {
+        for(auto& dep_name : kv.second.second) {
             if(dep_graph.find(dep_name) == end(dep_graph)) 
                 throw string("Node ") + kv.first + " takes " + dep_name + 
                     " as an argument, but no node of that name can be found.";
@@ -200,16 +200,19 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
     int graph_size = dep_graph.size();
     for(int round_num=0; round_num<graph_size; ++round_num) {
         for(auto it=begin(dep_graph); it!=end(dep_graph); ++it) {
-            if(all_of(begin(it->second), end(it->second), in_topo)) {
+            if(!it->second.first) continue;
+            if(all_of(begin(it->second.second), end(it->second.second), in_topo)) {
                 topo_order.push_back(it->first);
-                dep_graph.erase(it);
+                it->second.first = false;  // make node inactive
             }
         }
     }
-    if(dep_graph.size()) throw string("Unsatisfiable dependency in force computation");
+    for(auto &kv : dep_graph) if(kv.second.first) 
+        throw string("Unsatisfiable dependency ") + kv.first + " in force computation";
 
     // using topo_order here ensures that a node is only parsed after all its arguments
     for(auto &nm : topo_order) {
+        if(!quiet)  printf("initializing %-27s%s", nm.c_str(), nm=="pos" ? "\n" : ""); 
         if(nm=="pos") continue;  // pos node is added specially
         // some name in the node_creation_map must be a prefix of this name
         string node_type_name = "";
@@ -227,6 +230,14 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
             arguments.push_back(dynamic_cast<CoordNode*>(engine.get(arg_name).computation.get()));
             if(!arguments.back()) 
                 throw arg_name + " is not an intermediate value, but it is an argument of " + nm;
+        }
+        if(!quiet) {
+            printf(" with %sargument%s ", 
+                    argument_names.size() == 0 ? "no " : "",
+                    argument_names.size() == 1 ? " "   : "s");
+            for(size_t na=0; na<argument_names.size(); ++na) 
+                printf("%s%s", na ? " and " : "", argument_names[na].c_str());
+            printf("\n");
         }
 
         try {
@@ -258,4 +269,67 @@ double get_n_hbond(DerivEngine &engine) {
         nullptr : 
         &engine.get_computation<HBondCounter>("hbond_energy");
     return hbond_comp?hbond_comp->n_hbond:-1.f;
+}
+
+
+vector<float> central_difference_deriviative(
+        const function<void()>& compute_value, vector<float>& input, vector<float>& output, float eps) 
+{
+    // FIXME only handles single systems
+    auto old_input = input;
+    compute_value();
+    auto output_minus_eps = output;
+
+    vector<float> jacobian(input.size()*output.size(), -10101.f);
+
+    for(unsigned ni=0; ni<input.size(); ++ni) {
+        copy(begin(old_input), end(old_input), begin(input));
+
+        input[ni] = old_input[ni] - eps; 
+        compute_value();
+        copy(begin(output), end(output), begin(output_minus_eps));
+
+        input[ni] = old_input[ni] + eps; 
+        compute_value();
+
+        for(unsigned no=0; no<output.size(); ++no)
+            jacobian[no*input.size() + ni] = (output[no]-output_minus_eps[no]) * (0.5f/eps);
+    }
+    // restore input and recompute the output so the caller is not surprised
+    copy(begin(old_input), end(old_input), begin(input));  
+    compute_value();
+
+    return jacobian;
+}
+
+
+template <int NDIM_INPUT>
+vector<float> extract_jacobian_matrix(
+        int elem_width_output, const vector<AutoDiffParams>& ad_params, 
+        CoordNode &input_node, int n_arg)
+{
+    int output_size = ad_params.size()*elem_width_output;
+    int input_size  = input_node.n_elem*input_node.elem_width;
+    vector<float> jacobian(output_size * input_size);
+
+    SysArray accum_array = input_node.coords().deriv;
+    vector<unsigned short> slots;
+
+    for(unsigned no=0; no<ad_params.size(); ++no) {
+        slots.erase();
+        auto p = ad_params[no];
+        if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
+        else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
+        else throw string("internal error");
+
+        for(auto s: slots) {
+            for(unsigned ewo=0; ewo<elem_width_output; ++ewo) {
+                StaticCoord<NDIM_INPUT> d(accum_array, 0, s+ewo);
+                for(int i=0; i<NDIM_INPUT; ++i) 
+                    jacobian[no*elem_width_output*input_size + ewo*input_size + input_element*NDIM_INPUT + i] = d.v[i];
+            }
+        }
+    }
+
+    return jacobian;
 }
