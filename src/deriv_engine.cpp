@@ -303,6 +303,7 @@ vector<float> central_difference_deriviative(
 }
 
 
+/*
 template <int NDIM_INPUT>
 vector<float> extract_jacobian_matrix(
         int elem_width_output, const vector<AutoDiffParams>& ad_params, 
@@ -333,3 +334,4 @@ vector<float> extract_jacobian_matrix(
 
     return jacobian;
 }
+*/
