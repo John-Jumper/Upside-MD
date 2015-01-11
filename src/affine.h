@@ -52,17 +52,19 @@ quat_to_rot(
 }
 }
 
+//! Coordinate representing a rigid body rotation and its derivative/torque
 template <int NDIM_OUTPUT=1>
 struct AffineCoord
 {
-    float t[3];
-    float U[9];    // store orthogonal matrix for easy application
-    float d[NDIM_OUTPUT][6]; // first three components are translation deriv, second 3 are torque deriv
+    float t[3];    //!< translation vector
+    float U[9];    //!< rotation matrix
+    float d[NDIM_OUTPUT][6]; //!< first three components are translation deriv, second 3 are torque deriv
 
     float* deriv_arr;
 
     AffineCoord() {};
 
+    //! Initialize from coordinate array, system index, and an index into the coordinate array
     AffineCoord(const CoordArray arr, int system, const CoordPair &c):
         deriv_arr(arr.deriv.x + system*arr.deriv.offset + c.slot*6)
     {
@@ -78,6 +80,11 @@ struct AffineCoord
         for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) for(int nd=0; nd<6; ++nd) d[ndo][nd] = 0.f;
     }
 
+    //! Apply the rigid body transformation to a point in the reference frame
+
+    //! Result is the transformed point in the simulation residue frame.
+    //! This function is used to convert atomic positions from the reference frame
+    //! to the laboratory frame of the simulation.
     float3 apply(const float3& r) {
         float3 ret;
         ret.x = U[0]*r.x + U[1]*r.y + U[2]*r.z + t[0];
@@ -86,6 +93,11 @@ struct AffineCoord
         return ret;
     }
 
+    //! Apply the rigid body transformation to a point in the laboratory frame
+
+    //! Result is the transformed point in the reference frame.
+    //! This function is used to convert atomic positions from the laboratory frame
+    //! of the simulation to the reference frame for the residue.
     float3 apply_inverse(const float3& r) {
         float3 s = r-tf3();
 
@@ -96,6 +108,11 @@ struct AffineCoord
         return ret;
     }
 
+    //! Apply only the rotational part of the rigid body transformation
+    
+    //! This function should be used for transforming directions (vectors like
+    //! the CA-CB bond vector) from the reference frame to the laboratory frame 
+    //! of the simulation.
     float3 apply_rotation(const float3& r) {
         float3 ret;
         ret.x = U[0]*r.x + U[1]*r.y + U[2]*r.z;
@@ -104,10 +121,16 @@ struct AffineCoord
         return ret;
     }
 
+    //! Same as apply() above, but acts on float* instead of float3
     float3 apply(const float* r) { return apply(make_float3(r[0], r[1], r[2])); }
 
+    //! Return translation vector as a float3
     float3 tf3() const {return make_float3(t[0], t[1], t[2]);}
 
+    //! Add a derivative and torque for a force applied at a specified point for CoordNode
+
+    //! This function is similar to add_deriv_at_location(r_lab_frame, r_deriv), but you must
+    //! use this version if you have multiple output values (only applies to CoordNode's).
     void add_deriv_at_location(int ndo, const float3& r_lab_frame, const float3& r_deriv) {
         // add translation derivs
         d[ndo][0] += r_deriv.x;
@@ -122,10 +145,23 @@ struct AffineCoord
         d[ndo][4] += r.z*r_deriv.x - r.x*r_deriv.z;
         d[ndo][5] += r.x*r_deriv.y - r.y*r_deriv.x;
     }
+    //! Add a derivative and torque for a force applied at a specified point for CoordNode
+
+    //! This function is used when you are applying a potential based on a specific
+    //! location in the laboratory frame.  A simple example might be a potential based on the 
+    //! the distance between CB-atoms, where each CB location was computed by applying the affine
+    //! transformation to a point in the residue reference frame.
+    //!
+    //! For code of the form float3 x = rigid_body.apply(ref_pos); potential = f(x);, you should
+    //! call rigid_body.add_deriv_at_location(x, df_dx).  This function will automatically 
+    //! compute and apply the torque cross(x, df_dx).
     void add_deriv_at_location(const float3& r_lab_frame, const float3& r_deriv) {
         add_deriv_at_location(0, r_lab_frame, r_deriv);
     }
 
+    //! Add a derivative and torque for CoordNode
+
+    //! Only useful when writing CoordNode, otherwise see add_deriv_and_torque(r_deriv, torque).
     void add_deriv_and_torque(int ndo, const float3& r_deriv, const float3& torque) {
         d[ndo][0] += r_deriv.x;
         d[ndo][1] += r_deriv.y;
@@ -135,10 +171,16 @@ struct AffineCoord
         d[ndo][4] += torque.y;
         d[ndo][5] += torque.z;
     }
+    //! Add a derivative and torque
+
+    //! Add a derivative and torque value for this rigid body.  Most of the 
+    //! time it is more convenient to use add_deriv_at_location instead of this
+    //! function.
     void add_deriv_and_torque(const float3& r_deriv, const float3& torque) {
         add_deriv_and_torque(0, r_deriv, torque);
     }
 
+    //! Write the derivative to the CoordArray
     void flush() const {
         for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) 
             for(int nd=0; nd<6; ++nd) 
