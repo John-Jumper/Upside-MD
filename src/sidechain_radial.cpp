@@ -46,7 +46,6 @@ void radial_pairs(
         int n_types, float cutoff,
         int n_res, int n_system)
 {
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         vector<SidechainRadialResidue> residues;  residues.reserve(n_res);
 
@@ -89,7 +88,6 @@ void contact_energy(
         const ContactPair* contact_param,
         int n_contacts, float cutoff, int n_system)
 {
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nc=0; nc<n_contacts; ++nc) {
             ContactPair p = contact_param[nc];

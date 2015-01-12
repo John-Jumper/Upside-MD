@@ -18,7 +18,6 @@ void dihedral_angle_range(
         int n_terms, 
         int n_system)
 {
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_terms; ++nt) {
             DihedralRangeParams p = params[nt];

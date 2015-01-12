@@ -122,11 +122,9 @@ void backbone_pairs(
         float dist_cutoff,
         int n_res, int n_system)
 {
-#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         float dist_cutoff2 = dist_cutoff*dist_cutoff;
-        vector<AffineCoord<>> coords;
-        coords.reserve(n_res);
+        vector<AffineCoord<>> coords; coords.reserve(n_res);
         for(int nr=0; nr<n_res; ++nr) 
             coords.emplace_back(rigid_body, ns, params[nr].residue);
 

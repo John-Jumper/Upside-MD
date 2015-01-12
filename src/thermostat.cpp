@@ -28,7 +28,6 @@ ornstein_uhlenbeck_thermostat(
         int n_round, // FIXME uint64_t
         int n_system)
 {
-#pragma omp parallel for
     for(uint32_t ns=0; ns<(uint32_t)n_system; ++ns) {
         for(int na=0; na<n_atoms; ++na) {
             RandomGenerator random(seed, 0u, na*n_system + ns, n_round);

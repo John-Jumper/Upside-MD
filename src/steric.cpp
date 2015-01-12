@@ -168,7 +168,6 @@ void steric_pairs(
         int n_res, int n_system)
 {
     int n_point = point_starts[n_res]; // total number of points
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         vector<AffineCoord<>> coords;  coords.reserve(n_res);
         vector<StericPoint> lab_points(n_point);
@@ -238,7 +237,6 @@ void steric_pairs(
         int n_res, int n_system)
 {
     int n_point = point_starts[n_res]; // total number of points
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         vector<AffineCoord<>> coords;  coords.reserve(n_res);
         vector<StericPoint> lab_points(n_point);
