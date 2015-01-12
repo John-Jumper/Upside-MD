@@ -83,26 +83,28 @@ void backbone_dependent_point(
     #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
-            Coord<2,3>     r(rama, ns, param[nt].rama_residue);
-            AffineCoord<3> body(alignment, ns, param[nt].alignment_residue);
+            MutableCoord<3> com_rotated(output, ns, nt);
+            Coord<2,3>      r    (rama,     ns, param[nt].rama_residue);
+            AffineCoord<3>  body(alignment, ns, param[nt].alignment_residue);
 
             float3 com, dcom_dphi, dcom_dpsi;
             read_backbone_dependent_point(com, dcom_dphi, dcom_dpsi, 
                     map, param[nt].restype, make_float2(r.v[0], r.v[1]));
 
             // rotate reference derivatives into the body frame
-            float3 com_rotated = body.apply(com);
+            com_rotated.set_value(body.apply(com));
             float3 dcom_dphi_rotated = body.apply_rotation(dcom_dphi);
             float3 dcom_dpsi_rotated = body.apply_rotation(dcom_dpsi);
 
-            r.d[0][0] = dcom_dphi_rotated.x;   r.d[0][1] = dcom_dpsi_rotated.x;
-            r.d[1][0] = dcom_dphi_rotated.y;   r.d[1][1] = dcom_dpsi_rotated.y;
-            r.d[2][0] = dcom_dphi_rotated.z;   r.d[2][1] = dcom_dpsi_rotated.z;
+            r.d[0][0] = dcom_dphi_rotated.x;  r.d[0][1] = dcom_dpsi_rotated.x;
+            r.d[1][0] = dcom_dphi_rotated.y;  r.d[1][1] = dcom_dpsi_rotated.y;
+            r.d[2][0] = dcom_dphi_rotated.z;  r.d[2][1] = dcom_dpsi_rotated.z;
 
-            body.add_deriv_at_location(0, com_rotated, make_float3(1.f, 0.f, 0.f));
-            body.add_deriv_at_location(1, com_rotated, make_float3(0.f, 1.f, 0.f));
-            body.add_deriv_at_location(2, com_rotated, make_float3(0.f, 0.f, 1.f));
+            body.add_deriv_at_location(0, com_rotated.f3(), make_float3(1.f, 0.f, 0.f));
+            body.add_deriv_at_location(1, com_rotated.f3(), make_float3(0.f, 1.f, 0.f));
+            body.add_deriv_at_location(2, com_rotated.f3(), make_float3(0.f, 0.f, 1.f));
 
+            com_rotated.flush();
             body.flush();
             r.flush();
         }

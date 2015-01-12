@@ -312,14 +312,10 @@ struct Infer_H_O : public CoordNode
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
-    CoordArray coords() {
-        return CoordArray(SysArray(output.data(), n_virtual*6), slot_machine.accum_array());
-    }
-
     virtual void compute_value() {
         Timer timer(string("infer_H_O"));
         infer_HN_OC_pos_and_dir(
-                SysArray(output.data(),n_virtual*6), pos.coords(), 
+                coords().value, pos.coords(), 
                 params.data(), n_virtual, pos.n_system);
     }
 

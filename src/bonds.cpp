@@ -149,6 +149,7 @@ void rama_coord(
                 next_N.set_deriv(1,d5);
             }
 
+            rama_pos.flush();
             if(has_prev) prev_C.flush();
             N .flush();
             CA.flush();

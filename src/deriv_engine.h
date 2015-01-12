@@ -57,7 +57,7 @@ struct AutoDiffParams {
         while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
 
         unsigned loc2=0;
-        for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots1[loc2++] = i;
+        for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots2[loc2++] = i;
         n_slots2 = loc2;
         while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
     }
@@ -272,5 +272,51 @@ void reverse_autodiff(
 
 
 std::vector<float> central_difference_deriviative(
-        const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output);
+        const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output,
+        float eps=1e-3f);
+
+
+template <int NDIM_INPUT>
+std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordPair>>& coord_pairs,
+        int elem_width_output, const std::vector<AutoDiffParams>& ad_params, 
+        CoordNode &input_node, int n_arg)
+{
+    using namespace std;
+    // First validate coord_pairs consistency with ad_params
+    vector<unsigned short> slots;
+    if(ad_params.size() != coord_pairs.size()) throw string("internal error");
+    for(unsigned no=0; no<ad_params.size(); ++no) {
+        slots.resize(0);
+        auto p = ad_params[no];
+        if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
+        else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
+        else throw string("internal error");
+
+        if(slots.size() != coord_pairs[no].size()) 
+            throw string("size mismatch (") + to_string(slots.size()) + " != " + to_string(coord_pairs[no].size()) + ")";
+        for(unsigned i=0; i<slots.size(); ++i) if(slots[i] != coord_pairs[no][i].slot) throw string("inconsistent");
+    }
+
+
+    int output_size = coord_pairs.size()*elem_width_output;
+    int input_size  = input_node.n_elem*input_node.elem_width;
+    if(input_node.elem_width != NDIM_INPUT) 
+        throw string("dimension mismatch ") + to_string(input_node.elem_width) + " " + to_string(NDIM_INPUT);
+
+    vector<float> jacobian(output_size * input_size);
+    SysArray accum_array = input_node.coords().deriv;
+
+    for(unsigned no=0; no<coord_pairs.size(); ++no) {
+        for(auto cp: coord_pairs[no]) {
+            for(unsigned eo=0; eo<elem_width_output; ++eo) {
+                StaticCoord<NDIM_INPUT> d(accum_array, 0, cp.slot+eo);
+                for(int i=0; i<NDIM_INPUT; ++i) 
+                    jacobian[no*elem_width_output*input_size + eo*input_size + cp.index*NDIM_INPUT + i] = d.v[i];
+            }
+        }
+    }
+
+    return jacobian;
+}
+
 #endif

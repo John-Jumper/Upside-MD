@@ -1024,8 +1024,6 @@ def main():
         write_steric(fasta_seq, args.steric)
 
     if args.sidechain_radial:
-        print 'SIDECHAIN_RADIAL IS CURRENTLY BROKEN.  DO NOT USE.'
-        return;
         do_alignment = True
         write_rama_coord()
         write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)

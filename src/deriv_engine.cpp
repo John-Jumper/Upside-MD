@@ -301,37 +301,3 @@ vector<float> central_difference_deriviative(
 
     return jacobian;
 }
-
-
-/*
-template <int NDIM_INPUT>
-vector<float> extract_jacobian_matrix(
-        int elem_width_output, const vector<AutoDiffParams>& ad_params, 
-        CoordNode &input_node, int n_arg)
-{
-    int output_size = ad_params.size()*elem_width_output;
-    int input_size  = input_node.n_elem*input_node.elem_width;
-    vector<float> jacobian(output_size * input_size);
-
-    SysArray accum_array = input_node.coords().deriv;
-    vector<unsigned short> slots;
-
-    for(unsigned no=0; no<ad_params.size(); ++no) {
-        slots.erase();
-        auto p = ad_params[no];
-        if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
-        else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
-        else throw string("internal error");
-
-        for(auto s: slots) {
-            for(unsigned ewo=0; ewo<elem_width_output; ++ewo) {
-                StaticCoord<NDIM_INPUT> d(accum_array, 0, s+ewo);
-                for(int i=0; i<NDIM_INPUT; ++i) 
-                    jacobian[no*elem_width_output*input_size + ewo*input_size + input_element*NDIM_INPUT + i] = d.v[i];
-            }
-        }
-    }
-
-    return jacobian;
-}
-*/
