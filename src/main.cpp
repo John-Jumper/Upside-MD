@@ -206,10 +206,23 @@ try {
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
                 state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data());
-                printf("%*lu / %*lu rounds %5.1f hbonds\n", 
+
+                double Rg = 0.f;
+                for(int ns=0; ns<n_system; ++ns) {
+                    float3 com = make_float3(0.f, 0.f, 0.f);
+                    for(int na=0; na<n_atom; ++na) 
+                        com += StaticCoord<3>(engine.pos->coords().value, ns, na).f3();
+                    com *= 1.f/n_atom;
+
+                    for(int na=0; na<n_atom; ++na) 
+                        Rg += mag2(StaticCoord<3>(engine.pos->coords().value, ns, na).f3()-com);
+                }
+                Rg = sqrt(Rg/(n_atom*n_system));
+
+                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A\n", 
                         round_print_width, (unsigned long)nr, 
                         round_print_width, (unsigned long)n_round, 
-                        get_n_hbond(engine)/n_system);
+                        get_n_hbond(engine)/n_system, Rg);
                 fflush(stdout);
             }
             // To be cautious, apply the thermostat more often if in the equilibration phase

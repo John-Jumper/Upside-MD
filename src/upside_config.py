@@ -952,6 +952,7 @@ def main():
         parser.error('--sidechain-radial requires --backbone-dependent-point')
 
     fasta_seq = read_fasta(open(args.fasta))
+    do_alignment = False
 
     global n_system, n_atom, t, force
     n_system = args.n_system
