@@ -49,7 +49,6 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
     C  = traj[:,2::3].astype('f4')
     H  = N[:,1: ] - H_bond * vhat(vhat(C [:,:-1]-N[:,1: ]) + vhat(CA[:,1: ]-N[:,1: ]))
     O  = C[:,:-1] - O_bond * vhat(vhat(CA[:,:-1]-C[:,:-1]) + vhat(N [:,1: ]-C[:,:-1]))
-    print N.shape
 
     # write structure information
     atom_id = 0
@@ -113,6 +112,7 @@ def main():
     #         np.column_stack((np.arange(3*n_res)[:-1], np.arange(3*n_res)[1:])))
     print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], 
             t.root.output.pos[::args.stride].transpose((0,2,3,1)))
+    t.close()
 
 if __name__ == '__main__':
     main()
