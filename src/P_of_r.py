@@ -66,6 +66,7 @@ for r,p in zip(bin_centers, P_of_r):
     print >>output_file, '%10.3f %10.8f' % (r,p)
 output_file.close()
 
+
 if args.plot_histogram:
     import matplotlib.pyplot as plt
     plt.plot(bin_centers, P_of_r)
@@ -73,3 +74,10 @@ if args.plot_histogram:
     plt.ylabel('frequency')
     plt.title('P(r) for %s' % args.config)
     plt.show()
+
+Rg = np.sqrt(((traj-traj.mean(axis=-2)[:,:,None,:])**2).sum(axis=-1).mean(axis=-1).mean(axis=0))
+print traj.shape
+print Rg.shape
+
+np.set_printoptions(precision=4, suppress=True)
+print 'Rg = %s A' % (Rg if len(Rg.shape)>1 else np.float32(Rg[0]))
