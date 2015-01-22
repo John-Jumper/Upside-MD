@@ -8,10 +8,14 @@ import argparse
 import tables
 
 model_geom = np.zeros((3,3))
-model_geom[:,0] = (-1.19280531, -0.83127186, 0.)  # N
-model_geom[:,1] = ( 0.,          0.,         0.)  # CA
-model_geom[:,2] = ( 1.25222632, -0.87268266, 0.)  # C
+model_geom[0] = (-1.19280531, -0.83127186, 0.)  # N
+model_geom[1] = ( 0.,          0.,         0.)  # CA
+model_geom[2] = ( 1.25222632, -0.87268266, 0.)  # C
 model_geom -= model_geom.mean(axis=0)
+
+def vmag(x):
+    assert x.shape[-1] == 3
+    return np.sqrt(np.sum(x**2,axis=-1))
 
 def rmsd_transform(target, model):
     assert target.shape == model.shape == (model.shape[0],3)
