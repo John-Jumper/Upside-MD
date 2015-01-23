@@ -51,7 +51,7 @@ def create_array(grp, nm, obj=None):
 
 def write_backbone_pair(fasta):
     n_res = len(fasta)
-    grp = t.create_group(force, 'backbone_pairs')
+    grp = t.create_group(potential, 'backbone_pairs')
     grp._v_attrs.arguments = np.array(['affine_alignment'])
 
     ref_pos = np.zeros((n_res,4,3))
@@ -69,7 +69,7 @@ def write_backbone_pair(fasta):
     create_array(grp, 'ref_pos', obj=ref_pos)
 
 def write_affine_alignment(n_res):
-    grp = t.create_group(force, 'affine_alignment')
+    grp = t.create_group(potential, 'affine_alignment')
     grp._v_attrs.arguments = np.array(['pos'])
 
     ref_geom = np.zeros((n_res,3,3))
@@ -117,7 +117,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     # FIXME yes, this is scandalous
     # I really need to separate the Infer and the HBondEnergy, but I am busy right now
 
-    grp = t.create_group(force, 'infer_H_O')
+    grp = t.create_group(potential, 'infer_H_O')
     grp._v_attrs.arguments = np.array(['pos'])
 
     donors    = t.create_group(grp, 'donors')
@@ -130,7 +130,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
 
-    grp = t.create_group(force, 'hbond_energy')
+    grp = t.create_group(potential, 'hbond_energy')
     grp._v_attrs.arguments = np.array(['infer_H_O'])
     grp._v_attrs.hbond_energy = hbond_energy
 
@@ -148,7 +148,7 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
 def make_restraint_group(group_num, residues, initial_pos, strength):
     np.random.seed(314159)  # make groups deterministic
 
-    grp = t.root.input.force.dist_spring
+    grp = t.root.input.potential.dist_spring
 
     id = grp.id[:]
     equil_dist = grp.equil_dist[:]
@@ -241,10 +241,10 @@ def random_initial_config(n_res):
     return construct_equilibrium_structure(rama, angles, lengths)
 
 
-# write dist_spring force
+# write dist_spring potential
 def write_dist_spring(args):
     # create a linear chain
-    grp = t.create_group(force, 'dist_spring')
+    grp = t.create_group(potential, 'dist_spring')
     grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(n_atom-1)
     id = np.column_stack((id,id+1))
@@ -263,7 +263,7 @@ def write_dist_spring(args):
     create_array(grp, 'bonded_atoms', obj=bonded_atoms)
 
 def write_angle_spring(args):
-    grp = t.create_group(force, 'angle_spring')
+    grp = t.create_group(potential, 'angle_spring')
     grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(n_atom-2)
     id = np.column_stack((id,id+2,id+1))
@@ -278,7 +278,7 @@ def write_angle_spring(args):
 
 def write_dihedral_spring():
     # this is primarily used for omega bonds
-    grp = t.create_group(force, 'dihedral_spring')
+    grp = t.create_group(potential, 'dihedral_spring')
     grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(1,n_atom-3,3)  # start at CA atom
     id = np.column_stack((id,id+1,id+2,id+3))
@@ -560,7 +560,7 @@ def populate_rama_maps(seq, rama_library_h5):
 
 
 def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
-    grp = t.create_group(force, 'rama_hmm_pot')
+    grp = t.create_group(potential, 'rama_hmm_pot')
     grp._v_attrs.arguments = np.array(['pos'])
     # first ID is previous C
     id = np.arange(2,n_atom-4,3)
@@ -637,7 +637,7 @@ def write_nonbonded(fasta_seq, Vfcns, max_r=10., n_bin=64):
     n_type = len(three_letter_aa)
     assert n_type == 20
 
-    com = t.create_group(force, 'group_com')
+    com = t.create_group(potential, 'group_com')
     n_group = n_atom/3
     group_inds = -1 + np.zeros((n_group, 3), dtype='i8')
 
@@ -650,7 +650,7 @@ def write_nonbonded(fasta_seq, Vfcns, max_r=10., n_bin=64):
     create_array(com, 'group_inds', obj=group_inds)
     create_array(com, 'group_type', obj=group_type)
 
-    pairwise = t.create_group(force, 'pairwise')
+    pairwise = t.create_group(potential, 'pairwise')
 
     deriv_over_r = np.zeros((n_type, n_type, n_bin), 'f4')
     dx = max_r / (n_bin-1)
@@ -682,7 +682,7 @@ def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     fields = fields[1:]
     n_elem = len(fields)
 
-    grp = t.create_group(t.root.input.force, 'dihedral_range')
+    grp = t.create_group(t.root.input.potential, 'dihedral_range')
     grp._v_attrs.arguments = np.array(['pos'])
 
     id          = np.zeros((n_elem,4), dtype = 'i')
@@ -731,7 +731,7 @@ def write_contact_energies(parser, fasta, contact_table):
     fields = fields[1:]
     n_contact = len(fields)
 
-    g = t.create_group(t.root.input.force, 'contact')
+    g = t.create_group(t.root.input.potential, 'contact')
     g._v_attrs.arguments = np.array(['affine_alignment'])
     g._v_attrs.cutoff = 6.   # in units of width
 
@@ -764,16 +764,16 @@ def write_contact_energies(parser, fasta, contact_table):
 
 
 def write_sidechain_potential(fasta, library):
-    g = t.create_group(t.root.input.force, 'sidechain')
+    g = t.create_group(t.root.input.potential, 'sidechain')
     g._v_attrs.arguments = np.array(['affine_alignment'])
     t.create_external_link(g, 'sidechain_data', os.path.abspath(library)+':/params')
     create_array(g, 'restype', map(str,fasta))
 
     # quick check to ensure the external link worked
-    assert t.get_node('/input/force/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
+    assert t.get_node('/input/potential/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
 
 def write_rama_coord():
-    grp = t.create_group(force, 'rama_coord')
+    grp = t.create_group(potential, 'rama_coord')
     grp._v_attrs.arguments = np.array(['pos'])
     n_res = n_atom/3
     N_id = 3*np.arange(n_res)
@@ -784,7 +784,7 @@ def write_rama_coord():
 
 
 def write_backbone_dependent_point(fasta, library):
-    grp = t.create_group(force, 'backbone_dependent_point')
+    grp = t.create_group(potential, 'backbone_dependent_point')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
 
     data = tables.open_file(library)
@@ -804,6 +804,7 @@ def write_backbone_dependent_point(fasta, library):
     # compute central difference derivatives
     point_map[:,:,:, 1,:] = (point_map[:,up_loc,:][:,:,:, 0,:]-point_map[:,dn_loc,:][:,:,:, 0,:])/(2.*dx)
     point_map[:,:,:, 2,:] = (point_map[:,:,up_loc][:,:,:, 0,:]-point_map[:,:,dn_loc][:,:,:, 0,:])/(2.*dx)
+    data.close()
 
     create_array(grp, 'rama_residue',       np.arange(len(fasta)))
     create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
@@ -812,7 +813,7 @@ def write_backbone_dependent_point(fasta, library):
 
 
 def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
-    g = t.create_group(t.root.input.force, 'radial')
+    g = t.create_group(t.root.input.potential, 'radial')
     g._v_attrs.arguments = np.array(['backbone_dependent_point'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
@@ -937,7 +938,7 @@ def main():
     fasta_seq = read_fasta(open(args.fasta))
     do_alignment = False
 
-    global n_system, n_atom, t, force
+    global n_system, n_atom, t, potential
     n_system = args.n_system
     n_atom = 3*len(fasta_seq)
     
@@ -963,7 +964,7 @@ def main():
     else:
         target = pos.copy()
     
-    force = t.create_group(input,  'force')
+    potential = t.create_group(input,  'potential')
 
     write_dist_spring(args)
     write_angle_spring(args)

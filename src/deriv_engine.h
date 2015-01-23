@@ -87,6 +87,7 @@ struct DerivComputation
         potential_term(potential_term_), n_system(n_system_) {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
+    virtual void test_value_deriv_agreement = 0;
 };
 
 struct CoordNode : public DerivComputation
@@ -184,7 +185,7 @@ struct DerivEngine
 };
 
 double get_n_hbond(DerivEngine &engine);
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group, bool quiet=false);
+DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t potential_group, bool quiet=false);
 
 // note that there are no null points in the vector of CoordNode*
 typedef std::vector<CoordNode*> ArgList;
@@ -283,7 +284,7 @@ void reverse_autodiff(
 
 std::vector<float> central_difference_deriviative(
         const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output,
-        float eps=1e-3f);
+        float eps=1e-2f);
 
 
 template <int NDIM_INPUT>

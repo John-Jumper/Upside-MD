@@ -83,7 +83,8 @@ struct PosSpring : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("pos_spring")); 
         pos_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);}
+                pos.coords(), params.data(), n_elem, pos.n_system);
+    }
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 

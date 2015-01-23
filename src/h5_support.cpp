@@ -116,8 +116,11 @@ H5Obj ensure_group(hid_t loc, const char* nm) {
             : H5Gcreate2(loc, nm, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
 }
 
-H5Obj open_group(hid_t loc, const char* nm) {
+H5Obj open_group(hid_t loc, const char* nm) 
+try {
     return h5_obj(H5Gclose, H5Gopen2(loc, nm, H5P_DEFAULT));
+} catch(std::string &s) {
+    throw std::string("unable to open group ") + nm + " (does it exist?), " + s;
 }
 
 void ensure_not_exist(hid_t loc, const char* nm) {

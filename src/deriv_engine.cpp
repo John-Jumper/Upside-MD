@@ -183,15 +183,15 @@ struct ComputeMyDeriv {
 };
 
 
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_group, bool quiet)
+DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t potential_group, bool quiet)
 {
     auto engine = DerivEngine(n_atom, n_system);
     auto& m = node_creation_map();
 
     map<string, pair<bool,vector<string>>> dep_graph;  // bool indicates node is active
     dep_graph["pos"] = make_pair(true, vector<string>());
-    for(const auto &name : node_names_in_group(force_group, "."))
-        dep_graph[name] = make_pair(true, read_attribute<vector<string>>(force_group, name.c_str(), "arguments"));
+    for(const auto &name : node_names_in_group(potential_group, "."))
+        dep_graph[name] = make_pair(true, read_attribute<vector<string>>(potential_group, name.c_str(), "arguments"));
 
     for(auto &kv : dep_graph) {
         for(auto& dep_name : kv.second.second) {
@@ -216,7 +216,7 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         }
     }
     for(auto &kv : dep_graph) if(kv.second.first) 
-        throw string("Unsatisfiable dependency ") + kv.first + " in force computation";
+        throw string("Unsatisfiable dependency ") + kv.first + " in potential computation";
 
     // using topo_order here ensures that a node is only parsed after all its arguments
     for(auto &nm : topo_order) {
@@ -231,7 +231,7 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         if(node_type_name == "") throw string("No node type found for name '") + nm + "'";
         NodeCreationFunction& node_func = m[node_type_name];
 
-        auto argument_names = read_attribute<vector<string>>(force_group, nm.c_str(), "arguments");
+        auto argument_names = read_attribute<vector<string>>(potential_group, nm.c_str(), "arguments");
         ArgList arguments;
         for(const auto& arg_name : argument_names)  {
             // if the node is not a CoordNode, a null pointer will be returned from dynamic_cast
@@ -249,7 +249,7 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t force_gr
         }
 
         try {
-            auto grp = open_group(force_group,nm.c_str());
+            auto grp = open_group(potential_group,nm.c_str());
             auto computation = unique_ptr<DerivComputation>(node_func(grp.get(),arguments));
             engine.add_node(nm, move(computation), argument_names);
         } catch(const string &e) {

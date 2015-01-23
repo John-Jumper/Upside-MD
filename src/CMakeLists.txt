@@ -12,7 +12,7 @@ else()
     set(DEBUG_FLAGS "-g")
 endif()
 
-set (OMP_FLAGS "") # "-fsanitize=address") # "-fopenmp")
+set (OMP_FLAGS  "") # "-fsanitize=address") # "-fopenmp")
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
 set (OPT     " -O3 -ffast-math -fno-finite-math-only -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")

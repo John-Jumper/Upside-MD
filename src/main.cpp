@@ -19,10 +19,12 @@ struct StateLogger
     hid_t config;
     H5Obj pos_tbl;
     H5Obj kin_tbl;
+    H5Obj pot_tbl;
     H5Obj time_tbl;
 
     vector<float>  pos_buffer;
     vector<double> kin_buffer;
+    vector<double> pot_buffer;
     vector<double> time_buffer;
 
     // destructor would close tables inappropriately after naive copy
@@ -34,19 +36,24 @@ struct StateLogger
         n_atom(n_atom_), n_sys(n_sys_), n_chunk(n_chunk_), config(config_),
         pos_tbl (create_earray(output_grp, "pos",     H5T_NATIVE_FLOAT,  {0,n_sys,n_atom,3}, {n_chunk,1,n_atom,3})),
         kin_tbl (create_earray(output_grp, "kinetic", H5T_NATIVE_DOUBLE, {0,n_sys},          {n_chunk,1})),
+        pot_tbl (create_earray(output_grp, "potential",H5T_NATIVE_DOUBLE,{0,n_sys},          {n_chunk,1})),
         time_tbl(create_earray(output_grp, "time",    H5T_NATIVE_DOUBLE, {0},                {n_chunk}))
     {
         pos_buffer .reserve(n_chunk * n_sys * n_atom * 3);
         kin_buffer .reserve(n_chunk * n_sys);
+        pot_buffer .reserve(n_chunk * n_sys);
         time_buffer.reserve(n_chunk);
     }
 
-    void log(double sim_time, const float* pos, const float* mom) {
+    void log(double sim_time, const float* pos, const float* mom, const float* potential) {
         Timer timer(string("state_logger"));
         time_buffer.push_back(sim_time);
 
         pos_buffer.resize(pos_buffer.size()+n_sys*n_atom*3);
         std::copy_n(pos, n_sys*n_atom*3, &pos_buffer[pos_buffer.size()-n_sys*n_atom*3]);
+
+        pot_buffer.resize(pot_buffer.size()+n_sys);
+        std::copy_n(potential, n_sys, &pot_buffer[pot_buffer.size()-n_sys]);
 
         for(int ns=0; ns<n_sys; ++ns) {
             double sum_kin = 0.f;
@@ -63,6 +70,7 @@ struct StateLogger
         // I/O on NFS)
         if(pos_buffer .size()) {append_to_dset(pos_tbl.get(),  pos_buffer,  0); pos_buffer .resize(0);}
         if(kin_buffer .size()) {append_to_dset(kin_tbl.get(),  kin_buffer,  0); kin_buffer .resize(0);}
+        if(pot_buffer .size()) {append_to_dset(pot_tbl.get(),  pot_buffer,  0); pot_buffer .resize(0);}
         if(time_buffer.size()) {append_to_dset(time_tbl.get(), time_buffer, 0); time_buffer.resize(0);}
         H5Fflush(config, H5F_SCOPE_LOCAL);
     }
@@ -73,7 +81,7 @@ struct StateLogger
 };
 
 
-void force_testing(hid_t config, DerivEngine& engine, bool generate, double force_tol=1e-3) {
+void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-3) {
     auto &pos = *engine.pos;
     if(generate) {
         auto group = ensure_group(config, "/testing");
@@ -90,10 +98,68 @@ void force_testing(hid_t config, DerivEngine& engine, bool generate, double forc
                 double dev = x - pos.deriv.at(na*3*pos.n_system + d*pos.n_system + ns);
                 rms_error += dev*dev;});
         rms_error = sqrtf(rms_error / pos.n_atom / pos.n_system);
-        printf("RMS force difference: %.6f\n", rms_error);
-        if(rms_error > force_tol) throw string("inacceptable force deviation");
+        printf("RMS deriv difference: %.6f\n", rms_error);
+        if(rms_error > deriv_tol) throw string("inacceptable deriv deviation");
     }
 }
+
+
+vector<float> energy_deriv_agreement(DerivEngine& engine) {
+    vector<float> relative_error;
+    int n_atom = engine.pos->n_elem;
+    SysArray pos_array = engine.pos->coords().value;
+
+    for(int ns=0; ns<engine.pos->n_system; ++ns) {
+        vector<float> input(n_atom*3);
+        copy_n(pos_array.x + ns*pos_array.offset, n_atom*3, begin(input));
+        vector<float> output(1);
+
+        auto do_compute = [&]() {
+            copy_n(begin(input), n_atom*3, pos_array.x + ns*pos_array.offset);
+            engine.compute(PotentialAndDerivMode);
+            output[0] = engine.potential[ns];
+        };
+
+        for(auto &n: engine.nodes) {
+            if(n.computation->potential_term) {
+                auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
+                printf("%s:", n.name.c_str());
+                for(auto e: v) printf(" % 4.1f", e);
+                printf("\n");
+            }
+        }
+        printf("\n\n");
+
+        auto central_diff_jac = central_difference_deriviative(do_compute, input, output);
+
+        for(auto &n: engine.nodes) {
+            if(n.computation->potential_term) {
+                auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
+                printf("%s:", n.name.c_str());
+                for(auto e: v) printf(" % 4.1f", e);
+                printf("\n");
+            }
+        }
+        printf("\n\n");
+        
+        float value_rms=0.f;
+        float diff_rms =0.f;
+        if(central_diff_jac.size() != n_atom*3) throw string("impossible");
+        for(int i=0; i<n_atom*3; ++i) {
+            printf("re %i % 8.2f % 8.2f\n", i, central_diff_jac[i], engine.pos->deriv[i + ns*n_atom*3]);
+            fflush(stdout);
+            value_rms += sqr(central_diff_jac[i]);
+            diff_rms  += sqr(central_diff_jac[i] - engine.pos->deriv[i + ns*n_atom*3]);
+        }
+        // throw "oops";
+        value_rms = sqrt(value_rms/n_atom);
+        diff_rms  = sqrt(diff_rms /n_atom);
+
+        relative_error.push_back(diff_rms/value_rms);
+    }
+    return relative_error;
+}
+
 
 
 int main(int argc, const char* const * argv)
@@ -129,8 +195,8 @@ try {
     ValueArg<double> equilibration_duration_arg("", "equilibration-duration", 
             "duration to limit max force for equilibration (also decreases thermostat interval)", 
             false, 0., "float", cmd);
-    SwitchArg generate_expected_force_arg("", "generate-expected-force", 
-            "write an expected force to the input for later testing (developer only)", 
+    SwitchArg generate_expected_deriv_arg("", "generate-expected-deriv", 
+            "write an expected deriv to the input for later testing (developer only)", 
             cmd, false);
     cmd.parse(argc, argv);
 
@@ -153,8 +219,8 @@ try {
         int  n_system = pos_shape[2];
         if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
 
-        auto force_group = open_group(config.get(), "/input/force");
-        auto engine = initialize_engine_from_hdf5(n_atom, n_system, force_group.get());
+        auto potential_group = open_group(config.get(), "/input/potential");
+        auto engine = initialize_engine_from_hdf5(n_atom, n_system, potential_group.get());
         traverse_dset<3,float>(config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
                 engine.pos->output.at(ns*n_atom*3 + na*3 + d) = x;});
         printf("\nn_atom %i\nn_system %i\n", engine.pos->n_atom, engine.pos->n_system);
@@ -164,7 +230,13 @@ try {
         for(float e: engine.potential) printf(" %.2f\n", e);
         printf("\n");
 
-        force_testing(config.get(), engine, generate_expected_force_arg.getValue());
+        {
+            deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
+            auto relative_error = energy_deriv_agreement(engine);
+            printf("relative error: ");
+            for(auto r: relative_error) printf(" %.5f", r);
+            printf("\n");
+        }
 
         float dt = time_step_arg.getValue();
         uint64_t n_round = round(duration_arg.getValue() / (3*dt));
@@ -209,7 +281,8 @@ try {
         for(uint64_t nr=0; nr<n_round; ++nr) {
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
-                state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data());
+                engine.compute(PotentialAndDerivMode);
+                state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data(), engine.potential.data());
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {
@@ -227,7 +300,6 @@ try {
                         round_print_width, (unsigned long)nr, 
                         round_print_width, (unsigned long)n_round, 
                         get_n_hbond(engine)/n_system, Rg);
-                engine.compute(PotentialAndDerivMode);
                 for(float e: engine.potential) printf(" % 8.2f", e);
                 printf("\n");
                 fflush(stdout);
