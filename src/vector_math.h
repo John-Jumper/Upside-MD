@@ -59,11 +59,12 @@ static const float M_PI_F   = 3.141592653589793f;   //!< value of pi as float
 static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
 inline float rsqrtf(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
+inline float sqr(float x) {return x*x;}  //!< square a number (x^2)
 
 
-inline float2 make_float2(float x, float y                  ) { return float2(x,y);     } //!< make float2 from scalars
-inline float3 make_float3(float x, float y, float z         ) { return float3(x,y,z);   } //!< make float3 from scalars
-inline float4 make_float4(float x, float y, float z, float w) { return float4(x,y,z,w); } //!< make float4 from scalars
+inline float2 make_float2(float x, float y                  ) {return float2(x,y);    } //!< make float2 from scalars
+inline float3 make_float3(float x, float y, float z         ) {return float3(x,y,z);  } //!< make float3 from scalars
+inline float4 make_float4(float x, float y, float z, float w) {return float4(x,y,z,w);} //!< make float4 from scalars
 inline float4 make_float4(float3 v, float w) { return make_float4(v.x,v.y,v.z,w); } //!< make float4 from float3 (as x,y,z) and scalar (as w)
 
 inline float3 xyz(const float4& x) { return make_float3(x.x,x.y,x.z); } //!< return x,y,z as float3 from a float4

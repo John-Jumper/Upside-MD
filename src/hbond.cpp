@@ -194,60 +194,19 @@ float hbond_score(
 
     return val;
 }
-
-
-// void 
-// test_infer_x_body()
-// {
-//     RandomGenerator gen(14, 10, 32, 101);
-// 
-//     float bond_length = 1.24f;
-//     vector<float> output_storage(6);
-//     vector<float> pos(9);
-//     vector<float> deriv(10);
-//     for(auto& x: pos) x = gen.normal().x;
-// 
-//     Coord<3,6> x1(pos.data(), deriv.data(), CoordPair(0,0));
-//     Coord<3,6> x2(pos.data(), deriv.data(), CoordPair(1,0));
-//     Coord<3,6> x3(pos.data(), deriv.data(), CoordPair(2,0));
-// 
-//     auto f = [&](Coord<3,6>& xprime) {
-//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-//         infer_x_body(o, xprime, x2, x3, bond_length);
-//         return o;
-//     };
-//     f(x1);
-//     finite_difference(f, x1, &x1.d[0][0]);
-// 
-//     auto g = [&](Coord<3,6>& xprime) {
-//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-//         infer_x_body(o, x1, xprime, x3, bond_length);
-//         return o;
-//     };
-//     g(x2);
-//     finite_difference(g, x2, &x2.d[0][0]);
-// 
-//     auto h = [&](Coord<3,6>& xprime) {
-//         MutableCoord<6> o(output_storage.data(),0,MutableCoord<6>::Zero);
-//         infer_x_body(o, x1, x2, xprime, bond_length);
-//         return o;
-//     };
-//     h(x3);
-//     finite_difference(h, x3, &x3.d[0][0]);
-// }
 }
 
 
-float count_hbond(
+void count_hbond(
+        float* potential,
         const CoordArray virtual_pos,
         int n_donor,    const VirtualHBondParams * restrict donor_params,
         int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
         const float hbond_energy, int n_system)
 {
-    float tot_hbond = 0.f;
-    
 #pragma omp parallel for reduction(+:tot_hbond)
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         vector<Coord<6>> donors;    donors   .reserve(n_donor);
         vector<Coord<6>> acceptors; acceptors.reserve(n_acceptor);
 
@@ -268,7 +227,8 @@ float count_hbond(
 
                     Coord<6> &H = donors[nd];
                     Coord<6> &O = acceptors[na];
-                    tot_hbond += hbond_score(H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, energy);
+                    float hb = hbond_score(H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, energy);
+                    if(potential) potential[ns] += hb;
                 }
             }
         }
@@ -276,7 +236,6 @@ float count_hbond(
         for(auto& d: donors)    for(int i=0; i<6; ++i) d.flush();
         for(auto& a: acceptors) for(int i=0; i<6; ++i) a.flush();
     }
-    return tot_hbond;
 }
 
 
@@ -311,7 +270,7 @@ struct Infer_H_O : public CoordNode
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("infer_H_O"));
         infer_HN_OC_pos_and_dir(
                 coords().value, pos.coords(), 
@@ -338,7 +297,7 @@ struct HBondEnergy : public HBondCounter
     float hbond_energy;
 
     HBondEnergy(hid_t grp, CoordNode& infer_):
-        HBondCounter(),
+        HBondCounter(infer_.n_system),
         n_donor   (get_dset_size(1, grp, "donors/residue_id")[0]), 
         n_acceptor(get_dset_size(1, grp, "acceptors/residue_id")[0]),
         infer(infer_), 
@@ -369,48 +328,18 @@ struct HBondEnergy : public HBondCounter
         for(auto &p: acc_params) infer.slot_machine.add_request(1, p.id);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_energy"));
-        n_hbond = (1.f/hbond_energy) * count_hbond(
+        count_hbond(potential.data(),
                 infer.coords(), 
                 n_donor, don_params.data(), n_acceptor, acc_params.data(),
                 hbond_energy, infer.n_system);
+
+        n_hbond = 0.f;
+        for(float e: potential) n_hbond += e;
+        n_hbond *= 1.f/hbond_energy;
     }
 };
 
 static RegisterNodeType<Infer_H_O,1>  _16("infer_H_O");
 static RegisterNodeType<HBondEnergy,1>_17("hbond_energy");
-
-/*
-void helical_probabilities(
-        int n_residue, float * restrict helicity,  // size (n_residue,), corresponds to donor_params residue_id's
-        const float * restrict virtual_pos,
-        int n_donor,    const VirtualHBondParams * restrict donor_params,
-        int n_acceptor, const VirtualHBondParams * restrict acceptor_params)
-{
-    vector<Coord<6>> donors;    donors   .reserve(n_donor);
-    vector<Coord<6>> acceptors; acceptors.reserve(n_acceptor);
-
-    for(int nd=0; nd<n_donor;    ++nd) donors   .emplace_back(virtual_pos, nullptr, donor_params   [nd].id);
-    for(int na=0; na<n_acceptor; ++na) acceptors.emplace_back(virtual_pos, nullptr, acceptor_params[na].id);
-
-    for(int i=0; i<n_residue; ++i) helicity[i] = 0.f;
-
-    for(int nd=0; nd<n_donor; ++nd) {
-        for(int na=0; na<n_acceptor; ++na) {
-            int res_disp = donor_params[nd].residue_id - acceptor_params[na].residue_id;
-            if(res_disp!=4) continue;
-
-            if(mag2(donors[nd].f3()-acceptors[na].f3()) < radial_cutoff2) {
-                if(abs(res_disp)<2) continue;
-
-                Coord<6> &H = donors[nd];
-                Coord<6> &O = acceptors[na];
-                helicity[acceptor_params[na].residue_id] = hbond_score(
-                        H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, 1.f);
-            }
-        }
-    }
-}
-*/
-

@@ -40,6 +40,7 @@ struct SidechainRadialResidue {
 };
 
 void radial_pairs(
+        float* potential,
         const CoordArray                  interaction_pos,
         const SidechainRadialParams*      residue_param,
         const SidechainRadialInteraction* interaction_params,
@@ -47,6 +48,7 @@ void radial_pairs(
         int n_res, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         vector<SidechainRadialResidue> residues;  residues.reserve(n_res);
 
         for(int nr=0; nr<n_res; ++nr)
@@ -67,6 +69,7 @@ void radial_pairs(
                     //printf("reduced_coord %.1f %.1f\n",reduced_coord,sqrtf(dist2));
                     float  z = expf(reduced_coord);
                     float  w = 1.f / (1.f + z);
+                    if(potential) potential[ns] += w;
                     float  deriv_over_r = -2.f*at.scale * at.energy * z * (w*w);
                     float3 deriv = deriv_over_r * disp;
 
@@ -84,11 +87,13 @@ void radial_pairs(
 
 
 void contact_energy(
+        float* potential,
         const CoordArray   rigid_body,
         const ContactPair* contact_param,
         int n_contacts, float cutoff, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         for(int nc=0; nc<n_contacts; ++nc) {
             ContactPair p = contact_param[nc];
             AffineCoord<> r1(rigid_body, ns, p.loc[0]);
@@ -104,6 +109,7 @@ void contact_energy(
             if(reduced_coord<cutoff) {
                 float  z = expf(reduced_coord);
                 float  w = 1.f / (1.f + z);
+                if(potential) potential[ns] += w;
                 float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
                 float3 deriv = deriv_over_r * disp;
 
@@ -130,6 +136,7 @@ struct SidechainRadialPairs : public PotentialNode
     float cutoff;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
+        PotentialNode(bb_point_.n_system),
         n_residue(get_dset_size(1, grp, "id"   )[0]), 
         n_type   (get_dset_size(1, grp, "data/names")[0]),
         bb_point(bb_point_), 
@@ -167,9 +174,9 @@ struct SidechainRadialPairs : public PotentialNode
         for(size_t nr=0; nr<params.size(); ++nr) bb_point.slot_machine.add_request(1, params[nr].loc);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
-        radial_pairs(
+        radial_pairs((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 bb_point.coords(), 
                 params.data(), interaction_params.data(), n_type, cutoff, 
                 n_residue, bb_point.n_system);
@@ -184,6 +191,7 @@ struct ContactEnergy : public PotentialNode
     float cutoff;
 
     ContactEnergy(hid_t grp, CoordNode& alignment_):
+        PotentialNode(alignment_.n_system),
         n_contact(get_dset_size(2, grp, "id")[0]),
         alignment(alignment_), 
         params(n_contact),
@@ -210,9 +218,9 @@ struct ContactEnergy : public PotentialNode
                 alignment.slot_machine.add_request(1, params[i].loc[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("contact_energy"));
-        contact_energy(
+        contact_energy((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 alignment.coords(), params.data(), 
                 n_contact, cutoff, alignment.n_system);
     }

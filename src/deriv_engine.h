@@ -77,22 +77,27 @@ struct AutoDiffParams {
 
 } ;  // struct for implementing reverse autodifferentiation
 
+enum ComputeMode { DerivMode = 0, PotentialAndDerivMode = 1 };
+
 struct DerivComputation 
 {
-    virtual void compute_value()   =0;
+    const bool potential_term;
+    int n_system;
+    DerivComputation(bool potential_term_, int n_system_):
+        potential_term(potential_term_), n_system(n_system_) {}
+    virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
 };
 
 struct CoordNode : public DerivComputation
 {
-    int n_system;
     int n_elem;
     int elem_width;
     std::vector<float> output;
     SlotMachine slot_machine;
     CoordNode(int n_system_, int n_elem_, int elem_width_):
-        n_system(n_system_), n_elem(n_elem_), elem_width(elem_width_), 
-        output(n_system*n_elem*elem_width, 0.f), 
+        DerivComputation(false, n_system_), n_elem(n_elem_), elem_width(elem_width_), 
+        output(n_system*n_elem*elem_width), 
         slot_machine(elem_width, n_elem, n_system) {}
     virtual CoordArray coords() {
         return CoordArray(SysArray(output.data(), n_elem*elem_width), slot_machine.accum_array());
@@ -102,13 +107,16 @@ struct CoordNode : public DerivComputation
 
 struct PotentialNode : public DerivComputation
 {
+    std::vector<float> potential;
+    PotentialNode(int n_system_):
+        DerivComputation(true, n_system_), potential(n_system_) {}
     virtual void propagate_deriv() {};
 };
 
 
 struct HBondCounter : public PotentialNode {
     float n_hbond;
-    HBondCounter(): n_hbond(-1.f) {};
+    HBondCounter(int n_system_): PotentialNode(n_system_), n_hbond(-1.f) {};
 };
 
 
@@ -122,7 +130,7 @@ struct Pos : public CoordNode
         n_atom(n_atom_), deriv(3*n_atom*n_system, 0.f)
     {}
 
-    virtual void compute_value() {};
+    virtual void compute_value(ComputeMode mode) {};
     virtual void propagate_deriv();
     CoordArray coords() {
         return CoordArray(SysArray(output.data(), n_atom*3), slot_machine.accum_array());
@@ -148,12 +156,14 @@ struct DerivEngine
 
     std::vector<Node> nodes;  // nodes[0] is the pos node
     Pos* pos;
+    std::vector<float> potential;
 
-    DerivEngine(int n_atom, int n_system)
-        {
-            nodes.emplace_back("pos", std::unique_ptr<DerivComputation>(new Pos(n_atom, n_system)));
-            pos = dynamic_cast<Pos*>(nodes[0].computation.get());
-        }
+    DerivEngine(int n_atom, int n_system): 
+        potential(n_system)
+    {
+        nodes.emplace_back("pos", std::unique_ptr<DerivComputation>(new Pos(n_atom, n_system)));
+        pos = dynamic_cast<Pos*>(nodes[0].computation.get());
+    }
 
     void add_node(
             const std::string& name, 
@@ -168,7 +178,7 @@ struct DerivEngine
         return dynamic_cast<T&>(*get(name).computation.get());
     }
 
-    void compute();
+    void compute(ComputeMode mode);
     enum IntegratorType {Verlet=0, Predescu=1};
     void integration_cycle(float* mom, float dt, float max_force, IntegratorType type = Verlet);
 };
@@ -320,3 +330,4 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
 }
 
 #endif
+ 

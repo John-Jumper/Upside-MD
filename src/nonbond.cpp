@@ -35,8 +35,9 @@ pack_atom(const float x[3]) {
 namespace {
 
 
+template <bool return_deriv>
 inline float
-nonbonded_kernel_over_r(float r_mag2)
+nonbonded_kernel_or_deriv_over_r(float r_mag2)
 {
     // V(r) = 1/(1+exp(s*(r**2-d**2)))
     // V(d+width) is approximately V(d) + V'(d)*width
@@ -56,9 +57,12 @@ nonbonded_kernel_over_r(float r_mag2)
     float z = fminf(expf(scale_factor * (r_mag2-wall_squared)), 1e12f);
     float w = 1.f/(1.f + z);  // include protection from 0
 
-    float deriv_over_r = -2.f*scale_factor * z * (w*w);
-
-    return deriv_over_r;
+    if(return_deriv) {
+        float deriv_over_r = -2.f*scale_factor * z * (w*w);
+        return deriv_over_r;
+    } else {
+        return w;
+    }
 }
 
 inline void 
@@ -89,6 +93,7 @@ unpack_atom(unsigned int packed_atom)
 
 template <typename AffineCoordT>
 inline void backbone_pairs_body(
+        float* pot_value,
         AffineCoordT &body1,
         AffineCoordT &body2,
         int n_atoms1, const float3* restrict rpos1,
@@ -101,9 +106,10 @@ inline void backbone_pairs_body(
             const float3 x2 = rpos2[i2];
 
             const float3 r = x1-x2;
-            const float rmag2 = mag2(r);
-            if(rmag2>4.0f*4.0f) continue;
-            const float deriv_over_r = nonbonded_kernel_over_r(mag2(r));
+            const float r_mag2 = mag2(r);
+            if(r_mag2>4.0f*4.0f) continue;
+            const float deriv_over_r  = nonbonded_kernel_or_deriv_over_r<true> (r_mag2);
+            if(pot_value) *pot_value += nonbonded_kernel_or_deriv_over_r<false>(r_mag2);
             const float3 g = deriv_over_r*r;
 
             body1.add_deriv_at_location(x1,  g);
@@ -115,6 +121,7 @@ inline void backbone_pairs_body(
 }
 
 void backbone_pairs(
+        float* potential,
         const CoordArray rigid_body,
         const PackedRefPos* restrict ref_pos,
         const AffineParams* restrict params,
@@ -123,6 +130,7 @@ void backbone_pairs(
         int n_res, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         float dist_cutoff2 = dist_cutoff*dist_cutoff;
         vector<AffineCoord<>> coords; coords.reserve(n_res);
         for(int nr=0; nr<n_res; ++nr) 
@@ -140,6 +148,7 @@ void backbone_pairs(
             for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
                 if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
                     backbone_pairs_body(
+                            (potential ? potential+ns : nullptr),
                             coords[nr1],        coords[nr2], 
                             ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
                             ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
@@ -165,6 +174,7 @@ struct BackbonePairs : public PotentialNode
     float dist_cutoff;
 
     BackbonePairs(hid_t grp, CoordNode& alignment_):
+        PotentialNode(alignment_.n_system),
         n_residue(get_dset_size(1, grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
@@ -189,9 +199,10 @@ struct BackbonePairs : public PotentialNode
         for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("backbone_pairs"));
         backbone_pairs(
+                (mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 alignment.coords(), 
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
                 alignment.n_system);

@@ -503,7 +503,7 @@ struct AffineAlignment : public CoordNode
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("affine_alignment"));
         affine_alignment(coords().value, pos.coords(), params.data(), 
                 n_elem, pos.n_system);}

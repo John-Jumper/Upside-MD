@@ -155,7 +155,7 @@ struct BackboneDependentPoint : public CoordNode
                 AutoDiffParams({p.rama_residue.slot}, {p.alignment_residue.slot}));
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("backbone_point"));
         BackbonePointMap bb_map;
         bb_map.n_bin = n_bin;

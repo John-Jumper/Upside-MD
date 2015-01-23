@@ -36,25 +36,21 @@ struct PosSpringParams {
     float spring_constant;
 };
 
-template <typename CoordT>
-inline void pos_spring_body(
-        CoordT &x1,
-        const PosSpringParams &p)
-{
-    float3 disp = x1.f3() - make_float3(p.x,p.y,p.z);
-    x1.set_deriv(p.spring_constant * disp);
-}
-
 
 void pos_spring(
+        float* potential,
         const CoordArray pos,
         const PosSpringParams* restrict params,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {
-            Coord<3> x1(pos, ns, params[nt].atom[0]);
-            pos_spring_body(x1, params[nt]);
+            PosSpringParams p = params[nt];
+            Coord<3> x1(pos, ns, p.atom[0]);
+            float3 disp = x1.f3() - make_float3(p.x,p.y,p.z);
+            if(potential) potential[ns] += 0.5f * p.spring_constant * mag2(disp);
+            x1.set_deriv(p.spring_constant * disp);
             x1.flush();
         }
     }
@@ -67,7 +63,8 @@ struct PosSpring : public PotentialNode
     vector<PosSpringParams> params;
 
     PosSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size(1, grp, "id")[0]), pos(pos_), params(n_elem)
+        PotentialNode(pos_.n_system),
+        n_elem(get_dset_size(1, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
         check_size(grp, "id", n_elem, n_dep);
@@ -83,9 +80,10 @@ struct PosSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("pos_spring")); 
-        pos_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+        pos_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_elem, pos.n_system);}
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 
@@ -194,7 +192,7 @@ struct RamaCoord : public CoordNode
                 AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_coord"));
         rama_coord(
                 coords().value,
@@ -216,31 +214,27 @@ struct RamaCoord : public CoordNode
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
 
 
-template <typename CoordT>
-inline void dist_spring_body(
-        CoordT &x1,
-        CoordT &x2,
-        const DistSpringParams &p)
-{
-    float3 disp = x1.f3() - x2.f3();
-    float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
-    // V(x1,x2) = spring_const * (|x1-x2| - equil_dist)^2
-
-    x1.set_deriv( deriv);
-    x2.set_deriv(-deriv);
-}
-
-
 void dist_spring(
+        float* potential,
         const CoordArray pos,
         const DistSpringParams* restrict params,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
+
         for(int nt=0; nt<n_terms; ++nt) {
-            Coord<3> x1(pos, ns, params[nt].atom[0]);
-            Coord<3> x2(pos, ns, params[nt].atom[1]);
-            dist_spring_body(x1,x2, params[nt]);
+            DistSpringParams p = params[nt];
+            Coord<3> x1(pos, ns, p.atom[0]);
+            Coord<3> x2(pos, ns, p.atom[1]);
+
+            float3 disp = x1.f3() - x2.f3();
+            float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
+            if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist);
+
+            x1.set_deriv( deriv);
+            x2.set_deriv(-deriv);
+
             x1.flush();
             x2.flush();
         }
@@ -255,7 +249,8 @@ struct DistSpring : public PotentialNode
     vector<DistSpringParams> params;
 
     DistSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
+        PotentialNode(pos_.n_system),
+        n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
         check_size(grp, "id",              n_elem, n_dep);
@@ -270,29 +265,36 @@ struct DistSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dist_spring"));
-        dist_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+        dist_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_elem, pos.n_system);}
 };
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
 
 
 void z_flat_bottom_spring(
+        float* potential,
         const CoordArray pos,
         const ZFlatBottomParams* params,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        potential[ns] = 0.f;
+
         for(int nt=0; nt<n_terms; ++nt) {
             ZFlatBottomParams p = params[nt];
             Coord<3> atom_pos(pos, ns, p.atom);
             
             float z = atom_pos.f3().z;
-            float3 deriv(0.f, 0.f, 0.f);
-            if(z-p.z0 >  p.radius) deriv.z = p.spring_constant * (z-p.z0 - p.radius);
-            if(z-p.z0 < -p.radius) deriv.z = p.spring_constant * (z-p.z0 + p.radius);
+            float3 deriv = make_float3(0.f,0.f,0.f);
+            float excess = z-p.z0 >  p.radius ? z-p.z0 - p.radius
+                :         (z-p.z0 < -p.radius ? z-p.z0 + p.radius : 0.f);
+            deriv.z = p.spring_constant * excess;
             atom_pos.set_deriv(deriv);
             atom_pos.flush();
+
+            if(potential) potential[ns] += 0.5f*p.spring_constant * sqr(excess);
         }
     }
 }
@@ -305,6 +307,7 @@ struct ZFlatBottom : public PotentialNode
     vector<ZFlatBottomParams> params;
 
     ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
+        PotentialNode(pos_.n_system),
         pos(pos_), params( get_dset_size(1, hdf_group, "atom")[0] )
     {
         n_term = params.size();
@@ -322,47 +325,44 @@ struct ZFlatBottom : public PotentialNode
         for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].atom);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("z_flat_bottom"));
-        z_flat_bottom_spring(pos.coords(), params.data(), n_term, pos.n_system);
+        z_flat_bottom_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_term, pos.n_system);
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
 
 
-template <typename CoordT>
-inline void angle_spring_body(
-        CoordT &atom1,
-        CoordT &atom2,
-        CoordT &atom3,   // middle atom
-        const AngleSpringParams &p)
-{
-    float3 x1 = atom1.f3() - atom3.f3(); float inv_d1 = inv_mag(x1); float3 x1h = x1*inv_d1;
-    float3 x2 = atom2.f3() - atom3.f3(); float inv_d2 = inv_mag(x2); float3 x2h = x2*inv_d2;
-
-    float dp = dot(x1h, x2h);
-    float force_prefactor = p.spring_constant * (dp - p.equil_dp);
-
-    atom1.set_deriv(force_prefactor * (x2h - x1h*dp) * inv_d1);
-    atom2.set_deriv(force_prefactor * (x1h - x2h*dp) * inv_d2);
-    atom3.set_deriv(-atom1.df3(0)-atom2.df3(0));  // computed by the condition of zero net force
-}
-
-
 void angle_spring(
+        float* potential,
         const CoordArray pos,
         const AngleSpringParams* restrict params,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
+
         for(int nt=0; nt<n_terms; ++nt) {
-            Coord<3> x1(pos, ns, params[nt].atom[0]);
-            Coord<3> x2(pos, ns, params[nt].atom[1]);
-            Coord<3> x3(pos, ns, params[nt].atom[2]);
-            angle_spring_body(x1,x2,x3, params[nt]);
-            x1.flush();
-            x2.flush();
-            x3.flush();
+            AngleSpringParams p = params[nt];
+            Coord<3> atom1(pos, ns, p.atom[0]);
+            Coord<3> atom2(pos, ns, p.atom[1]);
+            Coord<3> atom3(pos, ns, p.atom[2]);
+
+            float3 x1 = atom1.f3() - atom3.f3(); float inv_d1 = inv_mag(x1); float3 x1h = x1*inv_d1;
+            float3 x2 = atom2.f3() - atom3.f3(); float inv_d2 = inv_mag(x2); float3 x2h = x2*inv_d2;
+
+            float dp = dot(x1h, x2h);
+            float force_prefactor = p.spring_constant * (dp - p.equil_dp);
+            if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(dp-p.equil_dp);
+
+            atom1.set_deriv(force_prefactor * (x2h - x1h*dp) * inv_d1);
+            atom2.set_deriv(force_prefactor * (x1h - x2h*dp) * inv_d2);
+            atom3.set_deriv(-atom1.df3(0)-atom2.df3(0));  // computed by the condition of zero net force
+    
+            atom1.flush();
+            atom2.flush();
+            atom3.flush();
         }
     }
 }
@@ -375,7 +375,8 @@ struct AngleSpring : public PotentialNode
     vector<AngleSpringParams> params;
 
     AngleSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
+        PotentialNode(pos_.n_system),
+        n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 3;  // number of atoms that each term depends on 
         check_size(grp, "id",              n_elem, n_dep);
@@ -390,15 +391,17 @@ struct AngleSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("angle_spring"));
-        angle_spring(pos.coords(), params.data(), n_elem, pos.n_system);}
+        angle_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_elem, pos.n_system);}
 };
 static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
 
 
 template <typename CoordT>
 inline void dihedral_spring_body(
+        float* pot_loc,
         CoordT &x1,
         CoordT &x2,
         CoordT &x3,
@@ -412,6 +415,7 @@ inline void dihedral_spring_body(
     float displacement = dihedral - p.equil_dihedral;
     displacement = (displacement> M_PI_F) ? displacement-2.f*M_PI_F : displacement;
     displacement = (displacement<-M_PI_F) ? displacement+2.f*M_PI_F : displacement;
+    if(pot_loc) *pot_loc += 0.5f * p.spring_constant * sqr(displacement);
 
     float c = p.spring_constant * displacement;
     x1.set_deriv(c*d1);
@@ -422,18 +426,21 @@ inline void dihedral_spring_body(
 
 
 void dynamic_dihedral_spring(
+        float* potential,
         const CoordArray pos,
         const DihedralSpringParams* restrict params,
         int params_offset,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {
             Coord<3> x1(pos, ns, params[nt].atom[0]);
             Coord<3> x2(pos, ns, params[nt].atom[1]);
             Coord<3> x3(pos, ns, params[nt].atom[2]);
             Coord<3> x4(pos, ns, params[nt].atom[3]);
-            dihedral_spring_body(x1,x2,x3,x4, params[ns*params_offset + nt]);
+            dihedral_spring_body((potential?potential+ns:0),
+                    x1,x2,x3,x4, params[ns*params_offset + nt]);
             x1.flush();
             x2.flush();
             x3.flush();
@@ -451,7 +458,8 @@ struct DynamicDihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
 
     DynamicDihedralSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
+        PotentialNode(pos_.n_system),
+        n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
         check_size(grp, "id", n_elem, n_dep, pos.n_system);  // only id is required for dynamic spring
@@ -469,25 +477,29 @@ struct DynamicDihedralSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dynamic_dihedral_spring"));
-        dynamic_dihedral_spring(pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
+        dynamic_dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
     }
 };
 
 
 void dihedral_spring(
+        float* potential,
         const CoordArray pos,
         const DihedralSpringParams* restrict params,
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {
             Coord<3> x1(pos, ns, params[nt].atom[0]);
             Coord<3> x2(pos, ns, params[nt].atom[1]);
             Coord<3> x3(pos, ns, params[nt].atom[2]);
             Coord<3> x4(pos, ns, params[nt].atom[3]);
-            dihedral_spring_body(x1,x2,x3,x4, params[nt]);
+            dihedral_spring_body((potential?potential+ns:0),
+                    x1,x2,x3,x4, params[nt]);
             x1.flush();
             x2.flush();
             x3.flush();
@@ -503,7 +515,8 @@ struct DihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;
 
     DihedralSpring(hid_t grp, CoordNode& pos_):
-    n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
+        PotentialNode(pos_.n_system),
+        n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
         check_size(grp, "id",           n_elem, n_dep);
@@ -518,9 +531,10 @@ struct DihedralSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dihedral_spring"));
-        dihedral_spring(pos.coords(), params.data(), n_elem, pos.n_system);
+        dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_elem, pos.n_system);
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");

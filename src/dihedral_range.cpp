@@ -13,12 +13,14 @@ struct DihedralRangeParams {
 };
 
 void dihedral_angle_range(
+        float* potential,
         const CoordArray   pos,
         const DihedralRangeParams* params,
         int n_terms, 
         int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {
             DihedralRangeParams p = params[nt];
 
@@ -48,6 +50,7 @@ void dihedral_angle_range(
             float wu = 1.f/(1.f+zu);
             
             float dV_dtheta = p.energy * p.scale * wl*wu * (wl*zl - zu*wu);
+            if(potential) potential[ns] += p.energy * wl*wu;
 
             x1.set_deriv(dV_dtheta * d1);
             x2.set_deriv(dV_dtheta * d2);
@@ -69,6 +72,7 @@ struct DihedralRange : public PotentialNode
     CoordNode& pos;
     vector<DihedralRangeParams> params;
     DihedralRange(hid_t grp, CoordNode& pos_):
+        PotentialNode(pos_.n_system),
         n_elem(get_dset_size(2, grp, "id")[0]),
         pos(pos_),
         params(n_elem)
@@ -90,10 +94,11 @@ struct DihedralRange : public PotentialNode
                 pos.slot_machine.add_request(1, params[i].atom[j]);
 
     }
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
             Timer timer(string("dihedral_range"));
-            dihedral_angle_range(pos.coords(), params.data(),
-                           n_elem, pos.n_system);
+            dihedral_angle_range((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                    pos.coords(), params.data(),
+                    n_elem, pos.n_system);
     }
 
 };

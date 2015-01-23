@@ -27,7 +27,6 @@ add_executable (upside
     string_method.cpp
     sidechain_radial.cpp
     nonbond.cpp 
-    steric.cpp
     bonds.cpp 
     hbond.cpp 
     backbone_dependent_sidechain.cpp

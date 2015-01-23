@@ -159,7 +159,11 @@ try {
                 engine.pos->output.at(ns*n_atom*3 + na*3 + d) = x;});
         printf("\nn_atom %i\nn_system %i\n", engine.pos->n_atom, engine.pos->n_system);
 
-        engine.compute();  // just a test force computation
+        engine.compute(PotentialAndDerivMode);
+        printf("Initial potential energy:");
+        for(float e: engine.potential) printf(" %.2f\n", e);
+        printf("\n");
+
         force_testing(config.get(), engine, generate_expected_force_arg.getValue());
 
         float dt = time_step_arg.getValue();
@@ -219,10 +223,13 @@ try {
                 }
                 Rg = sqrt(Rg/(n_atom*n_system));
 
-                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A\n", 
+                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A, energy", 
                         round_print_width, (unsigned long)nr, 
                         round_print_width, (unsigned long)n_round, 
                         get_n_hbond(engine)/n_system, Rg);
+                engine.compute(PotentialAndDerivMode);
+                for(float e: engine.potential) printf(" % 8.2f", e);
+                printf("\n");
                 fflush(stdout);
             }
             // To be cautious, apply the thermostat more often if in the equilibration phase

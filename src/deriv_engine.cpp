@@ -84,7 +84,7 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
     return loc != nodes.end() ? loc-begin(nodes) : -1;
 }
 
-void DerivEngine::compute() {
+void DerivEngine::compute(ComputeMode mode) {
     // FIXME add CUDA streams support
     // for each BFS depth, each computation gets the stream ID of its parent
     // if the parents have multiple streams or another (sibling) computation has already taken the stream id,
@@ -96,6 +96,8 @@ void DerivEngine::compute() {
 
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
+    if(mode == PotentialAndDerivMode) fill(begin(potential), end(potential), 0.f);
+
     // BFS traversal
     for(int lvl=0, not_finished=1; ; ++lvl, not_finished=0) {
         for(auto& n: nodes) {
@@ -105,9 +107,15 @@ void DerivEngine::compute() {
                         int exec_lvl = nodes[ip].germ_exec_level;
                         return exec_lvl!=-1 && exec_lvl!=lvl; // do not execute at same level as your parents
                         });
+
                 if(all_parents) {
-                    n.computation->compute_value();
+                    n.computation->compute_value(mode);
                     n.germ_exec_level = lvl;
+                    if(mode == PotentialAndDerivMode && n.computation->potential_term) {
+                        auto pot_node = static_cast<PotentialNode*>(n.computation.get());
+                        for(int ns=0; ns<pos->n_system; ++ns) 
+                            potential[ns] += pot_node->potential[ns];
+                    }
                 }
             }
 
@@ -139,7 +147,7 @@ void DerivEngine::integration_cycle(float* mom, float dt, float max_force, Integ
     float pos_update[] = {     3.f*b, 3.0f-6.f*b, 3.f*b};
 
     for(int stage=0; stage<3; ++stage) {
-        compute();   // compute derivatives
+        compute(DerivMode);   // compute derivatives
         Timer timer(string("integration"));
         integration_stage( 
                 SysArray(mom,                pos->n_atom*3), 
@@ -265,10 +273,9 @@ NodeCreationMap& node_creation_map()
 
 
 double get_n_hbond(DerivEngine &engine) {
-    HBondCounter* hbond_comp = engine.get_idx("hbond_energy",false)==-1 ? 
-        nullptr : 
-        &engine.get_computation<HBondCounter>("hbond_energy");
-    return hbond_comp?hbond_comp->n_hbond:-1.f;
+    return engine.get_idx("hbond_energy",false) == -1 
+        ? -1.f
+        : engine.get_computation<HBondCounter>("hbond_energy").n_hbond;
 }
 
 

@@ -34,11 +34,14 @@ struct HMMDeriv {
     float2 pot_rama[N_STATE];
 };
 
-inline void approx_normalization(float* x, int n) 
+inline void approx_normalization(float* pot_value, float* x, int n) 
+    // Currently this function exactly normalizes, but it could avoid division
+    // by using approx_rsqrt(x)^2 instead without breaking the HMM code
 {
     float total = 0.f;
     for(int i=0; i<n; ++i) total += x[i];
     float inv_total = 1.f/total;
+    if(pot_value) *pot_value += log(inv_total);
     for(int i=0; i<n; ++i) x[i] *= inv_total;
 }
 
@@ -142,6 +145,7 @@ void hmm_stage1(
 
 void
 hmm_stage2(
+        float* pot_value,
         float*   forward_backward_prob,
         int n_residue,
         const float* basin_prob,   // (n_res, N_STATE, n_system)
@@ -152,6 +156,8 @@ hmm_stage2(
     #define NS N_STATE
 
     if(!is_backward) {  // forward iteration
+        if(pot_value) *pot_value = 0.f;
+
         float prob[NS];
         for(int ns=0; ns<NS; ++ns) fb(is_backward, 0, ns) = prob[ns] = 1.f;
 
@@ -169,8 +175,14 @@ hmm_stage2(
             }
             for(int ns=0; ns<NS; ++ns) prob[ns] = new_prob[ns];
 
-            if(!(nr%HMM_NORMALIZATION_INTERVAL)) approx_normalization(prob, NS);
+            if(!(nr%HMM_NORMALIZATION_INTERVAL)) approx_normalization(pot_value, prob, NS);
             for(int ns=0; ns<NS; ++ns) fb(is_backward, nr+1, ns) = prob[ns];
+        }
+        if(pot_value) {
+            // finish up with any remaining normalization
+            float sum_prob = 0.f;
+            for(int ns=0; ns<N_STATE; ++ns) sum_prob += prob[ns];
+            *pot_value -= log(sum_prob);
         }
     } else {
         float prob[NS];
@@ -191,7 +203,7 @@ hmm_stage2(
             }
             for(int ns=0; ns<NS; ++ns) prob[ns] = new_prob[ns];
 
-            if(!(nr%HMM_NORMALIZATION_INTERVAL)) approx_normalization(prob, NS);
+            if(!(nr%HMM_NORMALIZATION_INTERVAL)) approx_normalization(nullptr, prob, NS);
             for(int ns=0; ns<NS; ++ns) fb(is_backward, nr-1, ns) = prob[ns];
         }
     }
@@ -240,6 +252,7 @@ void hmm_stage3(
 }
 
 void hmm(
+        float* potential,
         const CoordArray pos,
         const HMMParams* restrict params,
         const float* restrict trans_matrices,
@@ -264,7 +277,8 @@ void hmm(
         }
 
         for(int is_backward=0; is_backward<2; ++is_backward) {
-            hmm_stage2(forward_backward_prob.data(),
+            hmm_stage2((potential ? potential+ns : nullptr),
+                    forward_backward_prob.data(),
                     n_residue,
                     basin_prob.data(),
                     trans_matrices,
@@ -307,7 +321,8 @@ struct HMMPot : public PotentialNode
     vector<RamaMapGerm> rama_maps;
 
     HMMPot(hid_t grp, CoordNode& pos_):
-    n_residue(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_residue)
+        PotentialNode(pos_.n_system),
+        n_residue(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_residue)
     {
         int n_dep = 5;  // number of atoms that each term depends on 
         n_bin     = get_dset_size(5, grp, "rama_deriv")[2];
@@ -328,9 +343,10 @@ struct HMMPot : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(1, params[i].atom[j]);
     }
 
-    virtual void compute_value() {
+    virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_hmm"));
-        hmm(pos.coords(), params.data(),
+        hmm((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(),
                 trans_matrices.data(), n_bin, rama_maps.data(), 
                 n_residue, pos.n_system);
     }

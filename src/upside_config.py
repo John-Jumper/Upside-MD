@@ -833,18 +833,6 @@ def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
     params.close()
 
 
-def write_steric(fasta, library):
-    g = t.create_group(t.root.input.force, 'steric')
-    g._v_attrs.arguments = np.array(['affine_alignment'])
-    t.create_external_link(g, 'residue_data',     os.path.abspath(library)+':/residue_data')
-    t.create_external_link(g, 'atom_interaction', os.path.abspath(library)+':/atom_interaction')
-    create_array(g, 'restype', map(str,fasta))
-
-    # quick check to ensure the external link worked
-    assert len(t.get_node('/input/force/steric/residue_data/LYS').point.shape) == 2
-    assert len(t.get_node('/input/force/steric/atom_interaction/potential').shape) == 3
-
-
 def parse_segments(s):
     ''' Parse segments of the form 10-30,50-60 '''
     import argparse
@@ -882,8 +870,6 @@ def main():
     #         help='radius of residue for repulsive interaction (1 kT value)')
     parser.add_argument('--backbone', default=False, action='store_true',
             help='use rigid nonbonded for backbone N, CA, C, and CB')
-    parser.add_argument('--steric', default=None,
-            help='use steric library')
     parser.add_argument('--backbone-dependent-point', default=None,
             help='use backbone-depedent sidechain location library')
     parser.add_argument('--sidechain-radial', default=None,
@@ -944,9 +930,6 @@ def main():
     args = parser.parse_args()
     if args.restraint_group and not (args.initial_structures or args.target_structures):
         parser.error('must specify --initial-structures or --target-structures to use --restraint-group')
-
-    if args.steric and args.backbone:
-        parser.error('--steric is incompatible with --backbone since --steric includes backbone atoms.  You probably want just --steric.')
 
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
@@ -1019,10 +1002,6 @@ def main():
     # if args.sidechain_library:
     #     do_alignment = True
     #     write_sidechain_potential(fasta_seq, args.sidechain_library)
-
-    if args.steric:
-        do_alignment = True
-        write_steric(fasta_seq, args.steric)
 
     if args.sidechain_radial:
         do_alignment = True
