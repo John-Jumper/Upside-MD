@@ -69,7 +69,7 @@ void radial_pairs(
                     //printf("reduced_coord %.1f %.1f\n",reduced_coord,sqrtf(dist2));
                     float  z = expf(reduced_coord);
                     float  w = 1.f / (1.f + z);
-                    if(potential) potential[ns] += w;
+                    if(potential) potential[ns] += at.energy*w;
                     float  deriv_over_r = -2.f*at.scale * at.energy * z * (w*w);
                     float3 deriv = deriv_over_r * disp;
 
@@ -82,44 +82,6 @@ void radial_pairs(
 
         for(int nr=0; nr<n_res; ++nr)
             residues[nr].coord.flush();
-    }
-}
-
-
-void contact_energy(
-        float* potential,
-        const CoordArray   rigid_body,
-        const ContactPair* contact_param,
-        int n_contacts, float cutoff, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        for(int nc=0; nc<n_contacts; ++nc) {
-            ContactPair p = contact_param[nc];
-            AffineCoord<> r1(rigid_body, ns, p.loc[0]);
-            AffineCoord<> r2(rigid_body, ns, p.loc[1]);
-
-            float3 x1 = r1.apply(p.sc_ref_pos[0]);
-            float3 x2 = r2.apply(p.sc_ref_pos[1]);
-
-            float3 disp = x1-x2;
-            float  dist = mag(disp);
-            float  reduced_coord = p.scale * (dist - p.r0);
-
-            if(reduced_coord<cutoff) {
-                float  z = expf(reduced_coord);
-                float  w = 1.f / (1.f + z);
-                if(potential) potential[ns] += w;
-                float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
-                float3 deriv = deriv_over_r * disp;
-
-                r1.add_deriv_at_location(x1,  deriv);
-                r2.add_deriv_at_location(x2, -deriv);
-            }
-
-            r1.flush();
-            r2.flush();
-        }
     }
 }
 
@@ -181,7 +143,51 @@ struct SidechainRadialPairs : public PotentialNode
                 params.data(), interaction_params.data(), n_type, cutoff, 
                 n_residue, bb_point.n_system);
     }
+
+    virtual double test_value_deriv_agreement() {
+        vector<vector<CoordPair>> coord_pairs(1);
+        for(auto &p: params) coord_pairs.back().push_back(p.loc);
+        return compute_relative_deviation_for_node<3>(*this, bb_point, coord_pairs, CARTESIAN_VALUE);
+    }
 };
+
+
+void contact_energy(
+        float* potential,
+        const CoordArray   rigid_body,
+        const ContactPair* contact_param,
+        int n_contacts, float cutoff, int n_system)
+{
+    for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
+        for(int nc=0; nc<n_contacts; ++nc) {
+            ContactPair p = contact_param[nc];
+            AffineCoord<> r1(rigid_body, ns, p.loc[0]);
+            AffineCoord<> r2(rigid_body, ns, p.loc[1]);
+
+            float3 x1 = r1.apply(p.sc_ref_pos[0]);
+            float3 x2 = r2.apply(p.sc_ref_pos[1]);
+
+            float3 disp = x1-x2;
+            float  dist = mag(disp);
+            float  reduced_coord = p.scale * (dist - p.r0);
+
+            if(reduced_coord<cutoff) {
+                float  z = expf(reduced_coord);
+                float  w = 1.f / (1.f + z);
+                if(potential) potential[ns] += p.energy * w;
+                float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
+                float3 deriv = deriv_over_r * disp;
+
+                r1.add_deriv_at_location(x1,  deriv);
+                r2.add_deriv_at_location(x2, -deriv);
+            }
+
+            r1.flush();
+            r2.flush();
+        }
+    }
+}
 
 struct ContactEnergy : public PotentialNode
 {
@@ -224,6 +230,8 @@ struct ContactEnergy : public PotentialNode
                 alignment.coords(), params.data(), 
                 n_contact, cutoff, alignment.n_system);
     }
+
+    virtual double test_value_deriv_agreement() {return -1.;}
 };
 static RegisterNodeType<ContactEnergy,1>        contact_node("contact");
 static RegisterNodeType<SidechainRadialPairs,1> radial_node ("radial");

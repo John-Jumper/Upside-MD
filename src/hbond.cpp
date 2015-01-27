@@ -285,6 +285,10 @@ struct Infer_H_O : public CoordNode
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
                 n_virtual, pos.n_system);}
+
+    virtual double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term));
+    }
 };
 
 
@@ -338,6 +342,14 @@ struct HBondEnergy : public HBondCounter
         n_hbond = 0.f;
         for(float e: potential) n_hbond += e;
         n_hbond *= 1.f/hbond_energy;
+    }
+
+    virtual double test_value_deriv_agreement() {
+        vector<vector<CoordPair>> coord_pairs(1);
+        for(auto &p: don_params) coord_pairs.back().push_back(p.id);
+        for(auto &p: acc_params) coord_pairs.back().push_back(p.id);
+        
+        return compute_relative_deviation_for_node<6>(*this, infer, coord_pairs);
     }
 };
 

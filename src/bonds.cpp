@@ -85,6 +85,9 @@ struct PosSpring : public PotentialNode
         pos_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 pos.coords(), params.data(), n_elem, pos.n_system);
     }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+    }
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 
@@ -211,6 +214,9 @@ struct RamaCoord : public CoordNode
                 slot_machine.deriv_tape.size(), 
                 n_elem, pos.n_system);
     }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
+    }
 };
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
 
@@ -269,7 +275,11 @@ struct DistSpring : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dist_spring"));
         dist_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);}
+                pos.coords(), params.data(), n_elem, pos.n_system);
+    }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+    }
 };
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
 
@@ -330,6 +340,11 @@ struct ZFlatBottom : public PotentialNode
         Timer timer(string("z_flat_bottom"));
         z_flat_bottom_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 pos.coords(), params.data(), n_term, pos.n_system);
+    }
+
+    double test_value_deriv_agreement() {
+        return -1.;
+        // return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
@@ -395,7 +410,11 @@ struct AngleSpring : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("angle_spring"));
         angle_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);}
+                pos.coords(), params.data(), n_elem, pos.n_system);
+    }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+    }
 };
 static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
 
@@ -483,6 +502,9 @@ struct DynamicDihedralSpring : public PotentialNode
         dynamic_dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
     }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+    }
 };
 
 
@@ -536,6 +558,9 @@ struct DihedralSpring : public PotentialNode
         Timer timer(string("dihedral_spring"));
         dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 pos.coords(), params.data(), n_elem, pos.n_system);
+    }
+    double test_value_deriv_agreement() {
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");

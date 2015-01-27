@@ -608,8 +608,12 @@ def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
     # P(phi,b) = P(phi) * P(b|phi)
     # P(b|phi) = f(phi, b) / sum_b' f(phi,b)
 
-    # normalize the prob at each site
-    rama_deriv[...,0] /= rama_deriv[...,0].sum(axis=1)[:,None]
+    # # normalize the prob at each site (but this will ruin potential calculation)
+    # rama_deriv[...,0] /= rama_deriv[...,0].sum(axis=1)[:,None]
+
+    # scale the probabilities for each residue
+    print rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)
+    rama_deriv[...,0] /= rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)[:,None,None,None] + 1e-8;
 
     idx_to_map = np.arange(id.shape[0])
 
@@ -826,7 +830,7 @@ def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
 
     params = tables.open_file(library)
     data = t.create_group(g, 'data')
-    data._v_attrs.cutoff = 4.
+    data._v_attrs.cutoff = 8.
     create_array(data, 'names',      obj=params.root.params.names[:])
     create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
     create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:])

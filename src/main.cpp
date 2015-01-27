@@ -104,7 +104,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
 }
 
 
-vector<float> energy_deriv_agreement(DerivEngine& engine) {
+vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> relative_error;
     int n_atom = engine.pos->n_elem;
     SysArray pos_array = engine.pos->coords().value;
@@ -124,7 +124,7 @@ vector<float> energy_deriv_agreement(DerivEngine& engine) {
             if(n.computation->potential_term) {
                 auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
                 printf("%s:", n.name.c_str());
-                for(auto e: v) printf(" % 4.1f", e);
+                for(auto e: v) printf(" % 4.3f", e);
                 printf("\n");
             }
         }
@@ -132,30 +132,10 @@ vector<float> energy_deriv_agreement(DerivEngine& engine) {
 
         auto central_diff_jac = central_difference_deriviative(do_compute, input, output);
 
-        for(auto &n: engine.nodes) {
-            if(n.computation->potential_term) {
-                auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
-                printf("%s:", n.name.c_str());
-                for(auto e: v) printf(" % 4.1f", e);
-                printf("\n");
-            }
-        }
-        printf("\n\n");
-        
-        float value_rms=0.f;
-        float diff_rms =0.f;
-        if(central_diff_jac.size() != n_atom*3) throw string("impossible");
-        for(int i=0; i<n_atom*3; ++i) {
-            printf("re %i % 8.2f % 8.2f\n", i, central_diff_jac[i], engine.pos->deriv[i + ns*n_atom*3]);
-            fflush(stdout);
-            value_rms += sqr(central_diff_jac[i]);
-            diff_rms  += sqr(central_diff_jac[i] - engine.pos->deriv[i + ns*n_atom*3]);
-        }
-        // throw "oops";
-        value_rms = sqrt(value_rms/n_atom);
-        diff_rms  = sqrt(diff_rms /n_atom);
-
-        relative_error.push_back(diff_rms/value_rms);
+        relative_error.push_back(
+                relative_rms_deviation(
+                    central_diff_jac, 
+                    vector<float>(&engine.pos->deriv[ns*n_atom*3], &engine.pos->deriv[(ns+1)*n_atom*3])));
     }
     return relative_error;
 }
@@ -230,9 +210,13 @@ try {
         for(float e: engine.potential) printf(" %.2f\n", e);
         printf("\n");
 
+        printf("Initial agreement:\n");
+        for(auto &n: engine.nodes) printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
+        printf("\n");
+
         {
             deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
-            auto relative_error = energy_deriv_agreement(engine);
+            auto relative_error = potential_deriv_agreement(engine);
             printf("relative error: ");
             for(auto r: relative_error) printf(" %.5f", r);
             printf("\n");
@@ -296,7 +280,7 @@ try {
                 }
                 Rg = sqrt(Rg/(n_atom*n_system));
 
-                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A, energy", 
+                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A, potential", 
                         round_print_width, (unsigned long)nr, 
                         round_print_width, (unsigned long)n_round, 
                         get_n_hbond(engine)/n_system, Rg);

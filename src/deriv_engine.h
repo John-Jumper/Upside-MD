@@ -87,7 +87,7 @@ struct DerivComputation
         potential_term(potential_term_), n_system(n_system_) {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
-    virtual void test_value_deriv_agreement = 0;
+    virtual double test_value_deriv_agreement() = 0;
 };
 
 struct CoordNode : public DerivComputation
@@ -133,6 +133,7 @@ struct Pos : public CoordNode
 
     virtual void compute_value(ComputeMode mode) {};
     virtual void propagate_deriv();
+    virtual double test_value_deriv_agreement() {return 0.;};
     CoordArray coords() {
         return CoordArray(SysArray(output.data(), n_atom*3), slot_machine.accum_array());
     }
@@ -281,48 +282,51 @@ void reverse_autodiff(
 }
 
 
+enum ValueType {CARTESIAN_VALUE=0, ANGULAR_VALUE=1, BODY_VALUE=2};
 
 std::vector<float> central_difference_deriviative(
         const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output,
-        float eps=1e-2f);
+        float eps=1e-2f, ValueType value_type = CARTESIAN_VALUE);
 
 
 template <int NDIM_INPUT>
 std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordPair>>& coord_pairs,
-        int elem_width_output, const std::vector<AutoDiffParams>& ad_params, 
+        int elem_width_output, const std::vector<AutoDiffParams>* ad_params, 
         CoordNode &input_node, int n_arg)
 {
     using namespace std;
     // First validate coord_pairs consistency with ad_params
-    vector<unsigned short> slots;
-    if(ad_params.size() != coord_pairs.size()) throw string("internal error");
-    for(unsigned no=0; no<ad_params.size(); ++no) {
-        slots.resize(0);
-        auto p = ad_params[no];
-        if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
-        else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
-        else throw string("internal error");
+    if(ad_params) {
+        vector<unsigned short> slots;
+        if(ad_params->size() != coord_pairs.size()) throw string("internal error");
+        for(unsigned no=0; no<ad_params->size(); ++no) {
+            slots.resize(0);
+            auto p = (*ad_params)[no];
+            if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
+            else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
+            else throw string("internal error");
 
-        if(slots.size() != coord_pairs[no].size()) 
-            throw string("size mismatch (") + to_string(slots.size()) + " != " + to_string(coord_pairs[no].size()) + ")";
-        for(unsigned i=0; i<slots.size(); ++i) if(slots[i] != coord_pairs[no][i].slot) throw string("inconsistent");
+            if(slots.size() != coord_pairs[no].size()) 
+                throw string("size mismatch (") + to_string(slots.size()) + " != " + to_string(coord_pairs[no].size()) + ")";
+            for(unsigned i=0; i<slots.size(); ++i) if(slots[i] != coord_pairs[no][i].slot) throw string("inconsistent");
+        }
     }
-
 
     int output_size = coord_pairs.size()*elem_width_output;
     int input_size  = input_node.n_elem*input_node.elem_width;
     if(input_node.elem_width != NDIM_INPUT) 
         throw string("dimension mismatch ") + to_string(input_node.elem_width) + " " + to_string(NDIM_INPUT);
 
-    vector<float> jacobian(output_size * input_size);
+    vector<float> jacobian(output_size * input_size,0.f);
     SysArray accum_array = input_node.coords().deriv;
 
     for(unsigned no=0; no<coord_pairs.size(); ++no) {
         for(auto cp: coord_pairs[no]) {
             for(unsigned eo=0; eo<elem_width_output; ++eo) {
                 StaticCoord<NDIM_INPUT> d(accum_array, 0, cp.slot+eo);
-                for(int i=0; i<NDIM_INPUT; ++i) 
-                    jacobian[no*elem_width_output*input_size + eo*input_size + cp.index*NDIM_INPUT + i] = d.v[i];
+                for(int i=0; i<NDIM_INPUT; ++i) {
+                    jacobian[no*elem_width_output*input_size + eo*input_size + cp.index*NDIM_INPUT + i] += d.v[i];
+                }
             }
         }
     }
@@ -330,5 +334,87 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
     return jacobian;
 }
 
+template <typename T>
+void dump_matrix(int nrow, int ncol, const char* name, T matrix) {
+    if(int(matrix.size()) != nrow*ncol) throw std::string("impossible matrix sizes");
+    FILE* f = fopen(name, "w");
+    for(int i=0; i<nrow; ++i) {
+	for(int j=0; j<ncol; ++j)
+	    fprintf(f, "%f ", matrix[i*ncol+j]);
+	fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+#if !defined(IDENT_NAME)
+#define IDENT_NAME atom
 #endif
- 
+template <typename T>
+std::vector<std::vector<CoordPair>> extract_pairs(const std::vector<T>& params, bool is_potential) {
+    std::vector<std::vector<CoordPair>> coord_pairs;
+    int n_slot = sizeof(params[0].IDENT_NAME)/sizeof(params[0].IDENT_NAME[0]);
+    for(int ne=0; ne<params.size(); ++ne) {
+        if(ne==0 || !is_potential) coord_pairs.emplace_back();
+        for(int nsl=0; nsl<n_slot; ++nsl) {
+            CoordPair s = params[ne].IDENT_NAME[nsl];
+            if(s.slot != slot_t(-1)) coord_pairs.back().push_back(s);
+        }
+    }
+    return coord_pairs;
+}
+
+
+
+
+static double relative_rms_deviation(
+        const std::vector<float> &reference, const std::vector<float> &actual) {
+    if(reference.size() != actual.size()) 
+        throw std::string("impossible size mismatch ") + 
+            std::to_string(reference.size()) + " " + std::to_string(actual.size());
+    double diff_mag2  = 0.;
+    double value1_mag2 = 0.;
+    for(size_t i=0; i<reference.size(); ++i) {
+        diff_mag2  += sqr(reference[i]-actual[i]);
+        value1_mag2 += sqr(reference[i]);
+    }
+    return sqrt(diff_mag2/value1_mag2);
+}
+
+
+template <int NDIM_INPUT, typename T>
+double compute_relative_deviation_for_node(
+        T& node, 
+        CoordNode& argument, 
+        const std::vector<std::vector<CoordPair>> &coord_pairs,
+        ValueType value_type = CARTESIAN_VALUE) {
+    // FIXME handle multiple systems
+
+    std::vector<float>& output = node.potential_term 
+        ? reinterpret_cast<PotentialNode&>(node).potential
+        : reinterpret_cast<CoordNode&>    (node).output;
+
+    int elem_width_output = 1;
+    if(!node.potential_term) elem_width_output = reinterpret_cast<CoordNode&>(node).elem_width;
+
+    auto fd_deriv = central_difference_deriviative(
+            [&](){node.compute_value(PotentialAndDerivMode);}, 
+            argument.output, output, 1e-2, value_type);
+
+    node.compute_value(DerivMode);
+    auto pred_deriv = extract_jacobian_matrix<NDIM_INPUT>(
+            coord_pairs, elem_width_output, nullptr, argument, 0);
+//    printf("cp_size %lu\n", coord_pairs[0].size());
+
+    if(elem_width_output == 1 && coord_pairs[0].size() == 370u) {
+        // printf("output:");
+        // for(int i=0; i<output.size()/2; ++i) printf(" (%.1f,%.1f)", output[2*i+0]/deg, output[2*i+1]/deg);
+        // printf("\n");
+        dump_matrix(output.size(), fd_deriv.size()/output.size(), "fd_rama", fd_deriv);
+        dump_matrix(output.size(), fd_deriv.size()/output.size(), "pr_rama", pred_deriv);
+    }
+
+    return relative_rms_deviation(fd_deriv, pred_deriv);
+}
+
+
+#endif

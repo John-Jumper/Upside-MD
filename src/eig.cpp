@@ -514,6 +514,12 @@ struct AffineAlignment : public CoordNode
                 coords().value, coords().deriv, pos.slot_machine.accum_array(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_elem, pos.n_system);}
+                n_elem, pos.n_system);
+    }
+
+    virtual double test_value_deriv_agreement() {
+        return -1.;
+        // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term), BODY_VALUE);
+    }
 };
 static RegisterNodeType<AffineAlignment,1>_8("affine_alignment");

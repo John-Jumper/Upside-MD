@@ -280,7 +280,8 @@ double get_n_hbond(DerivEngine &engine) {
 
 
 vector<float> central_difference_deriviative(
-        const function<void()>& compute_value, vector<float>& input, vector<float>& output, float eps) 
+        const function<void()>& compute_value, vector<float>& input, vector<float>& output, float eps,
+        ValueType value_type) 
 {
     // FIXME only handles single systems
     auto old_input = input;
@@ -299,8 +300,15 @@ vector<float> central_difference_deriviative(
         input[ni] = old_input[ni] + eps; 
         compute_value();
 
-        for(unsigned no=0; no<output.size(); ++no)
-            jacobian[no*input.size() + ni] = (output[no]-output_minus_eps[no]) * (0.5f/eps);
+        for(unsigned no=0; no<output.size(); ++no){
+            float diff = output[no]-output_minus_eps[no];
+            if(value_type == ANGULAR_VALUE) {
+                //printf("diff %f\n", diff/M_PI_F*180.f);
+                if(diff> M_PI_F) diff -= 2.f*M_PI_F;
+                if(diff<-M_PI_F) diff += 2.f*M_PI_F;
+            }
+            jacobian[no*input.size() + ni] = diff * (0.5f/eps);
+        }
     }
     // restore input and recompute the output so the caller is not surprised
     copy(begin(old_input), end(old_input), begin(input));  

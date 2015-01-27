@@ -101,5 +101,7 @@ struct DihedralRange : public PotentialNode
                     n_elem, pos.n_system);
     }
 
+    virtual double test_value_deriv_agreement() {return -1.;}
+
 };
 static RegisterNodeType<DihedralRange,1>  dihedral_range_node("dihedral_range");

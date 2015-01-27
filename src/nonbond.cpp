@@ -50,6 +50,7 @@ nonbonded_kernel_or_deriv_over_r(float r_mag2)
 
     const float wall = 3.2f;  // corresponds to vdW *diameter*
     const float wall_squared = wall*wall;  
+    // const float width = 0.10f; // FIXME WRONG
     const float width = 0.15f;
     const float scale_factor = 1.f/(wall*width);  // ensure character
 
@@ -207,5 +208,7 @@ struct BackbonePairs : public PotentialNode
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
                 alignment.n_system);
     }
+
+    virtual double test_value_deriv_agreement() {return -1.;}
 };
 static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

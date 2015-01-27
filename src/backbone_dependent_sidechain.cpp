@@ -175,5 +175,7 @@ struct BackboneDependentPoint : public CoordNode
                 slot_machine.deriv_tape.size(), 
                 n_elem, alignment.n_system);
     }
+
+    virtual double test_value_deriv_agreement() {return -1.;}
 };
 static RegisterNodeType<BackboneDependentPoint,2> backbone_dependent_point_node("backbone_dependent_point");
