@@ -637,39 +637,6 @@ def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
         create_array(grp, 'count_matrices', obj=count_matrices)
 
 
-def write_nonbonded(fasta_seq, Vfcns, max_r=10., n_bin=64):
-    n_type = len(three_letter_aa)
-    assert n_type == 20
-
-    com = t.create_group(potential, 'group_com')
-    n_group = n_atom/3
-    group_inds = -1 + np.zeros((n_group, 3), dtype='i8')
-
-    # groups of 3 to simulate a backbone
-    group_inds[:,0] = np.arange(0,n_atom,3)
-    group_inds[:,1] = np.arange(1,n_atom,3)
-    group_inds[:,2] = np.arange(2,n_atom,3)
-    group_type = np.array([aa_num[r] for r in fasta_seq])
-
-    create_array(com, 'group_inds', obj=group_inds)
-    create_array(com, 'group_type', obj=group_type)
-
-    pairwise = t.create_group(potential, 'pairwise')
-
-    deriv_over_r = np.zeros((n_type, n_type, n_bin), 'f4')
-    dx = max_r / (n_bin-1)
-    eps = 1e-10
-    r = dx*np.arange(n_bin) + eps*1j + 1e-100  # use the complex step numerical differentiation method
-
-    for aa1,i1 in aa_num.items():
-        for aa2,i2 in aa_num.items():
-            deriv_over_r[i1,i2,1:] = np.imag(Vfcns[aa1,aa2](r[1:])) / eps / np.real(r[1:])
-            deriv_over_r[i1,i2, 0] = deriv_over_r[i1,i2, 1]   # kludge for problems at the origin
-
-    create_array(pairwise, 'dist_pot_deriv_over_r', obj=deriv_over_r)
-    pairwise.dist_pot_deriv_over_r._v_attrs.dx = dx
-
-
 def read_fasta(file_obj):
     lines = list(file_obj)
     assert lines[0][0] == '>'
@@ -983,19 +950,6 @@ def main():
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
         args_group._v_attrs[k] = v
-
-    # if args.residue_radius != 0.:
-    #     height = 20.
-    #     # width = args.residue_radius / np.sqrt(2*np.log(height))
-    #     # V = lambda r: height * np.exp(-0.5 * r**2 / width**2)
-
-    #     width = 0.3
-    #     radius = args.residue_radius - width * np.log(height-1.)  # set kT energy at desired coordinate
-    #     V = lambda r: height/(1.+np.exp((r-radius)/width))
-    #     # set all atoms to the same function
-    #     Vfcns = dict(((aa1,aa2), V) for aa1 in aa_num for aa2 in aa_num)
-
-    #     write_nonbonded(fasta_seq, Vfcns)
 
     if args.dihedral_range:
         write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)

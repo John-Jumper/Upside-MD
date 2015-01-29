@@ -351,7 +351,11 @@ struct HMMPot : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_hmm"));
-        if(mode==PotentialAndDerivMode) fprintf(stderr,"Potential values from Rama HMM are wrong\n");
+        static bool warning_printed = false;
+        if(mode==PotentialAndDerivMode && !warning_printed) {
+            fprintf(stderr,"Potential values from Rama HMM are wrong\n");
+            warning_printed=true; 
+        }
         hmm((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 pos.coords(), params.data(),
                 trans_matrices.data(), n_bin, rama_maps.data(), 
