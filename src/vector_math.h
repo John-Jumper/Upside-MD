@@ -147,6 +147,7 @@ inline float3 cross(float3 a, float3 b){
 inline float mag(float3 a){return sqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}  //!< vector magnitude
 
 inline float mag2(float3 a){return a.x*a.x + a.y*a.y + a.z*a.z;} //!< vector magnitude squared (faster than mag)
+inline float mag2(float4 a){return a.x*a.x + a.y*a.y + a.z*a.z + a.w*a.w;} //!< vector magnitude squared (faster than mag)
 
 inline float inv_mag2(float3 a){float m=inv_mag(a); return m*m;} //!< reciprocal of vector magnitude squared (1/|v|^2)
 

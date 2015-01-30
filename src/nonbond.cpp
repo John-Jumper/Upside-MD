@@ -161,6 +161,7 @@ void backbone_pairs(
             for(int d=0; d<6; ++d) coords[nr].d[0][d] *= energy_scale;
             coords[nr].flush();
         }
+        if(potential) potential[ns] *= energy_scale;
     }
 }
 
@@ -209,6 +210,10 @@ struct BackbonePairs : public PotentialNode
                 alignment.n_system);
     }
 
-    virtual double test_value_deriv_agreement() {return -1.;}
+    virtual double test_value_deriv_agreement() {
+        vector<vector<CoordPair>> coord_pairs(1);
+        for(auto &p: params) coord_pairs.back().push_back(p.residue);
+        return compute_relative_deviation_for_node<7,BackbonePairs,BODY_VALUE>(*this, alignment, coord_pairs);
+    }
 };
 static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

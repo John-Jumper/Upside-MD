@@ -457,11 +457,9 @@ affine_reverse_autodiff(
             float q[4]; for(int d=0; d<4; ++d) q[d] = affine.x[ns*affine.offset+na*7+d+3];
 
             // push back torque to affine derivatives (multiply by quaternion)
-            // I am not sure if this multiplication should be on the right or the left
-            // by the quat or its conjugate
             // the torque is in the tangent space of the rotated frame
             // to act on a tangent in the affine space, I need to push that tangent into the rotated space
-            // this means a right multiply by the quaternion itself, I think
+            // this means a right multiply by the quaternion itself
 
             float *torque = torque_sens[na].v+3;
             sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
@@ -518,8 +516,7 @@ struct AffineAlignment : public CoordNode
     }
 
     virtual double test_value_deriv_agreement() {
-        return -1.;
-        // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term), BODY_VALUE);
+        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term), BODY_VALUE);
     }
 };
 static RegisterNodeType<AffineAlignment,1>_8("affine_alignment");

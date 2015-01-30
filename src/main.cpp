@@ -210,16 +210,17 @@ try {
         for(float e: engine.potential) printf(" %.2f\n", e);
         printf("\n");
 
-        printf("Initial agreement:\n");
-        for(auto &n: engine.nodes) printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
-        printf("\n");
 
         {
             deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
-            auto relative_error = potential_deriv_agreement(engine);
-            printf("relative error: ");
-            for(auto r: relative_error) printf(" %.5f", r);
-            printf("\n");
+            // printf("Initial agreement:\n");
+            // for(auto &n: engine.nodes) printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
+            // printf("\n");
+
+            // auto relative_error = potential_deriv_agreement(engine);
+            // printf("overall potential relative error: ");
+            // for(auto r: relative_error) printf(" %.5f", r);
+            // printf("\n");
         }
 
         float dt = time_step_arg.getValue();

@@ -252,6 +252,8 @@ namespace {
 // };
 // 
 // 
+
+
 inline void
 relative_quat(float* restrict ret, const float* q1, const float* q2)
 // ret = conjugate(p) * q  -- it takes you from the right reference frame to the left
@@ -261,7 +263,6 @@ relative_quat(float* restrict ret, const float* q1, const float* q2)
     ret[2] = -q1[2]*q2[0] - q1[3]*q2[1] + q1[0]*q2[2] + q1[1]*q2[3];
     ret[3] = -q1[3]*q2[0] + q1[2]*q2[1] - q1[1]*q2[2] + q1[0]*q2[3];
 }
-
 
 // inline void
 // apply_affine(float* restrict ret, const float* restrict t, const float* restrict U, const float* restrict x)

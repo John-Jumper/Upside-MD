@@ -313,8 +313,9 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
     }
 
     int output_size = coord_pairs.size()*elem_width_output;
-    int input_size  = input_node.n_elem*input_node.elem_width;
-    if(input_node.elem_width != NDIM_INPUT) 
+    int input_size  = input_node.n_elem*NDIM_INPUT;
+    // special case handling for rigid bodies, since torques have 3 elements but quats have 4
+    if(input_node.elem_width != NDIM_INPUT && input_node.elem_width!=7) 
         throw string("dimension mismatch ") + to_string(input_node.elem_width) + " " + to_string(NDIM_INPUT);
 
     vector<float> jacobian(output_size * input_size,0.f);
@@ -381,7 +382,7 @@ static double relative_rms_deviation(
 }
 
 
-template <int NDIM_INPUT, typename T>
+template <int NDIM_INPUT, typename T,ValueType arg_type = CARTESIAN_VALUE>
 double compute_relative_deviation_for_node(
         T& node, 
         CoordNode& argument, 
@@ -401,18 +402,36 @@ double compute_relative_deviation_for_node(
             argument.output, output, 1e-2, value_type);
 
     node.compute_value(DerivMode);
-    auto pred_deriv = extract_jacobian_matrix<NDIM_INPUT>(
+    auto pred_deriv = extract_jacobian_matrix<arg_type==BODY_VALUE ? 6 : NDIM_INPUT>(
             coord_pairs, elem_width_output, nullptr, argument, 0);
-//    printf("cp_size %lu\n", coord_pairs[0].size());
 
-    if(elem_width_output == 1 && coord_pairs[0].size() == 370u) {
-        // printf("output:");
-        // for(int i=0; i<output.size()/2; ++i) printf(" (%.1f,%.1f)", output[2*i+0]/deg, output[2*i+1]/deg);
-        // printf("\n");
-        dump_matrix(output.size(), fd_deriv.size()/output.size(), "fd_rama", fd_deriv);
-        dump_matrix(output.size(), fd_deriv.size()/output.size(), "pr_rama", pred_deriv);
+    if(arg_type == BODY_VALUE) {
+        // we need to convert the torque to a quaternion derivative
+        if(NDIM_INPUT != 7) throw "impossible";
+        std::vector<float> pred_deriv_quat;
+
+        if(pred_deriv.size()%6) throw "wrong";
+        if(argument.elem_width != 7) throw "wrong";
+        if((pred_deriv.size()/6) % argument.n_elem) throw "inconsistent";
+
+        for(unsigned i=0; 6*i<pred_deriv.size(); ++i) {
+            // just copy over CoM derivatives
+            pred_deriv_quat.push_back(pred_deriv[6*i+0]);
+            pred_deriv_quat.push_back(pred_deriv[6*i+1]);
+            pred_deriv_quat.push_back(pred_deriv[6*i+2]);
+
+            const float* q = argument.output.data() + 7*(i%argument.n_elem)+3;
+
+            // rotate torque back to the reference frame
+            float torque[3] = {pred_deriv[6*i+3], pred_deriv[6*i+4], pred_deriv[6*i+5]};
+            pred_deriv_quat.push_back(2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]));
+            pred_deriv_quat.push_back(2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]));
+            pred_deriv_quat.push_back(2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]));
+            pred_deriv_quat.push_back(2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]));
+        }
+
+        pred_deriv = pred_deriv_quat;
     }
-
     return relative_rms_deviation(fd_deriv, pred_deriv);
 }
 

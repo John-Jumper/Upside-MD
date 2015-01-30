@@ -300,6 +300,20 @@ vector<float> central_difference_deriviative(
         input[ni] = old_input[ni] + eps; 
         compute_value();
 
+        if(value_type == BODY_VALUE) {
+            if(output.size() % 7) throw "impossible";
+            for(unsigned no=0; no<output.size(); no+=7){
+                const float* o = &output[no+3];
+                float* ome = &output_minus_eps[no+3];
+
+                float4 qo   = make_float4(o  [0],o  [1],o  [2],o  [3]);
+                float4 qome = make_float4(ome[0],ome[1],ome[2],ome[3]);
+
+                // resolve whether q or -q is closer
+                if(mag2(qo+qome) < mag2(qo-qome)) for(int d=0; d<4; ++d) ome[d] *= -1.f;
+            }
+        }
+
         for(unsigned no=0; no<output.size(); ++no){
             float diff = output[no]-output_minus_eps[no];
             if(value_type == ANGULAR_VALUE) {
@@ -310,6 +324,7 @@ vector<float> central_difference_deriviative(
             jacobian[no*input.size() + ni] = diff * (0.5f/eps);
         }
     }
+
     // restore input and recompute the output so the caller is not surprised
     copy(begin(old_input), end(old_input), begin(input));  
     compute_value();

@@ -776,20 +776,11 @@ def write_backbone_dependent_point(fasta, library):
     data = tables.open_file(library)
 
     n_restype = len(aa_num)
-    n_bin = data.get_node('/ALA/center').shape[0]
-    point_map = np.zeros((n_restype,n_bin,n_bin, 3,3),dtype='f4')  
+    n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
+    point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
 
     for rname,idx in sorted(aa_num.items()):
-        point_map[idx,:,:, 0,:] = data.get_node('/%s/center'%rname)[:]
-
-    counter = np.arange(n_bin)
-    up_loc  = (counter+1)%n_bin
-    dn_loc  = (counter-1)%n_bin
-    dx = 2*np.pi/(n_bin-1)
-
-    # compute central difference derivatives
-    point_map[:,:,:, 1,:] = (point_map[:,up_loc,:][:,:,:, 0,:]-point_map[:,dn_loc,:][:,:,:, 0,:])/(2.*dx)
-    point_map[:,:,:, 2,:] = (point_map[:,:,up_loc][:,:,:, 0,:]-point_map[:,:,dn_loc][:,:,:, 0,:])/(2.*dx)
+        point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
     data.close()
 
     create_array(grp, 'rama_residue',       np.arange(len(fasta)))
