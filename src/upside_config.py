@@ -392,7 +392,7 @@ def maximum_likelihood_fixed_marginal(row_marginal, col_marginal, counts, pseudo
 
     def obj(lambd):
         prob = freq / (lambd[:N][:,None] - lambd[N:][None,:])
-        print prob.sum()
+        # print prob.sum()
         val = np.concatenate((
             prob.sum(axis=1) - row_marginal,
             prob.sum(axis=0) - col_marginal))
@@ -472,7 +472,7 @@ def minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudo
         while np.amin(prob_estimate) < 0.:
             pseudoprob += 1.
             prob_estimate = minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob)
-        print '%.2f'%(pseudoprob/counts.sum())
+        # print '%.2f'%(pseudoprob/counts.sum())
         return prob_estimate
 
     N = row_marginal.shape[0]
@@ -536,8 +536,6 @@ def make_trans_matrices(seq, monomer_basin_prob, dimer_counts):
     return trans_matrices, prob_matrices, count_matrices
 
 
-
-
 def populate_rama_maps(seq, rama_library_h5):
     rama_maps = np.zeros((len(seq), 72,72))
     t=tables.open_file(rama_library_h5)
@@ -557,6 +555,23 @@ def populate_rama_maps(seq, rama_library_h5):
     t.close()
 
     return dict(rama_maps = rama_maps, phi=np.arange(-180,180,5), psi=np.arange(-180,180,5))
+
+
+def write_rama_map_pot(seq, rama_library_h5):
+    grp = t.create_group(potential, 'rama_map_pot')
+    grp._v_attrs.arguments = np.array(['rama_coord'])
+
+    rama_pot = populate_rama_maps(seq, rama_library_h5)['rama_maps']
+    assert rama_pot.shape[0] == len(seq)
+
+    # let's remove the average energy from each Rama map 
+    # so that the Rama potential emphasizes its variation
+
+    rama_pot -= (rama_pot*np.exp(-rama_pot)).sum(axis=-1).sum(axis=-1)[:,None,None]
+
+    create_array(grp, 'residue_id',   obj=np.arange(len(seq)))
+    create_array(grp, 'rama_map_id',  obj=np.arange(rama_pot.shape[0]))
+    create_array(grp, 'rama_pot',     obj=rama_pot)
 
 
 def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
@@ -612,7 +627,7 @@ def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
     # rama_deriv[...,0] /= rama_deriv[...,0].sum(axis=1)[:,None]
 
     # scale the probabilities for each residue
-    print rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)
+    # print rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)
     rama_deriv[...,0] /= rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)[:,None,None,None] + 1e-8;
 
     idx_to_map = np.arange(id.shape[0])
@@ -908,6 +923,7 @@ def main():
 
     fasta_seq = read_fasta(open(args.fasta))
     do_alignment = False
+    require_rama = False
 
     global n_system, n_atom, t, potential
     n_system = args.n_system
@@ -940,16 +956,20 @@ def main():
     write_dist_spring(args)
     write_angle_spring(args)
     write_dihedral_spring()
-    # # write_rama_pot()
     if args.hbond_energy!=0.: 
         write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation, args.hbond_exclude_residues)
-
-    dimer_counts = cPickle.load(open(args.dimer_basin_library)) if args.dimer_basin_library else None
-    write_hmm_pot(fasta_seq, args.rama_library, dimer_counts=dimer_counts)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
         args_group._v_attrs[k] = v
+
+    if args.rama_library:
+        dimer_counts = cPickle.load(open(args.dimer_basin_library)) if args.dimer_basin_library else None
+        if dimer_counts is not None:
+            write_hmm_pot(fasta_seq, args.rama_library, dimer_counts=dimer_counts)
+        else:
+            require_rama = True
+            write_rama_map_pot(fasta_seq, args.rama_library)
 
     if args.dihedral_range:
         write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)
@@ -964,10 +984,13 @@ def main():
 
     if args.sidechain_radial:
         do_alignment = True
-        write_rama_coord()
+        require_rama = True
         write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
         write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 
                 args.sidechain_radial_exclude_residues)
+
+    if require_rama:
+        write_rama_coord()
 
     if args.contact_energies:
         do_alignment = True

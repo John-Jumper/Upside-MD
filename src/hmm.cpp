@@ -115,7 +115,6 @@ void hmm_stage1(
     float psi = dihedral_germ(x2.f3(),x3.f3(),x4.f3(),x5.f3(), d.psi_x2,d.psi_x3,d.psi_x4,d.psi_x5);
 
     RamaMapGerm rama_germ = rama.read_map(residue_number, phi, psi);
-        // FIXME why is this psi before phi?  the results are wrong otherwise
 
     for(int ns=0; ns<N_STATE; ++ns) {
         // the 1e-8 is a hack to avoid a situation where all basin probs are exactly zero,

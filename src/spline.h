@@ -60,11 +60,11 @@ struct LayeredPeriodicSpline2D {
     const int ny;
     vector<float> coefficients;
 
-    LayeredPeriodicSpline2D(int n_layer_, 
-             int nx_, 
-             int ny_, 
-             const float* data): // size (n_layer, nx, ny, NDIM_VALUE)
-                 n_layer(n_layer_), nx(nx_), ny(ny_), coefficients(n_layer*nx*ny*NDIM_VALUE*16)
+    LayeredPeriodicSpline2D(int n_layer_, int nx_, int ny_):
+        n_layer(n_layer_), nx(nx_), ny(ny_), coefficients(n_layer*nx*ny*NDIM_VALUE*16)
+    {}
+
+    void fit_spline(const double* data) // size (n_layer, nx, ny, NDIM_VALUE)
     {
         // store values in float, but solve system in double
         vector<double> coeff_tmp(nx*ny*16);
@@ -91,7 +91,7 @@ struct LayeredPeriodicSpline2D {
     }
 
 
-    void evaluate_value_and_deriv(float* restrict result, float x, float y) {
+    void evaluate_value_and_deriv(float* restrict result, int layer, float x, float y) const {
         // order of answer is (dx1,dy1,value1, dx2,dy2,value2, ...)
         int x_bin = int(x);
         int y_bin = int(y);
@@ -99,7 +99,7 @@ struct LayeredPeriodicSpline2D {
         float fx = x - x_bin;
         float fy = y - y_bin;
 
-        const float* c = coefficients.data() + (x_bin*ny + y_bin)*16*NDIM_VALUE;
+        const float* c = coefficients.data() + (layer*nx*ny + x_bin*ny + y_bin)*16*NDIM_VALUE;
 
         for(int id=0; id<NDIM_VALUE; ++id) 
             spline_value_and_deriv(result+id*3, c+id*16, fx, fy);
