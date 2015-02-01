@@ -14,7 +14,7 @@ using namespace h5;
 
 void parallel_tempering_step(
         uint32_t seed, uint64_t round,
-        vector<int> current_system_indices,
+        vector<int>& current_system_indices,
         const vector<float>& temperatures, DerivEngine& engine) {
     int n_system = engine.pos->n_system;
     if(int(temperatures.size()) != n_system) throw string("impossible");
@@ -49,13 +49,18 @@ void parallel_tempering_step(
     auto new_lboltz  = compute_log_boltzmann();
 
     // reverse all swaps that should not occur by metropolis criterion
-    for(int i=0; i+1<n_system; i+=2) {
+    int n_trial = 0; 
+    int n_accept = 0;
+    for(int i=start; i+1<n_system; i+=2) {
+        n_trial++;
         float lboltz_diff = (new_lboltz[i] + new_lboltz[i+1]) - (old_lboltz[i]+old_lboltz[i+1]);
         // If we reject the swap, we must reverse it
-        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) 
+        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) {
             coord_swap(i,i+1);
+        } else {
+            n_accept++;
+        }
     }
-
     // This function could probably do with fewer potential evaluations,
     // but it is called so rarely that it is unlikely to matter.
     // It is important that the energy is computed more than once in case
@@ -220,6 +225,9 @@ try {
             false, -1., "float", cmd);
     ValueArg<double> frame_interval_arg("", "frame-interval", "simulation time between frames", 
             true, -1., "float", cmd);
+    ValueArg<double> replica_interval_arg("", "replica-interval", 
+            "simulation time between applications of replica exchange (0 means no replica exchange, default 0.)", 
+            false, 0., "float", cmd);
     ValueArg<double> thermostat_interval_arg("", "thermostat-interval", 
             "simulation time between applications of the thermostat", 
             false, -1., "float", cmd);
@@ -338,13 +346,30 @@ try {
 
         int round_print_width = ceil(log(n_round)/log(10));
 
+        int replica_interval = 0;
+        if(replica_interval_arg.getValue())
+            replica_interval = max(1.,replica_interval_arg.getValue()/(3*dt));
+
+        vector<int> current_system_indices; 
+        for(int ns=0; ns<n_system; ++ns) current_system_indices.push_back(ns);
+        printf("replica interval %i\n", replica_interval);
+
         bool do_recenter = !disable_recenter_arg.getValue();
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
+            if(replica_interval && !(nr%replica_interval))
+                parallel_tempering_step(random_seed, nr, current_system_indices, temperature, engine);
+
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
                 engine.compute(PotentialAndDerivMode);
                 state_logger.log(nr*3*dt, engine.pos->output.data(), mom_sys.x, engine.potential.data());
+
+                if(replica_interval) {
+                    printf("current_system_indices");
+                    for(auto i: current_system_indices) printf(" %2i", i);
+                    printf("\n");
+                }
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {

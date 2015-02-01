@@ -37,6 +37,7 @@ integration_stage(
         int n_atom,
         int n_system)
 {
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int na=0; na<n_atom; ++na) {
             MutableCoord<3> p(mom,   ns, na);
