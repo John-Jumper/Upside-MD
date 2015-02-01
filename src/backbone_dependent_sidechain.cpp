@@ -24,6 +24,7 @@ void backbone_dependent_point(
     const float scale = map.nx * (0.5f/M_PI_F - 1e-7f);
     const float shift = M_PI_F;
 
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<3> com_rotated(output, ns, nt);

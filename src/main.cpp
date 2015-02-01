@@ -5,9 +5,63 @@
 #include "thermostat.h"
 #include <chrono>
 #include "md_export.h"
+#include <algorithm>
+#include "random.h"
 
 using namespace std;
 using namespace h5;
+
+
+void parallel_tempering_step(
+        uint32_t seed, uint64_t round,
+        vector<int> current_system_indices,
+        const vector<float>& temperatures, DerivEngine& engine) {
+    int n_system = engine.pos->n_system;
+    if(int(temperatures.size()) != n_system) throw string("impossible");
+    if(int(current_system_indices.size()) != n_system) throw string("impossible");
+
+    vector<float> beta(n_system);
+    for(int i=0; i<n_system; ++i) beta[i] = 1.f/temperatures[i];
+
+    // compute the boltzmann factors for everyone
+    auto compute_log_boltzmann = [&]() {
+        engine.compute(PotentialAndDerivMode);
+        vector<float> result(n_system);
+        for(int i=0; i<n_system; ++i) 
+            result[i] = -beta[i]*engine.potential[i];
+        return result;
+    };
+
+    // swap coordinates and the associated system indices
+    auto coord_swap = [&](int ns1, int ns2) {
+        SysArray pos = engine.pos->coords().value;
+        swap_ranges(pos.x+ns1*pos.offset, pos.x+(ns1+1)*pos.offset, pos.x+ns2*pos.offset);
+        swap(current_system_indices[ns1], current_system_indices[ns2]);
+    };
+
+    RandomGenerator random(seed, 1u, 0u, round);
+
+    // attempt neighbor swaps, first (2*i,2*i+1) swaps, then (2*i-1,2*i)
+    int start = random.uniform_open_closed().x < 0.5f;  // must start at 0 or 1 randomly
+
+    auto old_lboltz = compute_log_boltzmann();
+    for(int i=start; i+1<n_system; i+=2) coord_swap(i,i+1);
+    auto new_lboltz  = compute_log_boltzmann();
+
+    // reverse all swaps that should not occur by metropolis criterion
+    for(int i=0; i+1<n_system; i+=2) {
+        float lboltz_diff = (new_lboltz[i] + new_lboltz[i+1]) - (old_lboltz[i]+old_lboltz[i+1]);
+        // If we reject the swap, we must reverse it
+        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) 
+            coord_swap(i,i+1);
+    }
+
+    // This function could probably do with fewer potential evaluations,
+    // but it is called so rarely that it is unlikely to matter.
+    // It is important that the energy is computed more than once in case
+    // we are doing Hamiltonian parallel tempering rather than 
+    // temperature parallel tempering
+}
 
 
 struct StateLogger
@@ -162,6 +216,8 @@ try {
             cmd, false);
     ValueArg<double> temperature_arg("", "temperature", "thermostat temperature (default 1.0)", 
             false, 1., "float", cmd);
+    ValueArg<double> max_temperature_arg("", "max-temperature", "maximum thermostat temperature (useful for parallel tempering)", 
+            false, -1., "float", cmd);
     ValueArg<double> frame_interval_arg("", "frame-interval", "simulation time between frames", 
             true, -1., "float", cmd);
     ValueArg<double> thermostat_interval_arg("", "thermostat-interval", 
@@ -207,12 +263,12 @@ try {
 
         engine.compute(PotentialAndDerivMode);
         printf("Initial potential energy:");
-        for(float e: engine.potential) printf(" %.2f\n", e);
+        for(float e: engine.potential) printf(" %.2f", e);
         printf("\n");
 
 
+        deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
         {
-            deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
             // printf("Initial agreement:\n");
             // for(auto &n: engine.nodes) printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
             // printf("\n");
@@ -231,21 +287,42 @@ try {
         unsigned long big_prime = 4294967291ul;  // largest prime smaller than 2^32
         uint32_t random_seed = uint32_t(seed_arg.getValue() % big_prime);
 
+        vector<float> temperature(n_system);
+        float max_temp = max_temperature_arg.getValue();
+        float min_temp = temperature_arg.getValue();
+        if(max_temp == -1.) max_temp = min_temp;
+
+        if(max_temp != min_temp && n_system == 1) 
+            throw string("--max-temperature cannot be specified for only a single system");
+        if(n_system==1) {
+            temperature[0] = temperature_arg.getValue();
+        } else {
+            // system 0 is the minimum temperature
+            // tighter spacing at the low end of temperatures because the variance is decreasing
+            for(int ns=0; ns<n_system; ++ns) 
+                temperature[ns] = sqr((sqrt(min_temp)*(n_system-1-ns) + sqrt(max_temp)*ns)/(n_system-1));
+        }
+        printf("temperature:");
+        for(auto t: temperature) printf(" %f", t);
+        printf("\n");
+
         float equil_duration = equilibration_duration_arg.getValue();
         // equilibration_max_force is set so that the change in momentum should not be more than
         // 20% of the equilibration magnitude over a single dt interval
-        float equil_avg_mom   = sqrtf(temperature_arg.getValue()/1.5f);  // all particles have mass == 1.
+        float equil_avg_mom   = sqrtf(temperature[n_system-1]/1.5f);  // all particles have mass == 1.
         float equil_max_force = 0.8f*equil_avg_mom/dt;
 
         // initialize thermostat and thermalize momentum
         vector<float> mom(n_atom*n_system*3, 0.f);
+        SysArray mom_sys(mom.data(), n_atom*3);
+
         printf("random seed: %lu\n", (unsigned long)(random_seed));
         auto thermostat = OrnsteinUhlenbeckThermostat(
                 random_seed,
                 thermostat_timescale_arg.getValue(),
-                temperature_arg.getValue(),
+                temperature,
                 1e8);
-        thermostat.apply(SysArray(mom.data(),n_atom*3), n_atom, n_system); // initial thermalization
+        thermostat.apply(mom_sys, n_atom); // initial thermalization
         thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
 
         if(h5_exists(config.get(), "/output", false)) {
@@ -267,7 +344,7 @@ try {
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
                 engine.compute(PotentialAndDerivMode);
-                state_logger.log(nr*3*dt, engine.pos->output.data(), mom.data(), engine.potential.data());
+                state_logger.log(nr*3*dt, engine.pos->output.data(), mom_sys.x, engine.potential.data());
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {
@@ -292,8 +369,8 @@ try {
             // To be cautious, apply the thermostat more often if in the equilibration phase
             bool in_equil = nr*3*dt < equil_duration;
             if(!(nr%thermostat_interval) || in_equil) 
-                thermostat.apply(SysArray(mom.data(),n_atom*3), n_atom, n_system);
-            engine.integration_cycle(mom.data(), dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
+                thermostat.apply(mom_sys, n_atom);
+            engine.integration_cycle(mom_sys.x, dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
         }
         state_logger.flush();
 
@@ -307,8 +384,8 @@ try {
             traverse_dset<2,float>(config.get(),"/output/kinetic", [&](size_t i, size_t ns, float x){
                     if(i>n_round*0.5 / frame_interval){ sum_kin[ns]+=x; n_kin[ns]++; }
                     });
-            printf("\navg kinetic energy");
-            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns]);
+            printf("\navg_kinetic_energy/1.5kT");
+            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns] / (1.5*temperature[ns]));
             printf("\n");
         }
 

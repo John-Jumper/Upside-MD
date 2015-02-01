@@ -246,6 +246,7 @@ void reverse_autodiff(
         int n_atom, 
         int n_system)
 {
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         std::vector<TempCoord<my_width>> sens(n_atom);
         for(int nt=0; nt<n_tape; ++nt) {
@@ -323,7 +324,7 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
 
     for(unsigned no=0; no<coord_pairs.size(); ++no) {
         for(auto cp: coord_pairs[no]) {
-            for(unsigned eo=0; eo<elem_width_output; ++eo) {
+            for(int eo=0; eo<elem_width_output; ++eo) {
                 StaticCoord<NDIM_INPUT> d(accum_array, 0, cp.slot+eo);
                 for(int i=0; i<NDIM_INPUT; ++i) {
                     jacobian[no*elem_width_output*input_size + eo*input_size + cp.index*NDIM_INPUT + i] += d.v[i];
@@ -354,7 +355,7 @@ template <typename T>
 std::vector<std::vector<CoordPair>> extract_pairs(const std::vector<T>& params, bool is_potential) {
     std::vector<std::vector<CoordPair>> coord_pairs;
     int n_slot = sizeof(params[0].IDENT_NAME)/sizeof(params[0].IDENT_NAME[0]);
-    for(int ne=0; ne<params.size(); ++ne) {
+    for(int ne=0; ne<int(params.size()); ++ne) {
         if(ne==0 || !is_potential) coord_pairs.emplace_back();
         for(int nsl=0; nsl<n_slot; ++nsl) {
             CoordPair s = params[ne].IDENT_NAME[nsl];

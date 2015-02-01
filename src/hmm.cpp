@@ -338,7 +338,7 @@ struct HMMPot : public PotentialNode
                 if(m==2) rama_maps[i*n_bin*n_bin + k*n_bin + l].dpsi[ns] = x;
                 });
         traverse_dset<3,float>(grp, "rama_pot", [&](size_t nr, size_t nb1, size_t nb2, float x) {
-                if(nr==0 || nr==n_residue+1) return; // just parse the ones we need
+                if(nr==0 || nr==size_t(n_residue+1)) return; // just parse the ones we need
                 rama_base_potential.push_back(x);
                 });
         if(rama_base_potential.size() != unsigned(n_residue*n_bin*n_bin)) throw "oops";

@@ -130,6 +130,7 @@ void backbone_pairs(
         float dist_cutoff,
         int n_res, int n_system)
 {
+#pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
         float dist_cutoff2 = dist_cutoff*dist_cutoff;

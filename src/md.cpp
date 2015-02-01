@@ -58,6 +58,7 @@ void deriv_accumulation(
         int n_atom,
         int n_system)
 {
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         std::vector<MutableCoord<3>> coords;
         coords.reserve(n_atom);

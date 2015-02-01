@@ -133,6 +133,7 @@ void infer_HN_OC_pos_and_dir(
         const VirtualParams* params,
         int n_term, int n_system)
 {
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<6> hbond_pos(HN_OC, ns, nt);
@@ -204,7 +205,7 @@ void count_hbond(
         int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
         const float hbond_energy, int n_system)
 {
-#pragma omp parallel for reduction(+:tot_hbond)
+#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
         vector<Coord<6>> donors;    donors   .reserve(n_donor);
