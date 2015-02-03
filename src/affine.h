@@ -22,6 +22,26 @@ inline float3 apply_inverse_rotation(const float* restrict U, const float3 &r)
     return ret;
 }
 
+
+inline void axis_angle_to_rot(
+        float* U,
+        float angle,
+        float3 axis) { // must be normalized
+    float x = axis.x;
+    float y = axis.y;
+    float z = axis.z;
+
+    float c = std::cos(angle);
+    float s = std::sin(angle);
+    float C = 1.f-c;
+
+    U[0*3+0] = x*x*C+c;   U[0*3+1] = x*y*C-z*s; U[0*3+2] = x*z*C+y*s;
+    U[1*3+0] = y*x*C+z*s; U[1*3+1] = y*y*C+c;   U[1*3+2] = y*z*C-x*s;
+    U[2*3+0] = z*x*C-y*s; U[2*3+1] = z*y*C+x*s; U[2*3+2] = z*z*C+c;
+}
+
+
+
 inline void relative_rotation(
         float* restrict V,
         const float* U1,

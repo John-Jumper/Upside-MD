@@ -80,6 +80,11 @@ inline float2 operator+(const float2 &a, const float2 &b) { return make_float2(a
 inline float2 operator-(const float2 &a, const float2 &b) { return make_float2(a.x-b.x, a.y-b.y); }
 inline float2 operator/(const float2 &a, const float2 &b) { return make_float2(a.x/b.x, a.y/b.y); }
 
+inline float2 operator*(const float2 &a, const float  &b) { return make_float2(a.x*b, a.y*b); }
+inline float2 operator+(const float2 &a, const float  &b) { return make_float2(a.x+b, a.y+b); }
+inline float2 operator-(const float2 &a, const float  &b) { return make_float2(a.x-b, a.y-b); }
+inline float2 operator/(const float2 &a, const float  &b) { return make_float2(a.x/b, a.y/b); }
+
 inline float3 operator*(const float  &a, const float3 &b) { return make_float3(a*b.x, a*b.y, a*b.z); }
 inline float3 operator+(const float  &a, const float3 &b) { return make_float3(a+b.x, a+b.y, a+b.z); }
 inline float3 operator-(const float  &a, const float3 &b) { return make_float3(a-b.x, a-b.y, a-b.z); }

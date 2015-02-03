@@ -1,3 +1,4 @@
+#include "pivot_sampler.h"
 #include "h5_support.h"
 #include <tclap/CmdLine.h>
 #include "deriv_engine.h"
@@ -39,7 +40,7 @@ void parallel_tempering_step(
         swap(current_system_indices[ns1], current_system_indices[ns2]);
     };
 
-    RandomGenerator random(seed, 1u, 0u, round);
+    RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
 
     // attempt neighbor swaps, first (2*i,2*i+1) swaps, then (2*i-1,2*i)
     int start = random.uniform_open_closed().x < 0.5f;  // must start at 0 or 1 randomly
@@ -66,6 +67,38 @@ void parallel_tempering_step(
     // It is important that the energy is computed more than once in case
     // we are doing Hamiltonian parallel tempering rather than 
     // temperature parallel tempering
+}
+
+
+void pivot_monte_carlo_step(
+        uint32_t seed, 
+        uint64_t round,
+        const vector<float>& temperatures,
+        const PivotSampler& sampler,
+        DerivEngine& engine) 
+{
+    SysArray pos_sys = engine.pos->coords().value;
+    vector<float> pos_copy = engine.pos->output;
+    vector<float> delta_lprob(engine.pos->n_system);
+
+    engine.compute(PotentialAndDerivMode);
+    vector<float> old_potential = engine.potential;
+
+    sampler.execute_random_pivot(delta_lprob.data(), seed, round, 
+            engine.pos->coords().value, engine.pos->n_system);
+
+    engine.compute(PotentialAndDerivMode);
+    vector<float> new_potential = engine.potential;
+
+    for(int ns=0; ns<engine.pos->n_system; ++ns) {
+        float lboltz_diff = delta_lprob[ns] - (1.f/temperatures[ns]) * (new_potential[ns]-old_potential[ns]);
+        // If we reject the pivot, we must reverse it
+        RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, ns, round);
+        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) {
+            copy(pos_copy.data()+ns*pos_sys.offset, pos_copy.data()+(ns+1)*pos_sys.offset, 
+                    pos_sys.x+ns*pos_sys.offset);
+        }
+    }
 }
 
 
@@ -228,6 +261,9 @@ try {
     ValueArg<double> replica_interval_arg("", "replica-interval", 
             "simulation time between applications of replica exchange (0 means no replica exchange, default 0.)", 
             false, 0., "float", cmd);
+    ValueArg<double> pivot_interval_arg("", "pivot-interval", 
+            "simulation time between attempts to pivot move (0 means no pivot moves, default 0.)", 
+            false, 0., "float", cmd);
     ValueArg<double> thermostat_interval_arg("", "thermostat-interval", 
             "simulation time between applications of the thermostat", 
             false, -1., "float", cmd);
@@ -295,6 +331,14 @@ try {
         unsigned long big_prime = 4294967291ul;  // largest prime smaller than 2^32
         uint32_t random_seed = uint32_t(seed_arg.getValue() % big_prime);
 
+        int pivot_interval = pivot_interval_arg.getValue() > 0. 
+            ? max(1,int(pivot_interval_arg.getValue()/(3*dt)))
+            : 0;
+
+        PivotSampler pivot_sampler;
+        if(pivot_interval)
+            pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get()};
+
         vector<float> temperature(n_system);
         float max_temp = max_temperature_arg.getValue();
         float min_temp = temperature_arg.getValue();
@@ -352,11 +396,13 @@ try {
 
         vector<int> current_system_indices; 
         for(int ns=0; ns<n_system; ++ns) current_system_indices.push_back(ns);
-        printf("replica interval %i\n", replica_interval);
 
         bool do_recenter = !disable_recenter_arg.getValue();
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
+            if(pivot_interval && !(nr%pivot_interval)) 
+                pivot_monte_carlo_step(random_seed, nr, temperature, pivot_sampler, engine);
+
             if(replica_interval && !(nr%replica_interval))
                 parallel_tempering_step(random_seed, nr, current_system_indices, temperature, engine);
 

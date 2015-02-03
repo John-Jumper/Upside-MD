@@ -1011,8 +1011,19 @@ def main():
             print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
                                               for i,f in enumerate(fasta_one_letter)))
             make_restraint_group(i,restrained_residues,target[:,:,0], args.restraint_spring_constant)
-            
 
+
+    # if we have the necessary information, write pivot_sampler
+    if require_rama and 'rama_map_pot' in potential:
+        grp = t.create_group(input, 'pivot_moves')
+        pivot_atom = potential.rama_coord.id[:]
+        non_terminal_residue = np.array([not(np.int64(-1).astype(pivot_atom.dtype) in tuple(x)) 
+            for x in pivot_atom])
+
+        create_array(grp, 'proposal_pot',  potential.rama_map_pot.rama_pot[:])
+        create_array(grp, 'pivot_atom',    pivot_atom[non_terminal_residue])
+        create_array(grp, 'pivot_restype', potential.rama_map_pot.rama_map_id[:][non_terminal_residue])
+        create_array(grp, 'pivot_range',   np.column_stack((grp.pivot_atom[:,4]+1, np.zeros(sum(non_terminal_residue),'i')+n_atom)))
     t.close()
 
 

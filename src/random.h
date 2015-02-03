@@ -8,6 +8,15 @@
 #include "uniform.hpp"
 #include "boxmuller.hpp"
 
+// if you want random numbers, you need to add a new entry so that no one else
+// overlaps your random stream
+enum RandomStreamType {
+    THERMOSTAT_RANDOM_STREAM = 0,
+    REPLICA_EXCHANGE_RANDOM_STREAM = 1,
+    PIVOT_MOVE_RANDOM_STREAM = 2,
+    PIVOT_MONTE_CARLO_RANDOM_STREAM = 3
+};
+
 struct RandomGenerator
 {
     private:
