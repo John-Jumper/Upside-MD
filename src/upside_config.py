@@ -789,8 +789,8 @@ def write_backbone_dependent_point(fasta, library):
     create_array(grp, 'backbone_point_map', point_map)
 
 
-def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
-    g = t.create_group(t.root.input.potential, 'radial')
+def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_residues, suffix=''):
+    g = t.create_group(t.root.input.potential, 'radial'+suffix)
     g._v_attrs.arguments = np.array(['backbone_dependent_point'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
@@ -806,8 +806,8 @@ def write_sidechain_radial(fasta, library, scale_energy, excluded_residues):
     data._v_attrs.cutoff = 8.
     create_array(data, 'names',      obj=params.root.params.names[:])
     create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
-    create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:])
-    create_array(data, 'scale',      obj=params.root.params.scale[:])
+    create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:] * scale_radius**2)
+    create_array(data, 'scale',      obj=params.root.params.scale[:] * scale_radius)
     params.close()
 
 
@@ -856,6 +856,10 @@ def main():
             help='Residues that do not participate in the --sidechain-radial potential (same format as --restraint-group)')
     parser.add_argument('--sidechain-radial-scale-energy', default=1.0, type=float,
             help='scale the sidechain radial energies')
+    parser.add_argument('--sidechain-radial-scale-inverse-energy', default=0.0, type=float,
+            help='scale the sidechain radial inverse energies (default 0.)')
+    parser.add_argument('--sidechain-radial-scale-inverse-radius', default=0.7, type=float,
+            help='scale the sidechain radial inverse energies (default 0.7)')
     # parser.add_argument('--sidechain-library', default=None, 
     #         help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
@@ -977,8 +981,14 @@ def main():
         do_alignment = True
         require_rama = True
         write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
-        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 
+        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 1.0,
                 args.sidechain_radial_exclude_residues)
+        if args.sidechain_radial_scale_energy != 0.:
+            write_sidechain_radial(fasta_seq, args.sidechain_radial, 
+                    -args.sidechain_radial_scale_energy*args.sidechain_radial_scale_inverse_energy, 
+                    args.sidechain_radial_scale_inverse_radius,
+                    args.sidechain_radial_exclude_residues, '_inverse')
+
 
     if require_rama:
         write_rama_coord()

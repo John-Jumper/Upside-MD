@@ -255,6 +255,7 @@ void hmm(
         const RamaMapGerm* restrict rama_map_data,
         int n_residue, int n_system) 
 {
+    #pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
         std::vector<HMMDeriv> deriv(n_residue);
