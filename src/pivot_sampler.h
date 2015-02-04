@@ -79,7 +79,7 @@ struct PivotSampler {
             uint32_t seed, uint64_t n_round, SysArray pos, int n_system) const {
         Timer timer(std::string("random_pivot"));
         #pragma omp parallel for schedule(static,1)
-        for(unsigned ns=0; ns<n_system; ++ns) {
+        for(int ns=0; ns<n_system; ++ns) {
             RandomGenerator random(seed, PIVOT_MOVE_RANDOM_STREAM, ns, n_round);
             float4 random_values = random.uniform_open_closed();
 
