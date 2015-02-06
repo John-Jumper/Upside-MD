@@ -287,6 +287,7 @@ def write_dihedral_spring():
     create_array(grp, 'equil_dist',   obj=180*deg*np.ones(id.shape[0]))
     create_array(grp, 'spring_const', obj=30.0*np.ones(id.shape[0]))
 
+
 def basin_cond_prob_fcns(a_phi, a_psi):
     def basin_box(phi0,phi1, psi0,psi1):
         if phi0 > phi1: phi1 += 2*np.pi
@@ -326,84 +327,6 @@ def basin_cond_prob_fcns(a_phi, a_psi):
     return basin_cond_prob
 
 
-def approx_maximum_likelihood_fixed_marginal(row_marginal, col_marginal, counts, pseudocount=0.5):
-    N = row_marginal.shape[0]
-    N = col_marginal.shape[0]
-
-    assert row_marginal.shape == (N,)
-    assert col_marginal.shape == (N,)
-    assert counts.shape == (N,N)
-
-    row_marginal = row_marginal   / row_marginal .sum()
-    col_marginal = col_marginal / col_marginal.sum()
-
-    counts = counts + 1.*pseudocount  # add half pseudocount as in common in such methods
-    freq = counts / counts.sum()
-
-    # Equations to be solved are (forall i) sum_j c_{ij}/(lambda_i - lambda_j) == row_marginal_i
-    #                            (forall j) sum_i c_{ij}/(lambda_i - lambda_j) == col_marginal_j
-
-    # As an approximation, I will solve (forall i) sum_j c_{ij}/(lambda_i - mean(lambda_j')) == row_marginal_i
-    #                                   (forall j) sum_i c_{ij}/(mean(lambda_i') - lambda_j) == col_marginal_j
-    # These equations reduce to (forall i) lambda_i - sum_j lambda_j/N == sum_j c_{ij}/row_marginal_i 
-    #                           (forall j) sum_j lambda_i/N - lambda_i == sum_i c_{ij}/col_marginal_j
-    # and this is a linear system.  It is has many solutions since the LHS is unaffected by the 
-    # transformation lambda_i -> lambda_i + alpha, lambda_j -> lambda_j + # alpha.  
-    # This is also a symmetry of the exact equations.
-
-    # construct matrix on left-hand-side
-    LHS = np.zeros((2*N,2*N));   
-    
-    LHS[:N,:N] =  np.eye(N);  LHS[:N,N:] =  -1./N; 
-    LHS[N:,:N] =   1./N;      LHS[N:,N:] = -np.eye(N)
-
-    RHS = np.zeros((2*N,))
-    RHS[:N] = freq.sum(axis=1) / row_marginal
-    RHS[N:] = freq.sum(axis=0) / col_marginal
-
-    # the matrix is small, so we can just explicitly invert.  Due to the
-    # degeneracy, we will use the pseuodoinverse instead of a regular inverse.
-
-    lambd = np.dot(np.linalg.pinv(LHS), RHS)
-
-    approx_prob = freq / (lambd[:N][:,None] - lambd[N:][None,:])
-
-    return lambd[:N], lambd[N:], approx_prob
-
-
-def maximum_likelihood_fixed_marginal(row_marginal, col_marginal, counts, pseudocount=0.5):
-    N = row_marginal.shape[0]
-    N = col_marginal.shape[0]
-
-    assert row_marginal.shape == (N,)
-    assert col_marginal.shape == (N,)
-    assert counts.shape == (N,N)
-
-    row_marginal = row_marginal   / row_marginal .sum()
-    col_marginal = col_marginal / col_marginal.sum()
-
-    lr_approx, lc_approx, prob_approx = approx_maximum_likelihood_fixed_marginal(
-            row_marginal, col_marginal, counts, pseudocount)
-
-    counts = counts + 1.*pseudocount  # add half pseudocount as in common in such methods
-    freq = counts / counts.sum()
-
-    # see approx_maximum_likelihood_fixed_marginal for discussion of equations to be solved
-
-    def obj(lambd):
-        prob = freq / (lambd[:N][:,None] - lambd[N:][None,:])
-        # print prob.sum()
-        val = np.concatenate((
-            prob.sum(axis=1) - row_marginal,
-            prob.sum(axis=0) - col_marginal))
-
-        # since equations have a symmetry, break it with a condition on the lambda
-        val[-1] = lambd[:N].mean() - lambd[N:].mean()
-        return val
-
-    import scipy.optimize
-    return scipy.optimize.root(obj, np.concatenate((0.5/freq.sum(axis=1), 0.1/freq.sum(axis=0))), method='lm', 
-            options=dict(maxiter=100000))
 
 
 def exact_minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob=10.0):
@@ -456,7 +379,10 @@ def exact_minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, 
             inequality_matrix, inequality_cutoffs, 
             constraint_matrix, constraint_values)
     assert result['status'] == 'optimal'
-    return np.array(result['x']).reshape((N,N))
+    joint_prob = np.array(result['x']).reshape((N,N))
+    # FIXME add non-negativity constraints to joint probabilities
+    joint_prob[joint_prob<0.] = 0.
+    return joint_prob
 
 
 def minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob=10.0, tune_pseudoprob=False):
@@ -586,7 +512,6 @@ def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
 
     d=populate_rama_maps(sequence, rama_library_h5)
 
-
     import scipy.interpolate as interp
     phi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
     psi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
@@ -650,6 +575,92 @@ def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
     if dimer_counts is not None:
         create_array(grp, 'prob_matrices',  obj=prob_matrices)
         create_array(grp, 'count_matrices', obj=count_matrices)
+
+def compact_sigmoid(x, sharpness):
+    y = x*sharpness;
+    result = 0.25 * (y+2) * (y-1)**2
+    result = np.where((y< 1), result, np.zeros_like(result))
+    result = np.where((y>-1), result, np.ones_like (result))
+    return result
+
+
+def double_compact_sigmoid(x, half_width, sharpness):
+    return compact_sigmoid(x-half_width, sharpness) * compact_sigmoid(-x-half_width, sharpness)
+
+
+def angular_compact_double_sigmoid(theta, center, half_width, sharpness):
+    dev = theta-center
+    dev = np.where((dev< np.pi), dev, dev-2*np.pi)
+    dev = np.where((dev>-np.pi), dev, dev+2*np.pi)
+    return double_compact_sigmoid(dev, half_width, sharpness)
+
+
+def rama_box(rama, center, half_width, sharpness):
+    # print 'center', center
+    # print 'half_width', half_width
+    # print 'sharpness', sharpness, 1/sharpness
+    assert rama.shape[-1] == center.shape[-1] == half_width.shape[-1] == 2
+
+    s = center.shape[:-1]
+    if not s:
+        return (angular_compact_double_sigmoid(rama[...,0], rama, center, half_width, sharpness)*
+                angular_compact_double_sigmoid(rama[...,1], rama, center, half_width, sharpness))
+    else:
+        result = np.zeros(rama.shape[:-1] + center.shape[:-1]) 
+        for inds in np.indices(s).reshape((len(s),-1)).T:
+            inds = tuple(inds)
+            if len(inds) == 1: inds = inds[0]
+            value = (
+                    angular_compact_double_sigmoid(rama[...,0], center[inds,0], half_width[inds,0], sharpness)*
+                    angular_compact_double_sigmoid(rama[...,1], center[inds,1], half_width[inds,1], sharpness))
+            result[...,inds] = value
+        return result
+
+
+def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_library):
+    assert len(rama_pot.shape) == 3
+    grp = t.create_group(potential, 'basin_correlation_pot')
+    grp._v_attrs.arguments = np.array(['rama_coord'])
+
+    basin_width = 10.*deg; 
+    basin_sharpness = 1./basin_width
+
+    rama_prob = np.exp(-rama_pot)
+    rama_prob *= 1./rama_prob.sum(axis=-1,dtype='f8').sum(axis=-1)[:,None,None]
+
+    basins = deg * np.array([
+            ((-180.,   0.), (-100.,  50.)),   # alpha_R
+            ((-180.,-100.), (  50., 260.)),   # beta
+            ((-100.,   0.), (  50., 260.)),   # PPII
+            ((   0., 180.), ( -50., 100.)),   # alpha_L
+            ((   0., 180.), ( 100., 310.))])  # gamma
+
+    basin_center     = 0.5*(basins[:,:,1]+basins[:,:,0])
+    basin_half_width = 0.5*(basins[:,:,1]-basins[:,:,0])
+
+    create_array(grp, 'basin_center',     obj=basin_center)
+    create_array(grp, 'basin_half_width', obj=basin_half_width)
+    grp.basin_half_width._v_attrs.sharpness = basin_sharpness
+
+    phi_grid = np.linspace(-180.,180., rama_prob.shape[1], endpoint=False)*deg
+    psi_grid = np.linspace(-180.,180., rama_prob.shape[2], endpoint=False)*deg
+    PSI,PHI = np.meshgrid(phi_grid,psi_grid)
+    rama = np.concatenate((PHI[...,None], PSI[...,None]), axis=-1)
+
+    rama_basin_prob = rama_box(rama, basin_center, basin_half_width, basin_sharpness)
+    marginal_basin_prob = (rama_basin_prob[None] * rama_prob[...,None]).sum(axis=1).sum(axis=1)
+
+    connection_matrices, prob_matrices, count_matrices = make_trans_matrices(
+            sequence[1:-1], # exclude termini
+            np.array([marginal_basin_prob[i] for i in rama_map_id[1:-1]]),
+            cPickle.load(open(dimer_basin_library)))
+    connection_matrices = connection_matrices + 1e-3  # avoid zeros in probabilities
+
+    left_res = np.arange(1,len(sequence)-2)
+    create_array(grp, 'residue_id',           obj=np.column_stack((left_res, left_res+1)))
+    create_array(grp, 'connection_matrices',  obj=connection_matrices.astype('f4'))
+    create_array(grp, 'connection_matrix_id', obj=np.arange(grp.connection_matrices.shape[0]))
+    create_array(grp, 'prob_matrices',        obj=prob_matrices)
 
 
 def read_fasta(file_obj):
@@ -959,12 +970,13 @@ def main():
         args_group._v_attrs[k] = v
 
     if args.rama_library:
-        dimer_counts = cPickle.load(open(args.dimer_basin_library)) if args.dimer_basin_library else None
-        if dimer_counts is not None:
-            write_hmm_pot(fasta_seq, args.rama_library, dimer_counts=dimer_counts)
-        else:
-            require_rama = True
-            write_rama_map_pot(fasta_seq, args.rama_library)
+        require_rama = True
+        write_rama_map_pot(fasta_seq, args.rama_library)
+
+        if args.dimer_basin_library:
+            write_basin_correlation_pot(fasta_seq,
+                    potential.rama_map_pot.rama_pot[:], potential.rama_map_pot.rama_map_id[:], 
+                    args.dimer_basin_library)
 
     if args.dihedral_range:
         write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)

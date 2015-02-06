@@ -85,6 +85,11 @@ inline float2 operator+(const float2 &a, const float  &b) { return make_float2(a
 inline float2 operator-(const float2 &a, const float  &b) { return make_float2(a.x-b, a.y-b); }
 inline float2 operator/(const float2 &a, const float  &b) { return make_float2(a.x/b, a.y/b); }
 
+inline float2 operator*=(      float2 &a, const float2 &b) { a.x*=b.x; a.y*=b.y; return a;}
+inline float2 operator+=(      float2 &a, const float2 &b) { a.x+=b.x; a.y+=b.y; return a;}
+inline float2 operator-=(      float2 &a, const float2 &b) { a.x-=b.x; a.y-=b.y; return a;}
+inline float2 operator/=(      float2 &a, const float2 &b) { a.x/=b.x; a.y/=b.y; return a;}
+
 inline float3 operator*(const float  &a, const float3 &b) { return make_float3(a*b.x, a*b.y, a*b.z); }
 inline float3 operator+(const float  &a, const float3 &b) { return make_float3(a+b.x, a+b.y, a+b.z); }
 inline float3 operator-(const float  &a, const float3 &b) { return make_float3(a-b.x, a-b.y, a-b.z); }
@@ -175,6 +180,44 @@ inline float2 sigmoid(float x) {
     return make_float2(w, z*w*w);
 #endif
 }
+
+
+// Sigmoid-like function that has zero derivative outside (-1/sharpness,1/sharpness)
+// This function is 1 for large negative values and 0 for large positive values
+inline float2 compact_sigmoid(float x, float sharpness) {
+    float y = x*sharpness;
+    if     (y> 1.f) return make_float2(0.f, 0.f);
+    else if(y<-1.f) return make_float2(1.f, 0.f);
+    else            return make_float2(0.25f*(y+2.f)*(y-1.f)*(y-1.f), (sharpness*0.75f)*(y*y-1.f));
+}
+
+
+//! Sigmoid-like function that has zero derivative outside the two intervals (-half_width-1/sharpness,-half_width+1/sharpness)
+//! and (half_width-1/sharpness,half_width+1/sharpness).  The function is the product of opposing half-sigmoids.
+inline float2 compact_double_sigmoid(float x, float half_width, float sharpness) {
+    float2 v1 = compact_sigmoid( x-half_width, sharpness);
+    float2 v2 = compact_sigmoid(-x-half_width, sharpness);
+    return make_float2(v1.x*v2.x, v1.y*v2.x-v1.x*v2.y);
+}
+
+
+//! compact_double_sigmoid that also handles periodicity
+//! note that both theta and center must be in the range (-PI,PI)
+inline float2 angular_compact_double_sigmoid(float theta, float center, float half_width, float sharpness) {
+    float dev = theta - center;
+    if(dev <-M_PI_F) dev += 2.f*M_PI_F;
+    if(dev > M_PI_F) dev -= 2.f*M_PI_F;
+    return compact_double_sigmoid(dev, half_width, sharpness);
+}
+
+//! order is value, then dvalue/dphi, dvalue/dpsi
+inline float3 rama_box(float2 rama, float2 center, float2 half_width, float sharpness) {
+    float2 phi = angular_compact_double_sigmoid(rama.x, center.x, half_width.x, sharpness);
+    float2 psi = angular_compact_double_sigmoid(rama.y, center.y, half_width.y, sharpness);
+    return make_float3(phi.x*psi.x, phi.y*psi.x, phi.x*psi.y);
+}
+    
+
 
 //! Compute a dihedral angle and its derivative from four positions
 

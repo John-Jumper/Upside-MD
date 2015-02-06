@@ -400,7 +400,7 @@ double compute_relative_deviation_for_node(
 
     auto fd_deriv = central_difference_deriviative(
             [&](){node.compute_value(PotentialAndDerivMode);}, 
-            argument.output, output, 1e-2, value_type);
+            argument.output, output, 1e-3, value_type);
 
     node.compute_value(DerivMode);
     auto pred_deriv = extract_jacobian_matrix<arg_type==BODY_VALUE ? 6 : NDIM_INPUT>(

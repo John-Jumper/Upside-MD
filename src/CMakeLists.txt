@@ -22,6 +22,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    basin_correlation.cpp
     rama_map_pot.cpp
     spline.cpp
     main.cpp
