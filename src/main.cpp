@@ -70,36 +70,6 @@ void parallel_tempering_step(
 }
 
 
-void pivot_monte_carlo_step(
-        uint32_t seed, 
-        uint64_t round,
-        const vector<float>& temperatures,
-        const PivotSampler& sampler,
-        DerivEngine& engine) 
-{
-    SysArray pos_sys = engine.pos->coords().value;
-    vector<float> pos_copy = engine.pos->output;
-    vector<float> delta_lprob(engine.pos->n_system);
-
-    engine.compute(PotentialAndDerivMode);
-    vector<float> old_potential = engine.potential;
-
-    sampler.execute_random_pivot(delta_lprob.data(), seed, round, 
-            engine.pos->coords().value, engine.pos->n_system);
-
-    engine.compute(PotentialAndDerivMode);
-    vector<float> new_potential = engine.potential;
-
-    for(int ns=0; ns<engine.pos->n_system; ++ns) {
-        float lboltz_diff = delta_lprob[ns] - (1.f/temperatures[ns]) * (new_potential[ns]-old_potential[ns]);
-        // If we reject the pivot, we must reverse it
-        RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, ns, round);
-        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) {
-            copy(pos_copy.data()+ns*pos_sys.offset, pos_copy.data()+(ns+1)*pos_sys.offset, 
-                    pos_sys.x+ns*pos_sys.offset);
-        }
-    }
-}
 
 
 struct StateLogger
@@ -338,7 +308,7 @@ try {
 
         PivotSampler pivot_sampler;
         if(pivot_interval)
-            pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get()};
+            pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get(), n_system};
 
         vector<float> temperature(n_system);
         float max_temp = max_temperature_arg.getValue();
@@ -389,7 +359,7 @@ try {
                 H5Gcreate2(config.get(), "output", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
         StateLogger state_logger(n_atom, config.get(), output_grp.get(), 100, n_system);
 
-        int round_print_width = ceil(log(n_round)/log(10));
+        int round_print_width = ceil(log(1+n_round)/log(10));
 
         int replica_interval = 0;
         if(replica_interval_arg.getValue())
@@ -402,7 +372,7 @@ try {
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
             if(pivot_interval && !(nr%pivot_interval)) 
-                pivot_monte_carlo_step(random_seed, nr, temperature, pivot_sampler, engine);
+                pivot_sampler.pivot_monte_carlo_step(random_seed, nr, temperature, engine);
 
             if(replica_interval && !(nr%replica_interval))
                 parallel_tempering_step(random_seed, nr, current_system_indices, temperature, engine);
@@ -459,6 +429,12 @@ try {
             printf("\navg_kinetic_energy/1.5kT");
             for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns] / (1.5*temperature[ns]));
             printf("\n");
+
+            auto& ps = pivot_sampler.pivot_stats;
+            if(pivot_interval) printf("pivot_success:");
+            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", ps[ns].n_success*1./ps[ns].n_attempt);
+            printf("\n");
+
         }
 
         printf("\n");
