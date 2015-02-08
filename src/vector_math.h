@@ -252,6 +252,6 @@ static float dihedral_germ(
     d2 = -d1 + f_mid;
     d3 = -d4 - f_mid;
 
-    return atan2(dot(C,G), dot(A,B) * Gmag);
+    return atan2f(dot(C,G), dot(A,B) * Gmag);
 }
 #endif
