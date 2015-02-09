@@ -17,10 +17,10 @@ struct PivotLocation {
 };
 
 struct PivotStats {
-    int n_attempt;
-    int n_success;
+    uint64_t n_attempt;
+    uint64_t n_success;
     PivotStats() {reset();}
-    void reset() {n_attempt = n_success = 0;}
+    void reset() {n_attempt = n_success = 0u;}
 };
 
 // FIXME take a set of temperatures and propose at the appropriate temperature
