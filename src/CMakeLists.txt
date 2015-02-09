@@ -3,6 +3,7 @@ project(upside CXX)
 
 set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED COMPONENTS C HL)
+find_package(OpenMP)
 
 set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler")
 
@@ -12,7 +13,7 @@ else()
     set(DEBUG_FLAGS "-g")
 endif()
 
-set (OMP_FLAGS "-fopenmp") #"-fsanitize=address") # "-fopenmp")
+set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") #"-fsanitize=address") # "-fopenmp")
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
 set (OPT     " -O3 -ffast-math -fno-finite-math-only -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")

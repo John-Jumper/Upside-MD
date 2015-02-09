@@ -429,12 +429,13 @@ try {
             printf("\navg_kinetic_energy/1.5kT");
             for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns] / (1.5*temperature[ns]));
             printf("\n");
+        }
 
+        if(pivot_interval) {
             auto& ps = pivot_sampler.pivot_stats;
-            if(pivot_interval) printf("pivot_success:");
+            printf("pivot_success:");
             for(int ns=0; ns<n_system; ++ns) printf(" % .4f", ps[ns].n_success*1./ps[ns].n_attempt);
             printf("\n");
-
         }
 
         printf("\n");
