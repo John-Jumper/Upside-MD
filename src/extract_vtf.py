@@ -101,7 +101,13 @@ def main():
     parser.add_argument('input_h5', help='Input simulation file')
     parser.add_argument('output_vtf', help='Output trajectory file')
     parser.add_argument('--stride', type=int, default=1, help='Stride for reading file')
+    parser.add_argument('--system', type=int, default=None, help='Only output a single system')
     args = parser.parse_args()
+
+    if args.system is None:
+        sl = slice(None)
+    else:
+        sl = slice(args.system,args.system+1)
     
     t=tables.open_file(args.input_h5); 
     print t.root.output.pos.shape[0], 'frames found,', t.root.output.time[-1], 'time units'
@@ -111,7 +117,7 @@ def main():
     # print_traj_vtf(args.output_vtf, t.root.input.sequence[:], t.root.output.pos[:], 
     #         np.column_stack((np.arange(3*n_res)[:-1], np.arange(3*n_res)[1:])))
     print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], 
-            t.root.output.pos[::args.stride].transpose((0,2,3,1)))
+            t.root.output.pos[::args.stride,sl].transpose((0,2,3,1)))
     t.close()
 
 if __name__ == '__main__':
