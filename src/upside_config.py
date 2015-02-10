@@ -822,6 +822,46 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     params.close()
 
 
+def write_membrane_potential(sequence, potential_library_path, membrane_thickness):
+    grp = t.create_group(t.root.input.potential, 'membrane_potential')
+    grp._v_attrs.arguments = np.array(['backbone_dependent_point'])
+
+    potential_library = tables.open_file(potential_library_path)
+    resnames  = potential_library.root.names[:]
+    z_energy  = potential_library.root.z_energy[:]
+    z_lib_min = potential_library.root.z_energy._v_attrs.z_min
+    z_lib_max = potential_library.root.z_energy._v_attrs.z_max
+    potential_library.close()
+
+    z_lib = np.linspace(z_lib_min, z_lib_max, z_energy.shape[-1])
+
+    import scipy.interpolate
+    def extrapolated_spline(x0,y0):
+        spline = scipy.interpolate.InterpolatedUnivariateSpline(x0,y0)
+        def f(x, spline=spline):
+            return np.select(
+                    [(x<x0[0]),              (x>x0[-1]),              np.ones_like(x,dtype='bool')], 
+                    [np.zeros_like(x)+y0[0], np.zeros_like(x)+y0[-1], spline(x)])
+        return f
+
+    energy_splines = [extrapolated_spline(z_lib,ene) for ene in z_energy]
+
+    half_thickness = membrane_thickness/2
+    z = np.linspace(-half_thickness - 15., half_thickness + 15., int((2.*half_thickness+30.)/0.3)+1)
+
+    # if z>0, then use the spline evaluated at z-half_thickness, else use the spline evaluated at -z-half_thickness
+    z_transformed = np.where((z>=0.), z-half_thickness, -z-half_thickness)
+    membrane_energies = np.array([spline(z_transformed) for spline in energy_splines])
+
+    resname_to_num = dict([(nm,i) for i,nm in enumerate(resnames)])
+    energy_index = np.array([resname_to_num[aa] for aa in sequence])
+
+    create_array(grp, 'energy_index', energy_index)
+    create_array(grp, 'energy', membrane_energies)
+    grp.energy._v_attrs.z_min = z[0]
+    grp.energy._v_attrs.z_max = z[-1]
+
+
 def parse_segments(s):
     ''' Parse segments of the form 10-30,50-60 '''
     import argparse
@@ -918,7 +958,10 @@ def main():
             'space separated values.  The form of the interaction is '+
             'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
             'sidechain, typically a few angstroms above the CB.')
-
+    parser.add_argument('--membrane-thickness', default=None, type=float,
+            help='Thickness of the membrane in angstroms for use with --membrane-potential.')
+    parser.add_argument('--membrane-potential', default='',
+            help='Parameter file for membrane potential.  User must also supply --membrane-thickness.')
 
     args = parser.parse_args()
     if args.restraint_group and not (args.initial_structures or args.target_structures):
@@ -930,6 +973,7 @@ def main():
     fasta_seq = read_fasta(open(args.fasta))
     do_alignment = False
     require_rama = False
+    require_backbone_point = True
 
     global n_system, n_atom, t, potential
     n_system = args.n_system
@@ -985,22 +1029,29 @@ def main():
         do_alignment = True
         write_backbone_pair(fasta_seq)
 
-    # if args.sidechain_library:
-    #     do_alignment = True
-    #     write_sidechain_potential(fasta_seq, args.sidechain_library)
-
     if args.sidechain_radial:
-        do_alignment = True
-        require_rama = True
-        write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
+        require_backbone_point = True
         write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 1.0,
                 args.sidechain_radial_exclude_residues)
+
         if args.sidechain_radial_scale_energy != 0.:
             write_sidechain_radial(fasta_seq, args.sidechain_radial, 
                     -args.sidechain_radial_scale_energy*args.sidechain_radial_scale_inverse_energy, 
                     args.sidechain_radial_scale_inverse_radius,
                     args.sidechain_radial_exclude_residues, '_inverse')
 
+    if args.membrane_potential:
+        if args.membrane_thickness is None:
+            parser.error('--membrane-potential requires --membrane-thickness')
+        require_backbone_point = True
+        write_membrane_potential(fasta_seq, args.membrane_potential, args.membrane_thickness)
+
+    if require_backbone_point:
+        if args.backbone_dependent_point is None:
+            parser.error('--backbone-dependent-point is required, based on other options.')
+        do_alignment = True
+        require_rama = True
+        write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
 
     if require_rama:
         write_rama_coord()
