@@ -856,8 +856,9 @@ def write_membrane_potential(sequence, potential_library_path, membrane_thicknes
     resname_to_num = dict([(nm,i) for i,nm in enumerate(resnames)])
     energy_index = np.array([resname_to_num[aa] for aa in sequence])
 
-    create_array(grp, 'energy_index', energy_index)
-    create_array(grp, 'energy', membrane_energies)
+    create_array(grp, 'residue_id', np.arange(len(sequence)))
+    create_array(grp, 'restype',    energy_index)
+    create_array(grp, 'energy',     membrane_energies)
     grp.energy._v_attrs.z_min = z[0]
     grp.energy._v_attrs.z_max = z[-1]
 

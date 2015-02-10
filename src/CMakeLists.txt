@@ -3,7 +3,7 @@ project(upside CXX)
 
 set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED COMPONENTS C HL)
-find_package(OpenMP)
+find_package(OpenMP QUIET)
 
 set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler")
 
@@ -23,6 +23,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    membrane_potential.cpp
     basin_correlation.cpp
     rama_map_pot.cpp
     spline.cpp

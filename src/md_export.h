@@ -23,7 +23,7 @@ deriv_accumulation(
 
 void
 recenter(
-        SysArray pos,
+        SysArray pos, bool xy_recenter_only,
         int n_atom, int n_system
         );
 #endif

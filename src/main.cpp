@@ -240,7 +240,10 @@ try {
     ValueArg<double> thermostat_timescale_arg("", "thermostat-timescale", "timescale for the thermostat", 
             false, 5., "float", cmd);
     SwitchArg disable_recenter_arg("", "disable-recentering", 
-            "Disable recentering of protein in the universe", 
+            "Disable all recentering of protein in the universe", 
+            cmd, false);
+    SwitchArg disable_z_recenter_arg("", "disable-z-recentering", 
+            "Disable z-recentering of protein in the universe", 
             cmd, false);
     ValueArg<double> equilibration_duration_arg("", "equilibration-duration", 
             "duration to limit max force for equilibration (also decreases thermostat interval)", 
@@ -280,12 +283,11 @@ try {
         for(float e: engine.potential) printf(" %.2f", e);
         printf("\n");
 
-
-
         deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
         // {
+        //     if(n_system>1) throw string("Testing code does not support n_system > 1");
         //     printf("Initial agreement:\n");
-        //     for(auto &n: engine.nodes) 
+        //     for(auto &n: engine.nodes)
         //         printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
         //     printf("\n");
 
@@ -370,6 +372,18 @@ try {
         for(int ns=0; ns<n_system; ++ns) current_system_indices.push_back(ns);
 
         bool do_recenter = !disable_recenter_arg.getValue();
+        bool xy_recenter_only = do_recenter && disable_z_recenter_arg.getValue();
+
+        // quick hack of a check for z-centering and membrane potential
+        if(do_recenter && !xy_recenter_only) {
+            for(auto &n: engine.nodes) {
+                if(is_prefix(n.name, "membrane_potential")) 
+                    throw string("You have z-centering and membrane_potential turned on.  "
+                            "This is not what you want.  Considering --disable-z-recentering "
+                            "or --disable-recentering.");
+            }
+        }
+
         auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
             if(pivot_interval && !(nr%pivot_interval)) 
@@ -379,7 +393,7 @@ try {
                 parallel_tempering_step(random_seed, nr, current_system_indices, temperature, engine);
 
             if(!frame_interval || !(nr%frame_interval)) {
-                if(do_recenter) recenter(engine.pos->coords().value, n_atom, n_system);
+                if(do_recenter) recenter(engine.pos->coords().value, xy_recenter_only, n_atom, n_system);
                 engine.compute(PotentialAndDerivMode);
                 state_logger.log(nr*3*dt, engine.pos->output.data(), mom_sys.x, engine.potential.data());
 

@@ -154,12 +154,8 @@ struct LayeredClampedSpline1D {
         }
     }
         
-
-
     // result contains (dx1, value1, dx2, value2, ...)
     void evaluate_value_and_deriv(float* restrict result, int layer, float x) const {
-        //printf("x %i %f %i\n", layer, x, x_bin);
-
         if(x>=nx-1) {
             for(int id=0; id<NDIM_VALUE; ++id) {
                 result[id*2+0] = 0.f;

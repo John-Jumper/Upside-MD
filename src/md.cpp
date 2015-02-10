@@ -77,7 +77,7 @@ void deriv_accumulation(
 
 void
 recenter(
-        SysArray pos,
+        SysArray pos, bool xy_recenter_only,
         int n_atom, int n_system
         )
 {
@@ -85,6 +85,8 @@ recenter(
         float3 center = {0.f, 0.f, 0.f};
         for(int na=0; na<n_atom; ++na) center += StaticCoord<3>(pos,ns,na).f3();
         center /= n_atom;
+
+        if(xy_recenter_only) center.z = 0.f;
 
         for(int na=0; na<n_atom; ++na) {
             MutableCoord<3> x(pos,ns,na);
