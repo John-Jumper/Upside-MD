@@ -1,7 +1,6 @@
 #include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
-#include "spline.h"
 
 using namespace h5;
 using namespace std;

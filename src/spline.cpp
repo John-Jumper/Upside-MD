@@ -186,12 +186,12 @@ void solve_clamped_1d_spline(
     // for a zero-clamped spline, we must have coeff[-1] == coeff[1] and coeff[N-2] == coeff[N]
     // this conditions break the tridiagonal condition if added naively.
     // Instead, I can fold the condition into the matrix by doubling the (0,1) and (N-2,N-1)
-    // elements of the tridiagonal matrix.  These would be elements a[1] and c[n-2].
+    // elements of the tridiagonal matrix.  These would be elements c[0] and a[n-1].
     // Then, I need to remember to add the special basis functions that I absorbed
     // when computing the coefficients below.
 
-    a[1]   *= 2.;
-    c[n-2] *= 2.;
+    a[n-1] *= 2.;
+    c[0]   *= 2.;
     solve_tridiagonal_system(n, solution, a+1, b, c);
 
     // now we need to convert the b-spline coefficients to coefficients for {1,x,x^2,x^3}
