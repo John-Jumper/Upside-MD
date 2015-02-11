@@ -8,6 +8,7 @@
 #include "md_export.h"
 #include <algorithm>
 #include "random.h"
+#include "state_logger.h"
 
 using namespace std;
 using namespace h5;
@@ -15,11 +16,11 @@ using namespace h5;
 
 void parallel_tempering_step(
         uint32_t seed, uint64_t round,
-        vector<int>& current_system_indices,
+        vector<int>& coord_indices,
         const vector<float>& temperatures, DerivEngine& engine) {
     int n_system = engine.pos->n_system;
     if(int(temperatures.size()) != n_system) throw string("impossible");
-    if(int(current_system_indices.size()) != n_system) throw string("impossible");
+    if(int(coord_indices.size()) != n_system) throw string("impossible");
 
     vector<float> beta(n_system);
     for(int i=0; i<n_system; ++i) beta[i] = 1.f/temperatures[i];
@@ -37,7 +38,7 @@ void parallel_tempering_step(
     auto coord_swap = [&](int ns1, int ns2) {
         SysArray pos = engine.pos->coords().value;
         swap_ranges(pos.x+ns1*pos.offset, pos.x+(ns1+1)*pos.offset, pos.x+ns2*pos.offset);
-        swap(current_system_indices[ns1], current_system_indices[ns2]);
+        swap(coord_indices[ns1], coord_indices[ns2]);
     };
 
     RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
@@ -68,79 +69,6 @@ void parallel_tempering_step(
     // we are doing Hamiltonian parallel tempering rather than 
     // temperature parallel tempering
 }
-
-
-
-
-struct StateLogger
-{
-    int n_atom;
-    int n_sys;
-    int n_chunk;
-
-    hid_t config;
-    H5Obj pos_tbl;
-    H5Obj kin_tbl;
-    H5Obj pot_tbl;
-    H5Obj time_tbl;
-
-    vector<float>  pos_buffer;
-    vector<double> kin_buffer;
-    vector<double> pot_buffer;
-    vector<double> time_buffer;
-
-    // destructor would close tables inappropriately after naive copy
-    StateLogger(const StateLogger &o) = delete;
-    StateLogger& operator=(const StateLogger &o) = delete;
-    // move constructor could be defined if necessary
-
-    StateLogger(int n_atom_, hid_t config_, hid_t output_grp, int n_chunk_, int n_sys_):
-        n_atom(n_atom_), n_sys(n_sys_), n_chunk(n_chunk_), config(config_),
-        pos_tbl (create_earray(output_grp, "pos",     H5T_NATIVE_FLOAT,  {0,n_sys,n_atom,3}, {n_chunk,1,n_atom,3})),
-        kin_tbl (create_earray(output_grp, "kinetic", H5T_NATIVE_DOUBLE, {0,n_sys},          {n_chunk,1})),
-        pot_tbl (create_earray(output_grp, "potential",H5T_NATIVE_DOUBLE,{0,n_sys},          {n_chunk,1})),
-        time_tbl(create_earray(output_grp, "time",    H5T_NATIVE_DOUBLE, {0},                {n_chunk}))
-    {
-        pos_buffer .reserve(n_chunk * n_sys * n_atom * 3);
-        kin_buffer .reserve(n_chunk * n_sys);
-        pot_buffer .reserve(n_chunk * n_sys);
-        time_buffer.reserve(n_chunk);
-    }
-
-    void log(double sim_time, const float* pos, const float* mom, const float* potential) {
-        Timer timer(string("state_logger"));
-        time_buffer.push_back(sim_time);
-
-        pos_buffer.resize(pos_buffer.size()+n_sys*n_atom*3);
-        std::copy_n(pos, n_sys*n_atom*3, &pos_buffer[pos_buffer.size()-n_sys*n_atom*3]);
-
-        pot_buffer.resize(pot_buffer.size()+n_sys);
-        std::copy_n(potential, n_sys, &pot_buffer[pot_buffer.size()-n_sys]);
-
-        for(int ns=0; ns<n_sys; ++ns) {
-            double sum_kin = 0.f;
-            for(int i=0; i<n_atom*3; ++i) sum_kin += mom[ns*n_atom*3 + i]*mom[ns*n_atom*3 + i];
-            kin_buffer.push_back((0.5/n_atom)*sum_kin);  // kinetic_energy = (1/2) * <mom^2>
-        }
-
-        if(time_buffer.size() == (size_t)n_chunk) flush();
-    }
-
-    void flush() {
-        // the buffer sizes should stay in sync in normal operation, but they could get out of sync
-        // if the user catches an exception (exception paranoia seems prudent when dealing with
-        // I/O on NFS)
-        if(pos_buffer .size()) {append_to_dset(pos_tbl.get(),  pos_buffer,  0); pos_buffer .resize(0);}
-        if(kin_buffer .size()) {append_to_dset(kin_tbl.get(),  kin_buffer,  0); kin_buffer .resize(0);}
-        if(pot_buffer .size()) {append_to_dset(pot_tbl.get(),  pot_buffer,  0); pot_buffer .resize(0);}
-        if(time_buffer.size()) {append_to_dset(time_tbl.get(), time_buffer, 0); time_buffer.resize(0);}
-        H5Fflush(config, H5F_SCOPE_LOCAL);
-    }
-
-    virtual ~StateLogger() {
-        try {flush();} catch(...) {}  // destructors should never throw an exception
-    }
-};
 
 
 void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-3) {
@@ -298,7 +226,8 @@ try {
         // }
 
         float dt = time_step_arg.getValue();
-        uint64_t n_round = round(duration_arg.getValue() / (3*dt));
+        double duration = duration_arg.getValue();
+        uint64_t n_round = round(duration / (3*dt));
         int thermostat_interval = max(1.,round(thermostat_interval_arg.getValue() / (3*dt)));
         int frame_interval = max(1.,round(frame_interval_arg.getValue() / (3*dt)));
 
@@ -357,19 +286,32 @@ try {
             if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(config.get(), "/output", H5P_DEFAULT));
             else throw string("/output already exists and --overwrite-output was not specified");
         }
+        H5Logger state_logger(config, "output");
+        state_logger.add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
+                SysArray pos_array = engine.pos->coords().value;
+                for(int ns=0; ns<n_system; ++ns) 
+                    copy_n(pos_array.x+ns*pos_array.offset, n_atom*3, pos_buffer);
+            });
+        state_logger.add_logger<double>("kinetic", {n_system}, [&](double* kin_buffer) {
+            for(int ns=0; ns<n_system; ++ns) {
+                double sum_kin = 0.f;
+                for(int na=0; na<n_atom; ++na) sum_kin += mag2(StaticCoord<3>(mom_sys, ns, na).f3());
+                kin_buffer[ns] = (0.5/n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
+            }});
+        state_logger.add_logger<double>("potential", {n_system}, [&](double* pot_buffer) {
+                engine.compute(PotentialAndDerivMode);
+                for(int ns=0; ns<n_system; ++ns) pot_buffer[ns] = engine.potential[ns];});
 
-        auto output_grp = h5_obj(H5Gclose, 
-                H5Gcreate2(config.get(), "output", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
-        StateLogger state_logger(n_atom, config.get(), output_grp.get(), 100, n_system);
-
-        int round_print_width = ceil(log(1+n_round)/log(10));
+        int duration_print_width = ceil(log(1+duration)/log(10));
 
         int replica_interval = 0;
         if(replica_interval_arg.getValue())
             replica_interval = max(1.,replica_interval_arg.getValue()/(3*dt));
 
-        vector<int> current_system_indices; 
-        for(int ns=0; ns<n_system; ++ns) current_system_indices.push_back(ns);
+        vector<int> coord_indices; 
+        for(int ns=0; ns<n_system; ++ns) coord_indices.push_back(ns);
+        state_logger.add_logger<int>("coord_indices", {n_system}, [&](int* indices_buffer) {
+                copy_n(begin(coord_indices), n_system, indices_buffer);});
 
         bool do_recenter = !disable_recenter_arg.getValue();
         bool xy_recenter_only = do_recenter && disable_z_recenter_arg.getValue();
@@ -385,23 +327,20 @@ try {
         }
 
         auto tstart = chrono::high_resolution_clock::now();
+        double physical_time = 0.;
+        state_logger.add_logger<double>("time", {1}, [&](double* time_buffer) {time_buffer[0]=physical_time;});
         for(uint64_t nr=0; nr<n_round; ++nr) {
+            physical_time = nr*3*double(dt);
+
             if(pivot_interval && !(nr%pivot_interval)) 
                 pivot_sampler.pivot_monte_carlo_step(random_seed, nr, temperature, engine);
 
             if(replica_interval && !(nr%replica_interval))
-                parallel_tempering_step(random_seed, nr, current_system_indices, temperature, engine);
+                parallel_tempering_step(random_seed, nr, coord_indices, temperature, engine);
 
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, xy_recenter_only, n_atom, n_system);
-                engine.compute(PotentialAndDerivMode);
-                state_logger.log(nr*3*dt, engine.pos->output.data(), mom_sys.x, engine.potential.data());
-
-                if(replica_interval) {
-                    printf("current_system_indices");
-                    for(auto i: current_system_indices) printf(" %2i", i);
-                    printf("\n");
-                }
+                state_logger.collect_samples();
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {
@@ -415,9 +354,9 @@ try {
                 }
                 Rg = sqrt(Rg/(n_atom*n_system));
 
-                printf("%*lu / %*lu rounds %5.1f hbonds, Rg %5.1f A, potential", 
-                        round_print_width, (unsigned long)nr, 
-                        round_print_width, (unsigned long)n_round, 
+                printf("%*.0f / %*.0f elapsed %5.1f hbonds, Rg %5.1f A, potential", 
+                        duration_print_width, physical_time, 
+                        duration_print_width, duration, 
                         get_n_hbond(engine)/n_system, Rg);
                 for(float e: engine.potential) printf(" % 8.2f", e);
                 printf("\n");

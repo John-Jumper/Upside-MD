@@ -127,23 +127,34 @@ void ensure_not_exist(hid_t loc, const char* nm) {
     if(h5_exists(loc, nm)) H5Ldelete(loc, nm, H5P_DEFAULT);
 }
 
+
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
         const std::initializer_list<int> &chunk_dims,
-        bool compression_level)  // 1 is often recommended
-{
-    if(dims.size() != chunk_dims.size()) throw std::string("invalid chunk dims");
-
+        bool compression_level){ // 1 is often recommended
     hsize_t ndims = dims.size();
     std::vector<hsize_t> dims_v(ndims);
-    std::vector<hsize_t> max_dims_v(ndims);
     std::vector<hsize_t> chunk_dims_v(ndims);
-
     for(size_t d=0; d<ndims; ++d) {
         dims_v[d]       = *(begin(dims      )+d);
-        max_dims_v[d]   = dims_v[d] ? dims_v[d] : H5S_UNLIMITED;
         chunk_dims_v[d] = *(begin(chunk_dims)+d);
     }
+    return create_earray(group, name, dtype, dims_v, chunk_dims_v, compression_level);
+}
+
+
+H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
+        const std::vector<hsize_t>& dims_v, // any direction that is extendable must have dims == 0
+        const std::vector<hsize_t>& chunk_dims_v,
+        bool compression_level)  // 1 is often recommended
+{
+    if(dims_v.size() != chunk_dims_v.size()) throw std::string("invalid chunk dims");
+
+    hsize_t ndims = dims_v.size();
+    std::vector<hsize_t> max_dims_v(ndims);
+
+    for(size_t d=0; d<ndims; ++d)
+        max_dims_v[d] = dims_v[d] ? dims_v[d] : H5S_UNLIMITED;
 
     auto space_id = h5_obj(H5Sclose, H5Screate_simple(ndims, dims_v.data(), max_dims_v.data()));
 

@@ -13,7 +13,7 @@ else()
     set(DEBUG_FLAGS "-g")
 endif()
 
-set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") #"-fsanitize=address") # "-fopenmp")
+set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") #"-fsanitize=address")
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
 set (OPT     " -O3 -ffast-math -fno-finite-math-only -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
@@ -23,11 +23,10 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
-    membrane_potential.cpp
+    main.cpp
     basin_correlation.cpp
     rama_map_pot.cpp
     spline.cpp
-    main.cpp
     deriv_engine.cpp 
     string_method.cpp
     sidechain_radial.cpp
@@ -38,6 +37,7 @@ add_executable (upside
     hmm.cpp 
     eig.cpp 
     dihedral_range.cpp
+    membrane_potential.cpp
     md.cpp 
     timing.cpp 
     thermostat.cpp

@@ -58,6 +58,13 @@ typedef std::unique_ptr<Hid_t,H5Deleter> H5Obj;
 //! such as H5Gclose or h5Dclose
 H5Obj h5_obj(H5DeleterFunc &deleter, hid_t obj);
 
+//! Duplicate an H5Obj by increasing the reference count of the underlying object
+inline H5Obj duplicate_obj(H5Obj& obj) {
+    H5Iinc_ref(obj.get());
+    return H5Obj(obj.get(), obj.get_deleter());
+}
+
+
 //! Check that an HDF object exists at a given path
 
 //! If check_valid is true, then the function will also 
@@ -103,6 +110,10 @@ H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::initializer_list<int> &chunk_dims,
         bool compression_level=0);  // 1 is often recommended
 
+H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
+        const std::vector<hsize_t>& dims_v, // any direction that is extendable must have dims == 0
+        const std::vector<hsize_t>& chunk_dims_v,
+        bool compression_level=0);  // 1 is often recommended
 
 //! Append a raw data buffer to a dataset
 void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, const void* new_data, int append_dim);
@@ -111,7 +122,8 @@ void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, con
 //! Append vector of data to a dataset
 template <typename T>
 void append_to_dset(hid_t dset, const std::vector<T> &new_data, int append_dim) {
-    append_to_dset(dset, select_predtype<T>(), new_data.size(), (const void*)(new_data.data()), append_dim);}
+    append_to_dset(dset, select_predtype<T>(), new_data.size(), (const void*)(new_data.data()), append_dim);
+}
 
 
 //! Read list of names within a group
