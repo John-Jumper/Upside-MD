@@ -100,7 +100,8 @@ struct PivotSampler {
             float4 random_values = random.uniform_open_closed();
 
             // pick a random pivot location
-            int loc = n_pivot_loc * (1.f - random_values.z);
+            int loc = int(n_pivot_loc * random_values.z);
+            if(loc == n_pivot_loc) loc--;  // this may occur due to rounding
             auto p = pivot_loc[loc];
 
             // select a bin
