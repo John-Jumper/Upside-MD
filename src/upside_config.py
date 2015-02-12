@@ -974,7 +974,7 @@ def main():
     fasta_seq = read_fasta(open(args.fasta))
     do_alignment = False
     require_rama = False
-    require_backbone_point = True
+    require_backbone_point = False
 
     global n_system, n_atom, t, potential
     n_system = args.n_system
