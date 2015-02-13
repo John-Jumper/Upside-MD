@@ -108,12 +108,12 @@ void ensure_not_exist(hid_t loc, const char* nm); //!< Delete a group if it exis
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
         const std::initializer_list<int> &chunk_dims,
-        bool compression_level=0);  // 1 is often recommended
+        bool compression_level=1);  // 1 is often recommended
 
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
         const std::vector<hsize_t>& dims_v, // any direction that is extendable must have dims == 0
         const std::vector<hsize_t>& chunk_dims_v,
-        bool compression_level=0);  // 1 is often recommended
+        bool compression_level=1);  // 1 is often recommended
 
 //! Append a raw data buffer to a dataset
 void append_to_dset(hid_t dset, hid_t hdf_predtype, size_t n_new_data_elems, const void* new_data, int append_dim);

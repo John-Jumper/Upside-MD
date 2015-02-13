@@ -72,10 +72,9 @@ struct H5Logger {
         Timer timer(std::string("logger"));
         for(auto &sl: state_loggers) 
             sl->collect_samples();
-        // timer.stop();
 
         n_samples_collected++;
-        if(n_samples_collected % 100) flush();
+        if(!(n_samples_collected % 100)) flush();
     }
 
     void flush() {
@@ -94,12 +93,34 @@ struct H5Logger {
         state_loggers.emplace_back(std::move(logger));
     }
 
+    template <typename T, typename F>
+    void log_once(
+            const char* relative_path, 
+            const std::initializer_list<int>& data_shape, 
+            const F&& sample_function) {
+        std::vector<hsize_t> dims;
+        hsize_t data_size = 1u;
+        for(auto i: data_shape) {
+            dims.push_back(i);
+            data_size *= i;
+        }
+        std::vector<hsize_t> fake_dims = dims;
+        fake_dims[0] = 0u;  // extensible dimension
+
+        std::vector<T> data_buffer(data_size);
+        sample_function(data_buffer.data());
+
+        auto data_set = h5::create_earray(logging_group.get(), relative_path, h5::select_predtype<T>(), 
+                fake_dims, dims);
+        h5::append_to_dset(data_set.get(), data_buffer, 0);
+    }
+
     virtual ~H5Logger() {
         flush();
     }
 };
 
-
+extern H5Logger* default_logger;
 
 /*
 template <typename T>

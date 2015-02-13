@@ -14,6 +14,12 @@ struct SysArray {
     SysArray(): x(nullptr), offset(0) {}
 };
 
+inline void copy_sys_array_to_buffer(SysArray arr, int n_system, int n_val, float* buffer) {
+    for(int ns=0; ns<n_system; ++ns)
+        for(int i=0; i<n_val; ++i)
+            buffer[ns*n_val+i] = arr.x[ns*arr.offset+i];
+}
+
 
 //! Pair of value and derivative SysArray's 
 struct CoordArray {

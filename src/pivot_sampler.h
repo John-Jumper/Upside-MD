@@ -17,8 +17,8 @@ struct PivotLocation {
 };
 
 struct PivotStats {
-    uint64_t n_attempt;
     uint64_t n_success;
+    uint64_t n_attempt;
     PivotStats() {reset();}
     void reset() {n_attempt = n_success = 0u;}
 };

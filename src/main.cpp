@@ -195,6 +195,15 @@ try {
             throw string("Unable to open configuration file at ") + config_arg.getValue();
         }
 
+        if(h5_exists(config.get(), "/output", false)) {
+            // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
+            // datasets or groups.  Subsequent h5repack will reclaim space, however.
+            if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(config.get(), "/output", H5P_DEFAULT));
+            else throw string("/output already exists and --overwrite-output was not specified");
+        }
+        H5Logger state_logger(config, "output");
+        default_logger = &state_logger;
+
         auto pos_shape = get_dset_size(3, config.get(), "/input/pos");
         int  n_atom   = pos_shape[0];
         int  n_system = pos_shape[2];
@@ -239,8 +248,16 @@ try {
             : 0;
 
         PivotSampler pivot_sampler;
-        if(pivot_interval)
+        if(pivot_interval) {
             pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get(), n_system};
+            state_logger.add_logger<int>("pivot_stats", {n_system,2}, [&](int* stats_buffer) {
+                    for(int ns=0; ns<n_system; ++ns) {
+                        stats_buffer[2*ns+0] = pivot_sampler.pivot_stats[ns].n_success;
+                        stats_buffer[2*ns+1] = pivot_sampler.pivot_stats[ns].n_attempt;
+                        pivot_sampler.pivot_stats[ns].reset();
+                    }});
+        }
+                    
 
         vector<float> temperature(n_system);
         float max_temp = max_temperature_arg.getValue();
@@ -261,6 +278,9 @@ try {
         for(auto t: temperature) printf(" %f", t);
         printf("\n");
 
+        state_logger.log_once<double>("temperature", {n_system}, [&](double* temperature_buffer) {
+                for(int ns=0; ns<n_system; ++ns) temperature_buffer[ns] = temperature[ns];});
+
         float equil_duration = equilibration_duration_arg.getValue();
         // equilibration_max_force is set so that the change in momentum should not be more than
         // 20% of the equilibration magnitude over a single dt interval
@@ -280,13 +300,6 @@ try {
         thermostat.apply(mom_sys, n_atom); // initial thermalization
         thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
 
-        if(h5_exists(config.get(), "/output", false)) {
-            // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
-            // datasets or groups.  Subsequent h5repack will reclaim space, however.
-            if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(config.get(), "/output", H5P_DEFAULT));
-            else throw string("/output already exists and --overwrite-output was not specified");
-        }
-        H5Logger state_logger(config, "output");
         state_logger.add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
                 SysArray pos_array = engine.pos->coords().value;
                 for(int ns=0; ns<n_system; ++ns) 
@@ -328,7 +341,7 @@ try {
 
         auto tstart = chrono::high_resolution_clock::now();
         double physical_time = 0.;
-        state_logger.add_logger<double>("time", {1}, [&](double* time_buffer) {time_buffer[0]=physical_time;});
+        state_logger.add_logger<double>("time", {}, [&](double* time_buffer) {*time_buffer=physical_time;});
         for(uint64_t nr=0; nr<n_round; ++nr) {
             physical_time = nr*3*double(dt);
 
@@ -386,9 +399,11 @@ try {
         }
 
         if(pivot_interval) {
-            auto& ps = pivot_sampler.pivot_stats;
+            std::vector<int64_t> ps(2*n_system);
+            traverse_dset<3,int>(config.get(), "/output/pivot_stats", [&](size_t nf, size_t ns, int d, int x) {
+                    ps[2*ns+d] += x;});
             printf("pivot_success:");
-            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", ps[ns].n_success*1./ps[ns].n_attempt);
+            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", double(ps[2*ns+0])/double(ps[2*ns+1]));
             printf("\n");
         }
 

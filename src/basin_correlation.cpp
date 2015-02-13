@@ -1,6 +1,7 @@
 #include "deriv_engine.h"
 #include "timing.h"
 #include "coord.h"
+// #include "state_logger.h"
 
 using namespace h5;
 using namespace std;
@@ -137,6 +138,21 @@ struct BasinCorrelationPot : public PotentialNode
                 connection_matrices.push_back(x);});
 
         for(size_t nr=0; nr<2; ++nr) for(auto &p: params) rama.slot_machine.add_request(1, p.residue[nr]);
+
+        /*
+        if(default_logger) {
+            default_logger->add_logger<float>("basin", {n_system, rama.n_elem, N_BASIN}, [&](float* buffer) {
+                    for(int ns=0; ns<n_system; ++ns) {
+                        for(int nr=0; nr<rama.n_elem; ++nr) {
+                            StaticCoord<2> rama1(rama.coords().value, ns, nr);
+                            for(int nb=0; nb<N_BASIN; ++nb) 
+                                buffer[(ns*rama.n_elem + nr)*N_BASIN + nb] = rama_box(
+                                    make_float2(rama1.v[0], rama1.v[1]), 
+                                    basins[nb].center, basins[nb].half_width, basin_sharpness).x;
+                        }
+                    }});
+        }
+        */
     }
 
     virtual void compute_value(ComputeMode mode) {
