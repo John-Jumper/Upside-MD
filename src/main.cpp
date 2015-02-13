@@ -182,9 +182,9 @@ try {
     cmd.parse(argc, argv);
 
     printf("invocation:");
-    for(auto arg=argv; arg!=argv+argc; ++arg) printf(" %s", *arg);
-    printf("\n");
-
+    std::string invocation(argv[0]);
+    for(auto arg=argv+1; arg!=argv+argc; ++arg) invocation += string(" ") + *arg;
+    printf("%s\n", invocation.c_str());
 
     try {
         h5_noerr(H5Eset_auto(H5E_DEFAULT, nullptr, nullptr));
@@ -203,6 +203,8 @@ try {
         }
         H5Logger state_logger(config, "output");
         default_logger = &state_logger;
+
+        write_string_attribute(config.get(), "output", "invocation", invocation);
 
         auto pos_shape = get_dset_size(3, config.get(), "/input/pos");
         int  n_atom   = pos_shape[0];

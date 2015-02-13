@@ -74,8 +74,6 @@ bool h5_exists(hid_t base, const char* nm, bool check_valid=true);
 // Read the dimension sizes of a dataset
 std::vector<hsize_t> get_dset_size(int ndims, hid_t group, const char* name);
 
-
-
 //! Read a scalar attribute
 template<class T>
 T read_attribute(hid_t h5, const char* path, const char* attr_name) 
@@ -91,6 +89,13 @@ try {
 template<>
 std::vector<std::string> read_attribute<std::vector<std::string>>
 (hid_t h5, const char* path, const char* attr_name);
+
+static void write_string_attribute(hid_t h5, const char* path, const char* attr_name, const std::string& value) 
+try {
+    h5_noerr(H5LTset_attribute_string(h5, path, attr_name, value.c_str()));
+} catch(const std::string &e) {
+    throw "while writing attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
+}
 
 void check_size(hid_t group, const char* name, std::vector<size_t> sz); //!< Check the dimension sizes of an arbitrary dataset
 void check_size(hid_t group, const char* name, size_t sz); //!< Check the dimension sizes of an 1D dataset
