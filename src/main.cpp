@@ -334,8 +334,8 @@ try {
         // quick hack of a check for z-centering and membrane potential
         if(do_recenter && !xy_recenter_only) {
             for(auto &n: engine.nodes) {
-                if(is_prefix(n.name, "membrane_potential")) 
-                    throw string("You have z-centering and membrane_potential turned on.  "
+                if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom"))
+                    throw string("You have z-centering and a z-dependent potential turned on.  "
                             "This is not what you want.  Considering --disable-z-recentering "
                             "or --disable-recentering.");
             }

@@ -300,7 +300,7 @@ void z_flat_bottom_spring(
         int n_terms, int n_system)
 {
     for(int ns=0; ns<n_system; ++ns) {
-        potential[ns] = 0.f;
+        if(potential) potential[ns] = 0.f;
 
         for(int nt=0; nt<n_terms; ++nt) {
             ZFlatBottomParams p = params[nt];

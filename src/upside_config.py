@@ -49,6 +49,42 @@ def vmag(x):
 def create_array(grp, nm, obj=None):
     return t.create_earray(grp, nm, obj=obj, filters=default_filter)
 
+def write_z_flat_bottom(fasta, z_spring_table):
+    fields = [ln.split() for ln in open(z_spring_table)]
+    header = 'residue z0 radius spring_constant'
+    if [x.lower() for x in fields[0]] != header.split():
+        parser.error('First line of z-flat-bottom table must be "%s"'%header)
+    if not all(len(f)==len(fields[0]) for f in fields):
+        parser.error('Invalid format for z-flat-bottom file')
+    fields = fields[1:]
+    n_spring = len(fields)
+
+    g = t.create_group(t.root.input.potential, 'z_flat_bottom')
+    g._v_attrs.arguments = np.array(['pos'])
+
+    atom            = np.zeros((n_spring), dtype='i')
+    z0              = np.zeros((n_spring,))
+    radius          = np.zeros((n_spring,))
+    spring_constant = np.zeros((n_spring,))
+
+    for i,f in enumerate(fields):
+        res = int(f[0])
+        msg = 'Contact energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
+        if not (0 <= res < len(fasta)): raise ValueError(msg % (res, len(fasta)))
+        atom[i] = int(f[0])*3 + 1  # restrain the CA atom in each residue
+
+        z0[i]              = float(f[1])
+        radius[i]          = float(f[2])
+        spring_constant[i] = float(f[3])
+
+    create_array(g, 'atom',            obj=atom)
+    create_array(g, 'z0',              obj=z0)
+    create_array(g, 'radius',          obj=radius)
+    create_array(g, 'spring_constant', obj=spring_constant)
+
+
+
+
 def write_backbone_pair(fasta):
     n_res = len(fasta)
     grp = t.create_group(potential, 'backbone_pairs')
@@ -928,6 +964,10 @@ def main():
             help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
             help='hbond energy perturbation file for helices')
+    parser.add_argument('--z-flat-bottom', default='', 
+            help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line'+
+            'must contact "residue z0 radius spring_constant".  The restraint is applied to the CA atom'+
+            'of each residue.')
     parser.add_argument('--initial-structures', default='', 
             help='Pickle file for initial structures for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
@@ -1029,6 +1069,9 @@ def main():
     if args.backbone:
         do_alignment = True
         write_backbone_pair(fasta_seq)
+
+    if args.z_flat_bottom:
+        write_z_flat_bottom(fasta_seq, args.z_flat_bottom)
 
     if args.sidechain_radial:
         require_backbone_point = True
