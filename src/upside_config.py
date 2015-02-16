@@ -965,8 +965,8 @@ def main():
     parser.add_argument('--helix-energy-perturbation', default=None,
             help='hbond energy perturbation file for helices')
     parser.add_argument('--z-flat-bottom', default='', 
-            help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line'+
-            'must contact "residue z0 radius spring_constant".  The restraint is applied to the CA atom'+
+            help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line '+
+            'must contact "residue z0 radius spring_constant".  The restraint is applied to the CA atom '+
             'of each residue.')
     parser.add_argument('--initial-structures', default='', 
             help='Pickle file for initial structures for the simulation.  ' +
