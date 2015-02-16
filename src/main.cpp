@@ -10,6 +10,10 @@
 #include "random.h"
 #include "state_logger.h"
 
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 using namespace std;
 using namespace h5;
 
@@ -211,6 +215,15 @@ try {
         int  n_system = pos_shape[2];
         if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
 
+        #if defined(_OPENMP)
+        // current we only use OpenMP parallelism over systems
+        if(n_system < omp_get_max_threads()) omp_set_num_threads(n_system);
+        if(omp_get_max_threads() > 1) 
+            printf("Multi-threaded execution with %i threads\n\n", omp_get_max_threads());
+        else
+            printf("Single-threaded execution\n\n");
+        #endif
+
         auto potential_group = open_group(config.get(), "/input/potential");
         auto engine = initialize_engine_from_hdf5(n_atom, n_system, potential_group.get());
         traverse_dset<3,float>(config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
@@ -259,7 +272,6 @@ try {
                         pivot_sampler.pivot_stats[ns].reset();
                     }});
         }
-                    
 
         vector<float> temperature(n_system);
         float max_temp = max_temperature_arg.getValue();
