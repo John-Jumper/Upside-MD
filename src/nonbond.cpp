@@ -147,7 +147,7 @@ void backbone_pairs(
         }
 
         for(int nr1=0; nr1<n_res; ++nr1) {
-            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
+            for(int nr2=nr1+3; nr2<n_res; ++nr2) {  // start interactions at i+3
                 if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
                     backbone_pairs_body(
                             (potential ? potential+ns : nullptr),
