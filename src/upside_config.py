@@ -703,7 +703,7 @@ def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_lib
 def read_fasta(file_obj):
     lines = list(file_obj)
     assert lines[0][0] == '>'
-    one_letter_seq = ''.join(x.strip() for x in lines[1:])
+    one_letter_seq = ''.join(x.strip().replace('\r','') for x in lines[1:])
     seq = np.array([three_letter_aa[a] for a in one_letter_seq])
     return seq
 
