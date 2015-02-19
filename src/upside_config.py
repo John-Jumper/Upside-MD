@@ -103,6 +103,7 @@ def write_backbone_pair(fasta):
     grp._v_attrs.dist_cutoff = 6.
     create_array(grp, 'id', obj=np.arange(n_res))
     create_array(grp, 'ref_pos', obj=ref_pos)
+    create_array(grp, 'n_atom',  obj=np.isfinite(grp.ref_pos[:].sum(axis=-1)).sum(axis=-1))
 
 def write_affine_alignment(n_res):
     grp = t.create_group(potential, 'affine_alignment')

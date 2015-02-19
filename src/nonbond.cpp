@@ -12,8 +12,8 @@ struct AffineParams {
 };
 
 struct PackedRefPos {
-    int32_t n_atoms;
-    uint32_t pos[4];
+    int32_t n_atom;
+    float3  pos[4];
 };
 
 uint32_t
@@ -48,10 +48,10 @@ nonbonded_kernel_or_deriv_over_r(float r_mag2)
     // V'(r) = -2*s*r * z/(1+z)^2 where z = exp(s*(r**2-d**2))
     // V'(r)/r = -2*s*z / (1+z)^2
 
-    const float wall = 3.2f;  // corresponds to vdW *diameter*
+    // const float wall = 3.2f;  // corresponds to vdW *diameter*
+    const float wall = 2.8f;  // corresponds to vdW *diameter*
     const float wall_squared = wall*wall;  
-    // const float width = 0.10f; // FIXME WRONG
-    const float width = 0.15f;
+    const float width = 0.10f;
     const float scale_factor = 1.f/(wall*width);  // ensure character
 
     // overflow protection prevents NaN
@@ -97,13 +97,13 @@ inline void backbone_pairs_body(
         float* pot_value,
         AffineCoordT &body1,
         AffineCoordT &body2,
-        int n_atoms1, const float3* restrict rpos1,
-        int n_atoms2, const float3* restrict rpos2)
+        int n_atom1, const float3* restrict rpos1,
+        int n_atom2, const float3* restrict rpos2)
 {
-    for(int i1=0; i1<n_atoms1; ++i1) {
+    for(int i1=0; i1<n_atom1; ++i1) {
         const float3 x1 = rpos1[i1];
 
-        for(int i2=0; i2<n_atoms2; ++i2) {
+        for(int i2=0; i2<n_atom2; ++i2) {
             const float3 x2 = rpos2[i2];
 
             const float3 r = x1-x2;
@@ -142,12 +142,12 @@ void backbone_pairs(
         vector<float3> ref_pos_coords(n_res*4);
 
         for(int nr=0; nr<n_res; ++nr) {
-            ref_pos_atoms[nr] = ref_pos[nr].n_atoms;
-            for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(unpack_atom(ref_pos[nr].pos[na]));
+            ref_pos_atoms[nr] = ref_pos[nr].n_atom;
+            for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(ref_pos[nr].pos[na]);
         }
 
         for(int nr1=0; nr1<n_res; ++nr1) {
-            for(int nr2=nr1+3; nr2<n_res; ++nr2) {  // start interactions at i+3
+            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+3
                 if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
                     backbone_pairs_body(
                             (potential ? potential+ns : nullptr),
@@ -186,18 +186,14 @@ struct BackbonePairs : public PotentialNode
         check_elem_width(alignment, 7);
 
         check_size(grp, "id",      n_residue);
+        check_size(grp, "n_atom",  n_residue);
         check_size(grp, "ref_pos", n_residue, 4, 3);
 
-        traverse_dset<1,int  >(grp, "id", [&](size_t nr, int x) {params[nr].residue.index = x;});
+        traverse_dset<1,int>(grp, "id",     [&](size_t nr, int x) {params[nr].residue.index = x;});
+        traverse_dset<1,int>(grp, "n_atom", [&](size_t nr, int x) {ref_pos[nr].n_atom = x;});
 
-        // read and pack reference positions
-        float tmp[3];
         traverse_dset<3,float>(grp, "ref_pos", [&](size_t nr, size_t na, size_t d, float x) {
-                tmp[d] = x;
-                if(d==2) ref_pos[nr].pos[na] = pack_atom(tmp);
-                });
-        for(auto &rp: ref_pos) 
-            rp.n_atoms = count_if(rp.pos, rp.pos+4, [](uint32_t i) {return i != uint32_t(-1);});
+                component(ref_pos[nr].pos[na], d) = x;});
 
         for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
     }
