@@ -11,85 +11,47 @@ struct AffineParams {
     CoordPair residue;
 };
 
-struct PackedRefPos {
+struct RefPos {
     int32_t n_atom;
     float3  pos[4];
 };
 
-uint32_t
-pack_atom(const float x[3]) {
-    const int   shift = 1<<9;
-    const float scale = 20.f / (1<<10);  // resolution is 0.02 angstroms
-    const unsigned int z_mask = (1<<10)-1;
-
-    uint32_t xi[3];
-    for(int i=0; i<3; ++i) xi[i] = (int)round(x[i]/scale) + shift;
-
-    // indicate invalid value by returning -1 as unsigned
-    // NaN will also give -1u
-    bool has_nan = (x[0]+x[1]+x[2])!=(x[0]+x[1]+x[2]);
-    if(xi[0]>z_mask || xi[1]>z_mask || xi[2]>z_mask || has_nan) return -1u;
-    return xi[0]<<20 | xi[1]<<10 | xi[2]<< 0;
-}
-
 namespace {
-
 
 template <bool return_deriv>
 inline float
 nonbonded_kernel_or_deriv_over_r(float r_mag2)
 {
-    // V(r) = 1/(1+exp(s*(r**2-d**2)))
-    // V(d+width) is approximately V(d) + V'(d)*width
-    // this equals 1/2 - (1/2)^2 * 2*s*r * width = (1/2) * (1 - s*(r*width))
-    // Based on this, to get a characteristic scale of width,
-    //   s should be 1/(wall_radius * width)
-
-    // V'(r) = -2*s*r * z/(1+z)^2 where z = exp(s*(r**2-d**2))
-    // V'(r)/r = -2*s*z / (1+z)^2
-
-    // const float wall = 3.2f;  // corresponds to vdW *diameter*
-    const float wall = 2.8f;  // corresponds to vdW *diameter*
+    const float wall = 3.0f;  // corresponds to vdW *diameter*
     const float wall_squared = wall*wall;  
     const float width = 0.10f;
-    const float scale_factor = 1.f/(wall*width);  // ensure character
+    const float sharpness = 1.f/(wall*width);  // ensure character
 
-    // overflow protection prevents NaN
-    float z = fminf(expf(scale_factor * (r_mag2-wall_squared)), 1e12f);
-    float w = 1.f/(1.f + z);  // include protection from 0
-
-    if(return_deriv) {
-        float deriv_over_r = -2.f*scale_factor * z * (w*w);
-        return deriv_over_r;
-    } else {
-        return w;
-    }
+    const float2 V = compact_sigmoid(r_mag2-wall_squared, sharpness);
+    return return_deriv ? 2.f*V.y : V.x;
 }
 
-inline void 
-unpack_atom(float x[3], unsigned int packed_atom)
-{
-    // 10 binary digits for each place
-    const int   shift = 1<<9;
-    const float scale = 20.f / (1<<10);  // resolution is 0.02 angstroms
-    const unsigned int   z_mask = (1<<10)-1;
-
-    // unpack reference position with 10 bit precision for each component,
-    //   where the range of reference positions for each component is (roughly) [-10.,10.]
-    x[0] = scale * ((int)(packed_atom>>20 & z_mask) - shift);
-    x[1] = scale * ((int)(packed_atom>>10 & z_mask) - shift);
-    x[2] = scale * ((int)(packed_atom>> 0 & z_mask) - shift);
-}
-
-
-// now a float3 variety
-inline float3 
-unpack_atom(unsigned int packed_atom)
-{
-    float ret[3]; 
-    unpack_atom(ret, packed_atom);
-    return make_float3(ret[0], ret[1], ret[2]);
-}
+// template <bool return_deriv>
+// inline float
+// nonbonded_kernel_or_deriv_over_r(float r_mag2)
+// {
+//     const float wall = 2.8f;  // corresponds to vdW *diameter*
+//     const float wall_squared = wall*wall;  
+//     const float width = 0.10f;
+//     const float scale_factor = 1.f/(wall*width);  // ensure character
+// 
+//     // overflow protection prevents NaN
+//     float z = fminf(expf(scale_factor * (r_mag2-wall_squared)), 1e12f);
+//     float w = 1.f/(1.f + z);  // include protection from 0
+//     printf("nbk % f % f   % f % f\n", sqrtf(r_mag2), wall, w, -scale_factor * z * (w*w));
+// 
+//     if(return_deriv) {
+//         float deriv_over_r = -2.f*scale_factor * z * (w*w);
+//         return deriv_over_r;
+//     } else {
+//         return w;
+//     }
+// }
 
 
 template <typename AffineCoordT>
@@ -124,7 +86,7 @@ inline void backbone_pairs_body(
 void backbone_pairs(
         float* potential,
         const CoordArray rigid_body,
-        const PackedRefPos* restrict ref_pos,
+        const RefPos* restrict ref_pos,
         const AffineParams* restrict params,
         float energy_scale,
         float dist_cutoff,
@@ -148,7 +110,7 @@ void backbone_pairs(
 
         for(int nr1=0; nr1<n_res; ++nr1) {
             for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+3
-                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
+                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < 2.f*dist_cutoff2) { // FIXME debug
                     backbone_pairs_body(
                             (potential ? potential+ns : nullptr),
                             coords[nr1],        coords[nr2], 
@@ -172,7 +134,7 @@ struct BackbonePairs : public PotentialNode
     int n_residue;
     CoordNode& alignment;
     vector<AffineParams> params;
-    vector<PackedRefPos> ref_pos;
+    vector<RefPos> ref_pos;
     float energy_scale;
     float dist_cutoff;
 
