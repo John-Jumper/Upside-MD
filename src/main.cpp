@@ -316,8 +316,8 @@ try {
 
         state_logger.add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
                 SysArray pos_array = engine.pos->coords().value;
-                for(int ns=0; ns<n_system; ++ns) 
-                    copy_n(pos_array.x+ns*pos_array.offset, n_atom*3, pos_buffer);
+                for(int ns=0; ns<n_system; ++ns)
+                    copy_n(pos_array.x+ns*pos_array.offset, n_atom*3, pos_buffer + ns*n_atom*3);
             });
         state_logger.add_logger<double>("kinetic", {n_system}, [&](double* kin_buffer) {
             for(int ns=0; ns<n_system; ++ns) {
