@@ -109,8 +109,8 @@ void backbone_pairs(
         }
 
         for(int nr1=0; nr1<n_res; ++nr1) {
-            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+3
-                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < 2.f*dist_cutoff2) { // FIXME debug
+            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+2
+                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
                     backbone_pairs_body(
                             (potential ? potential+ns : nullptr),
                             coords[nr1],        coords[nr2], 
