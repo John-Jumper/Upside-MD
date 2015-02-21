@@ -116,7 +116,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb', help='input .pdb file')
     parser.add_argument('output', help='output .pkl file')
-    parser.add_argument('--chain', default=None, help='Choose only a specific chain')
+    parser.add_argument('--additional-selector', default='', help='Find the backbone with the name and an additional selector (such as "chain A" or "protein").')
     parser.add_argument('--model', default=None, help='Choose only a specific model in the .pdb')
     parser.add_argument('--output-fasta', default=None, help='Output a fasta file as well')
     parser.add_argument('--output-rama', default='', help='Output rama angles')
@@ -137,7 +137,7 @@ def main():
     
     structure = prody.parsePDB(args.pdb, model=args.model)
     sel_str = 'name N CA C'
-    if args.chain is not None: sel_str += ' and chain %s' % args.chain
+    if args.additional_selector: sel_str += ' and (%s)' % args.additional_selector
     coords = structure.select(sel_str).getCoords()
     print len(coords)/3., 'residues found.'
     bond_lengths = np.sqrt(np.sum(np.diff(coords,axis=0)**2,axis=-1))
@@ -150,7 +150,7 @@ def main():
     f.close()
     
     sel_str = 'name CA'
-    if args.chain is not None: sel_str += ' and chain %s' % args.chain
+    if args.additional_selector: sel_str += ' and (%s)' % args.additional_selector
     coords_CA = structure.select(sel_str)
     seq = ''.join([one_letter_aa[s] for s in coords_CA.getResnames()])
 
