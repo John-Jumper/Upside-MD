@@ -655,6 +655,7 @@ def rama_box(rama, center, half_width, sharpness):
 
 
 def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_library):
+    np.set_printoptions(precision=3, suppress=True)
     assert len(rama_pot.shape) == 3
     grp = t.create_group(potential, 'basin_correlation_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
@@ -687,17 +688,22 @@ def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_lib
     rama_basin_prob = rama_box(rama, basin_center, basin_half_width, basin_sharpness)
     marginal_basin_prob = (rama_basin_prob[None] * rama_prob[...,None]).sum(axis=1).sum(axis=1)
 
+
     connection_matrices, prob_matrices, count_matrices = make_trans_matrices(
             sequence[1:-1], # exclude termini
             np.array([marginal_basin_prob[i] for i in rama_map_id[1:-1]]),
             cPickle.load(open(dimer_basin_library)))
-    connection_matrices = connection_matrices + 1e-3  # avoid zeros in probabilities
+    connection_matrices = np.clip(connection_matrices, 1e-3, 5.)  # avoid zeros and wild numbers in energy
+
+    for i,(s,m) in enumerate(zip(sequence,marginal_basin_prob)):
+        print i,s, m
 
     left_res = np.arange(1,len(sequence)-2)
     create_array(grp, 'residue_id',           obj=np.column_stack((left_res, left_res+1)))
     create_array(grp, 'connection_matrices',  obj=connection_matrices.astype('f4'))
     create_array(grp, 'connection_matrix_id', obj=np.arange(grp.connection_matrices.shape[0]))
     create_array(grp, 'prob_matrices',        obj=prob_matrices)
+    create_array(grp, 'marginal_basin_prob',  obj=marginal_basin_prob)
 
 
 def read_fasta(file_obj):
@@ -855,7 +861,8 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     create_array(data, 'names',      obj=params.root.params.names[:])
     create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
     create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:] * scale_radius**2)
-    create_array(data, 'scale',      obj=params.root.params.scale[:] * scale_radius)
+    # scale has units 1/A^2
+    create_array(data, 'scale',      obj=params.root.params.scale[:]      / scale_radius)
     params.close()
 
 
