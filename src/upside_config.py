@@ -695,9 +695,6 @@ def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_lib
             cPickle.load(open(dimer_basin_library)))
     connection_matrices = np.clip(connection_matrices, 1e-3, 5.)  # avoid zeros and wild numbers in energy
 
-    for i,(s,m) in enumerate(zip(sequence,marginal_basin_prob)):
-        print i,s, m
-
     left_res = np.arange(1,len(sequence)-2)
     create_array(grp, 'residue_id',           obj=np.column_stack((left_res, left_res+1)))
     create_array(grp, 'connection_matrices',  obj=connection_matrices.astype('f4'))

@@ -59,10 +59,12 @@ struct PivotSampler {
         traverse_dset<1,int>(grp, "pivot_restype", [&](size_t np,            int x) {pivot_loc[np].restype =x;});
 
         for(auto &p: pivot_loc) {
+            if(p.restype<0 || p.restype>=n_layer) throw std::string("invalid pivot restype");
             for(int na=0; na<5; ++na) {
                 if(p.pivot_range[0] <= p.rama_atom[na] && p.rama_atom[na] < p.pivot_range[1])
                     throw std::string("pivot_range cannot contain any atoms in pivot_atom ") + 
-                        std::to_string(p.pivot_range[0]) + " <= " + std::to_string(p.rama_atom[na]) + " < " + std::to_string(p.pivot_range[1]);
+                        std::to_string(p.pivot_range[0]) + " <= " + std::to_string(p.rama_atom[na]) + 
+                        " < " + std::to_string(p.pivot_range[1]);
             }
         }
 
@@ -71,8 +73,8 @@ struct PivotSampler {
         for(int nl=0; nl<n_layer; ++nl) {
             double sum_prob = 0.;
             for(int i=0; i<n_bin*n_bin; ++i) {
-                proposal_prob_cdf[nl*n_bin*n_bin + i] = sum_prob;
                 sum_prob += exp(-proposal_pot[nl*n_bin*n_bin + i]);
+                proposal_prob_cdf[nl*n_bin*n_bin + i] = sum_prob;
             }
 
             // normalize both the negative log probability and the cdf
@@ -117,10 +119,8 @@ struct PivotSampler {
             int psi_bin = pivot_bin%n_bin;
 
             // now pick a random location in that bin
-            float2 new_rama = (2.f*M_PI_F/n_bin)*make_float2(phi_bin+random_values.x, psi_bin+random_values.y) - M_PI_F;
-
-
-            // printf("proposing %f %f from %f\n", new_rama.x*180.f/M_PI_F, new_rama.y*180.f/M_PI_F, cdf_value);
+            // Note the half-bin shift because we want the bin center of the left-most bin at 0
+            float2 new_rama = (2.f*M_PI_F/n_bin)*make_float2(phi_bin+random_values.x-0.5f, psi_bin+random_values.y-0.5f) - M_PI_F;
 
             // find deviation from old rama
             float3 d1,d2,d3,d4;
@@ -134,8 +134,11 @@ struct PivotSampler {
                     dihedral_germ(prevC,N,CA,C, d1,d2,d3,d4),
                     dihedral_germ(N,CA,C,nextN, d1,d2,d3,d4));
 
-            int old_phi_bin = (old_rama.x+M_PI_F) * (0.5/M_PI_F) * n_bin;
-            int old_psi_bin = (old_rama.y+M_PI_F) * (0.5/M_PI_F) * n_bin;
+            // reverse the half-bin shift
+            int old_phi_bin = (old_rama.x+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
+            int old_psi_bin = (old_rama.y+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
+            old_phi_bin = old_phi_bin>=n_bin ? 0 : old_phi_bin;  // enforce periodicity
+            old_psi_bin = old_psi_bin>=n_bin ? 0 : old_psi_bin;
             float old_lprob = proposal_pot[(p.restype*n_bin + old_phi_bin)*n_bin + old_psi_bin];
 
             // apply rotations
@@ -170,25 +173,6 @@ struct PivotSampler {
                 y.flush();
             }
 
-            // {
-            //     float deg = M_PI_F/180.f;
-            //     float3 zprevC = StaticCoord<3>(pos, ns, p.rama_atom[0]).f3();
-            //     float3 zN     = StaticCoord<3>(pos, ns, p.rama_atom[1]).f3();
-            //     float3 zCA    = StaticCoord<3>(pos, ns, p.rama_atom[2]).f3();
-            //     float3 zC     = StaticCoord<3>(pos, ns, p.rama_atom[3]).f3();
-            //     float3 znextN = StaticCoord<3>(pos, ns, p.rama_atom[4]).f3();
-
-            //     float2 actual_rama = make_float2(
-            //             dihedral_germ(zprevC,zN,zCA,zC, d1,d2,d3,d4),
-            //             dihedral_germ(zN,zCA,zC,znextN, d1,d2,d3,d4));
-
-            //     printf("ns %i nr %2i old_rama % 8.3f % 8.3f new_rama % 8.3f % 8.3f actual_new_rama % 8.3f % 8.3f\n",
-            //             ns, p.rama_atom[1]/3, 
-            //             old_rama.x   /deg, old_rama.y   /deg, 
-            //             new_rama.x   /deg, new_rama.y   /deg,
-            //             actual_rama.x/deg, actual_rama.y/deg);
-            // }
-
             delta_lprob[ns] = new_lprob - old_lprob;
         }
     }
@@ -199,9 +183,11 @@ struct PivotSampler {
             const std::vector<float>& temperatures,
             DerivEngine& engine) 
     {
+        int n_system = engine.pos->n_system;
         SysArray pos_sys = engine.pos->coords().value;
+
         std::vector<float> pos_copy = engine.pos->output;
-        std::vector<float> delta_lprob(engine.pos->n_system);
+        std::vector<float> delta_lprob(n_system);
 
         engine.compute(PotentialAndDerivMode);
         std::vector<float> old_potential = engine.potential;
@@ -211,7 +197,7 @@ struct PivotSampler {
         engine.compute(PotentialAndDerivMode);
         std::vector<float> new_potential = engine.potential;
 
-        for(int ns=0; ns<engine.pos->n_system; ++ns) {
+        for(int ns=0; ns<n_system; ++ns) {
             float lboltz_diff = delta_lprob[ns] - (1.f/temperatures[ns]) * (new_potential[ns]-old_potential[ns]);
             RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, ns, round);
             pivot_stats[ns].n_attempt++;

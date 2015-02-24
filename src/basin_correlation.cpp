@@ -152,6 +152,11 @@ struct BasinCorrelationPot : public PotentialNode
                         }
                     }});
         }
+        if(default_logger) {
+            default_logger->add_logger<float>("basin_potential", {n_system}, [&](float* buffer) {
+                    for(int ns=0; ns<n_system; ++ns) buffer[ns] = potential[ns];
+                    });
+        }
         */
     }
 
