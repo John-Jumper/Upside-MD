@@ -49,11 +49,13 @@ def vmag(x):
 def create_array(grp, nm, obj=None):
     return t.create_earray(grp, nm, obj=obj, filters=default_filter)
 
-def write_z_flat_bottom(fasta, z_spring_table):
+def write_z_flat_bottom(parser, fasta, z_spring_table):
     fields = [ln.split() for ln in open(z_spring_table)]
     header = 'residue z0 radius spring_constant'
-    if [x.lower() for x in fields[0]] != header.split():
-        parser.error('First line of z-flat-bottom table must be "%s"'%header)
+    actual_header = [x.lower() for x in fields[0]]
+    if actual_header != header.split():
+        parser.error('First line of z-flat-bottom table must be "%s" but is "%s"'
+                %(header," ".join(actual_header)))
     if not all(len(f)==len(fields[0]) for f in fields):
         parser.error('Invalid format for z-flat-bottom file')
     fields = fields[1:]
@@ -1078,7 +1080,7 @@ def main():
         write_backbone_pair(fasta_seq)
 
     if args.z_flat_bottom:
-        write_z_flat_bottom(fasta_seq, args.z_flat_bottom)
+        write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
 
     if args.sidechain_radial:
         require_backbone_point = True
