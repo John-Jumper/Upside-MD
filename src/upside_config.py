@@ -1004,6 +1004,8 @@ def main():
             'space separated values.  The form of the interaction is '+
             'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
             'sidechain, typically a few angstroms above the CB.')
+    parser.add_argument('--reference-state-rama', default='',
+            help='Do not use this unless you know what you are doing.')
     parser.add_argument('--membrane-thickness', default=None, type=float,
             help='Thickness of the membrane in angstroms for use with --membrane-potential.')
     parser.add_argument('--membrane-potential', default='',
@@ -1124,7 +1126,6 @@ def main():
                                               for i,f in enumerate(fasta_one_letter)))
             make_restraint_group(i,restrained_residues,target[:,:,0], args.restraint_spring_constant)
 
-
     # if we have the necessary information, write pivot_sampler
     if require_rama and 'rama_map_pot' in potential:
         grp = t.create_group(input, 'pivot_moves')
@@ -1135,7 +1136,14 @@ def main():
         create_array(grp, 'proposal_pot',  potential.rama_map_pot.rama_pot[:])
         create_array(grp, 'pivot_atom',    pivot_atom[non_terminal_residue])
         create_array(grp, 'pivot_restype', potential.rama_map_pot.rama_map_id[:][non_terminal_residue])
-        create_array(grp, 'pivot_range',   np.column_stack((grp.pivot_atom[:,4]+1, np.zeros(sum(non_terminal_residue),'i')+n_atom)))
+        create_array(grp, 'pivot_range',   np.column_stack((grp.pivot_atom[:,4]+1,np.zeros(sum(non_terminal_residue),'i')+n_atom)))
+
+    # hack to fix reference state issues for Rama potential
+    if args.reference_state_rama:
+        ref_state_pot = -np.log(cPickle.load(open(args.reference_state_rama)))
+        ref_state_pot -= ref_state_pot.mean()
+        potential.rama_map_pot.rama_pot[:] = potential.rama_map_pot.rama_pot[:] - ref_state_pot
+    
     t.close()
 
 
