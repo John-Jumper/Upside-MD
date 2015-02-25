@@ -50,7 +50,7 @@ def create_array(grp, nm, obj=None):
     return t.create_earray(grp, nm, obj=obj, filters=default_filter)
 
 def write_z_flat_bottom(parser, fasta, z_spring_table):
-    fields = [ln.split() for ln in open(z_spring_table)]
+    fields = [ln.split() for ln in open(z_spring_table,'U')]
     header = 'residue z0 radius spring_constant'
     actual_header = [x.lower() for x in fields[0]]
     if actual_header != header.split():
@@ -71,7 +71,7 @@ def write_z_flat_bottom(parser, fasta, z_spring_table):
 
     for i,f in enumerate(fields):
         res = int(f[0])
-        msg = 'Contact energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
+        msg = 'Z_flat energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
         if not (0 <= res < len(fasta)): raise ValueError(msg % (res, len(fasta)))
         atom[i] = int(f[0])*3 + 1  # restrain the CA atom in each residue
 
@@ -713,7 +713,7 @@ def read_fasta(file_obj):
     return seq
 
 def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
-    fields = [ln.split() for ln in open(dihedral_angle_table)]
+    fields = [ln.split() for ln in open(dihedral_angle_table,'U')]
     if [x.lower() for x in fields[0]] != 'index angle_type start end width energy'.split():
         parser.error('First line of dihedral angle energy table must be "index angle_type start end width energy"')
     if not all(len(f)==6 for f in fields):
@@ -762,7 +762,7 @@ def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     create_array(grp, 'energy',      obj=energy)
 
 def write_contact_energies(parser, fasta, contact_table):
-    fields = [ln.split() for ln in open(contact_table)]
+    fields = [ln.split() for ln in open(contact_table,'U')]
     if [x.lower() for x in fields[0]] != 'residue1 residue2 r0 width energy'.split():
         parser.error('First line of contact energy table must be "residue1 residue2 r0 width energy"')
     if not all(len(f)==5 for f in fields):
@@ -1020,7 +1020,7 @@ def main():
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
 
-    fasta_seq = read_fasta(open(args.fasta))
+    fasta_seq = read_fasta(open(args.fasta,'U'))
     do_alignment = False
     require_rama = False
     require_backbone_point = False
