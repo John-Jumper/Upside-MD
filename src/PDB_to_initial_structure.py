@@ -143,7 +143,8 @@ def main():
     bond_lengths = np.sqrt(np.sum(np.diff(coords,axis=0)**2,axis=-1))
     
     if bond_lengths.max() > 2.:
-        print "WARNING: %i separate chains found" % (1+(bond_lengths>2.).sum())
+        breaks = bond_lengths>2.
+        print "WARNING: %i separate chains found with breaks at residue(s) %s" % (1+breaks.sum(), list(breaks.nonzero()[0]/3))
     
     f=open(args.output,'wb')
     cPickle.dump(coords[...,None], f, -1)
