@@ -11,6 +11,7 @@ a.out
 *.so
 *.dSYM/
 *.o
+*.i
 *.s
 obj/
 .clang_complete
@@ -18,7 +19,3 @@ CMakeCache.txt
 CMakeFiles/
 *.h5
 *.bak
-upside
-cmake_install.cmake
-Makefile
-nohup.out

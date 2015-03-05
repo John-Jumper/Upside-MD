@@ -760,7 +760,6 @@ def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     create_array(grp, 'angle_range', obj=angle_range)
     create_array(grp, 'scale',       obj=scale)
     create_array(grp, 'energy',      obj=energy)
-
 def write_contact_energies(parser, fasta, contact_table):
     fields = [ln.split() for ln in open(contact_table,'U')]
     if [x.lower() for x in fields[0]] != 'residue1 residue2 r0 width energy'.split():
@@ -865,7 +864,7 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     params.close()
 
 
-def write_membrane_potential(sequence, potential_library_path, membrane_thickness):
+def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,excluded_residues, unsatisfiedHB_residues):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
     grp._v_attrs.arguments = np.array(['backbone_dependent_point'])
 
@@ -876,6 +875,16 @@ def write_membrane_potential(sequence, potential_library_path, membrane_thicknes
     z_lib_max = potential_library.root.z_energy._v_attrs.z_max
     potential_library.close()
 
+    for res_num in excluded_residues + unsatisfiedHB_residues:
+        if not (0<=res_num<len(sequence)):
+           raise ValueError('Residue number %i is invalid'%res_num)
+    
+    residues_included               = sorted(set(np.arange(len(sequence))).difference(excluded_residues))
+    unsatisfiedHB_residues_included = sorted(set(unsatisfiedHB_residues)  .difference(excluded_residues))
+    sequence_included               = [sequence[i] for i in residues_included]
+    for num in unsatisfiedHB_residues_included:
+        sequence_included[num]      = 'UHB'   # abbreviation for Unsatisfied HBond
+                                              # sequence is comprised of 3-letter codes of aa
     z_lib = np.linspace(z_lib_min, z_lib_max, z_energy.shape[-1])
 
     import scipy.interpolate
@@ -890,18 +899,18 @@ def write_membrane_potential(sequence, potential_library_path, membrane_thicknes
     energy_splines = [extrapolated_spline(z_lib,ene) for ene in z_energy]
 
     half_thickness = membrane_thickness/2
-    z = np.linspace(-half_thickness - 15., half_thickness + 15., int((2.*half_thickness+30.)/0.3)+1)
+    z = np.linspace(-half_thickness - 15., half_thickness + 15., int((membrane_thickness+30.)/0.3)+1)
 
     # if z>0, then use the spline evaluated at z-half_thickness, else use the spline evaluated at -z-half_thickness
-    z_transformed = np.where((z>=0.), z-half_thickness, -z-half_thickness)
+    z_transformed     = np.where((z>=0.), z-half_thickness, -z-half_thickness)
     membrane_energies = np.array([spline(z_transformed) for spline in energy_splines])
 
     resname_to_num = dict([(nm,i) for i,nm in enumerate(resnames)])
-    energy_index = np.array([resname_to_num[aa] for aa in sequence])
+    energy_index   = np.array([resname_to_num[aa] for aa in sequence_included])
 
-    create_array(grp, 'residue_id', np.arange(len(sequence)))
+    create_array(grp, 'residue_id', residues_included)
     create_array(grp, 'restype',    energy_index)
-    create_array(grp, 'energy',     membrane_energies)
+    create_array(grp, 'energy',     membrane_energies * scale)
     grp.energy._v_attrs.z_min = z[0]
     grp.energy._v_attrs.z_max = z[-1]
 
@@ -1012,6 +1021,16 @@ def main():
             help='Thickness of the membrane in angstroms for use with --membrane-potential.')
     parser.add_argument('--membrane-potential', default='',
             help='Parameter file for membrane potential.  User must also supply --membrane-thickness.')
+    parser.add_argument('--membrane-potential-scale',            default=1.0,type=float,
+            help='scale the membrane potentials. User must also supply --membrane-potential.')	
+    parser.add_argument('--membrane-potential-exclude-residues', default=[], type=parse_segments,
+            help='Residues that do not participate in the --membrane-potential(same format as --restraint-group).' +
+            'User must also supply --membrane-potential.')	
+    parser.add_argument('--membrane-potential-unsatisfied-hbond-residues',default=[], type=parse_segments,
+            help='Residues that have unsatisfied hydrogen bond, which will be marked as UHB in --membrane-potential. ' +
+            'Normally, this argument is only turned on when user wants to determine the burial orientation of a given membrane protein ' +
+	    'and the residues with unsatisfied hbonds are awared of (same format as --restraint-group). ' + 
+	    'User must also supply --membrane-potential.')
 
     args = parser.parse_args()
     if args.restraint_group and not (args.initial_structures or args.target_structures):
@@ -1097,7 +1116,8 @@ def main():
         if args.membrane_thickness is None:
             parser.error('--membrane-potential requires --membrane-thickness')
         require_backbone_point = True
-        write_membrane_potential(fasta_seq, args.membrane_potential, args.membrane_thickness)
+        write_membrane_potential(fasta_seq, args.membrane_potential, args.membrane_potential_scale, args.membrane_thickness,
+	        args.membrane_potential_exclude_residues, args.membrane_potential_unsatisfied_hbond_residues)
 
     if require_backbone_point:
         if args.backbone_dependent_point is None:
@@ -1127,6 +1147,7 @@ def main():
             print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
                                               for i,f in enumerate(fasta_one_letter)))
             make_restraint_group(i,restrained_residues,target[:,:,0], args.restraint_spring_constant)
+	    
 
     # if we have the necessary information, write pivot_sampler
     if require_rama and 'rama_map_pot' in potential:
