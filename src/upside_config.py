@@ -163,14 +163,9 @@ def write_affine_alignment(n_res):
     create_array(grp, 'ref_geom', obj=ref_geom)
 
 
-def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_residues):
+def write_infer_H_O(fasta, excluded_residues):
     n_res = len(fasta)
-    if hbond_energy > 0.:
-        print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
-
-
     # note that proline is not an hbond donor since it has no NH
-    excluded_residues = set(excluded_residues)
     donor_residues    = np.array([i for i in range(n_res) if i>0       and i not in excluded_residues and fasta[i]!='PRO'])
     acceptor_residues = np.array([i for i in range(n_res) if i<n_res-1 and i not in excluded_residues])
 
@@ -179,19 +174,6 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
 
     H_bond_length = 0.88
     O_bond_length = 1.24
-
-    if helix_energy_perturbation is None:
-        don_bonus = np.zeros(len(   donor_residues))
-        acc_bonus = np.zeros(len(acceptor_residues))
-    else:
-        import pandas as pd
-        bonus = pd.read_csv(helix_energy_perturbation)
-        d = dict(zip(bonus['aa'],zip(bonus['U_donor'],bonus['U_acceptor'])))
-        don_bonus = np.array([d[fasta[nr]][0] for nr in    donor_residues])
-        acc_bonus = np.array([d[fasta[nr]][1] for nr in acceptor_residues])
-
-    # FIXME yes, this is scandalous
-    # I really need to separate the Infer and the HBondEnergy, but I am busy right now
 
     grp = t.create_group(potential, 'infer_H_O')
     grp._v_attrs.arguments = np.array(['pos'])
@@ -206,19 +188,21 @@ def write_count_hbond(fasta, hbond_energy, helix_energy_perturbation, excluded_r
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
 
+def write_count_hbond(fasta, hbond_energy):
+    n_res = len(fasta)
+    if hbond_energy[0] > 0. or hbond_energy[1] > 0.:
+        print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
+
     grp = t.create_group(potential, 'hbond_energy')
-    grp._v_attrs.arguments = np.array(['infer_H_O'])
-    grp._v_attrs.hbond_energy = hbond_energy
+    grp._v_attrs.arguments = np.array(['infer_H_O','backbone_dependent_point'])
 
-    donors    = t.create_group(grp, 'donors')
-    acceptors = t.create_group(grp, 'acceptors')
+    assert len(hbond_energy) == 2
+    grp._v_attrs.protein_hbond_energy = hbond_energy[0]
+    grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
 
-    create_array(donors,    'residue_id', obj=   donor_residues)
-    create_array(acceptors, 'residue_id', obj=acceptor_residues)
-
-    create_array(donors,    'helix_energy_bonus', obj=don_bonus)
-    create_array(acceptors, 'helix_energy_bonus', obj=acc_bonus)
-    return
+    create_array(grp, 'sidechain_id',     np.arange(len(fasta)))
+    create_array(grp, 'sidechain_radius', 4.5*np.ones(len(fasta))) 
+    create_array(grp, 'sidechain_scale',  (1./1.0)*np.ones(len(fasta)))
 
 
 def make_restraint_group(group_num, residues, initial_pos, strength):
@@ -837,16 +821,6 @@ def write_contact_energies(parser, fasta, contact_table):
     create_array(g, 'scale',      obj=scale)
     create_array(g, 'energy',     obj=energy)
 
-
-def write_sidechain_potential(fasta, library):
-    g = t.create_group(t.root.input.potential, 'sidechain')
-    g._v_attrs.arguments = np.array(['affine_alignment'])
-    t.create_external_link(g, 'sidechain_data', os.path.abspath(library)+':/params')
-    create_array(g, 'restype', map(str,fasta))
-
-    # quick check to ensure the external link worked
-    assert t.get_node('/input/potential/sidechain/sidechain_data/LYS').corner_location.shape == (3,)
-
 def write_rama_coord():
     grp = t.create_group(potential, 'rama_coord')
     grp._v_attrs.arguments = np.array(['pos'])
@@ -1011,6 +985,17 @@ def parse_segments(s):
     return ints
 
 
+def parse_float_pair(s):
+    import argparse
+    import re
+
+    args = s.split(',')
+    if len(args) != 2:
+        raise argparse.ArgumentTypeError('must be in the form -2.0,-1.0 or similar (exactly 2 numbers)')
+
+    return (float(args[0]), float(args[1]))
+
+
 def main():
     import argparse
 
@@ -1048,8 +1033,11 @@ def main():
             help='smooth Rama probability library')
     parser.add_argument('--dimer-basin-library', default='',
             help='dimer basin probability library')
-    parser.add_argument('--hbond-energy', default=0., type=float,
-            help='energy for forming a hydrogen bond')
+    parser.add_argument('--hbond-energy', default=(0.,0.), type=parse_float_pair,
+            help='energy for forming a hydrogen bond.  Must be two numbers, where '+
+            'the first is the energy for a protein-protien HBond and the second is '+
+            'the energy of a protein-solvent HBond.  Example "--hbond-energy=-2.15,-1.0".  '+
+            'Default is no HBond energy.')
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
@@ -1165,8 +1153,11 @@ def main():
     write_dist_spring(args)
     write_angle_spring(args)
     write_dihedral_spring()
-    if args.hbond_energy!=0.: 
-        write_count_hbond(fasta_seq, args.hbond_energy, args.helix_energy_perturbation, args.hbond_exclude_residues)
+
+    if any(x!=0. for x in args.hbond_energy): 
+        require_backbone_point = True
+        write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
+        write_count_hbond(fasta_seq, args.hbond_energy)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):

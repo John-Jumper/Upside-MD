@@ -4,8 +4,8 @@
 #include <math.h>
 #include "md_export.h"
 #include <algorithm>
+#include "state_logger.h"
 
-#include "random.h"
 using namespace h5;
 using namespace std;
 
@@ -40,36 +40,6 @@ hat_deriv(
     col1 = make_float3(s*    -v_hat.x*v_hat.y , s*(1.f-v_hat.y*v_hat.y), s*    -v_hat.z*v_hat.y );
     col2 = make_float3(s*    -v_hat.x*v_hat.z , s*    -v_hat.y*v_hat.z , s*(1.f-v_hat.z*v_hat.z));
 }
-
-#define radial_cutoff2 (3.5f*3.5f)
-// angular cutoff at 90 degrees
-#define angular_cutoff (0.f)    
-
-float2 hbond_radial_potential(float input) 
-{
-    const float outer_barrier    = 2.5f;
-    const float inner_barrier    = 1.4f;   // barrier to prevent H-O overlap
-    const float inv_outer_width  = 1.f/0.125f;
-    const float inv_inner_width  = 1.f/0.10f;
-
-    float2 outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
-    float2 inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
-
-    return make_float2( outer_sigmoid.x * inner_sigmoid.x,
-            - inv_outer_width * outer_sigmoid.y * inner_sigmoid.x
-            + inv_inner_width * inner_sigmoid.y * outer_sigmoid.x);
-}
-
-
-float2 hbond_angular_potential(float dotp) 
-{
-    const float wall_dp = 0.682f;  // half-height is at 47 degrees
-    const float inv_dp_width = 1.f/0.05f;
-
-    float2 v = sigmoid((dotp-wall_dp)*inv_dp_width);
-    return make_float2(v.x, inv_dp_width*v.y);
-}
-
 
 template <typename MutableCoordT, typename CoordT>
 void infer_x_body(
@@ -125,7 +95,6 @@ void infer_x_body(
     hbond_pos.v[5] = -disp.z;
 }
 
-}
 
 void infer_HN_OC_pos_and_dir(
         const SysArray   HN_OC,
@@ -133,7 +102,7 @@ void infer_HN_OC_pos_and_dir(
         const VirtualParams* params,
         int n_term, int n_system)
 {
-#pragma omp parallel for
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<6> hbond_pos(HN_OC, ns, nt);
@@ -148,94 +117,6 @@ void infer_HN_OC_pos_and_dir(
             curr_c.flush();
             next_c.flush();
         }
-    }
-}
-
-
-
-namespace {
-float hbond_score(
-        float  H[3], float  O[3], float  rHN[3], float  rOC[3],
-        float dH[3], float dO[3], float drHN[3], float drOC[3],
-        float score_multiplier)
-{
-    float HO[3] = {H[0]-O[0], H[1]-O[1], H[2]-O[2]};
-    const float eps = 1e-6;  // a bit of paranoia to avoid division by zero later
-    float magHO2 = HO[0]*HO[0] + HO[1]*HO[1] + HO[2]*HO[2] + eps;
-
-    float invHOmag = rsqrtf(magHO2);
-    float rHO[3] = {HO[0]*invHOmag, HO[1]*invHOmag, HO[2]*invHOmag};
-
-    float dotHOC =  rHO[0]*rOC[0] + rHO[1]*rOC[1] + rHO[2]*rOC[2];
-    float dotOHN = -rHO[0]*rHN[0] - rHO[1]*rHN[1] - rHO[2]*rHN[2];
-
-    if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) return 0.f;
-
-    float2 radial   = score_multiplier * hbond_radial_potential(sqrtf(magHO2));  // x has val, y has deriv
-    float2 angular1 =                    hbond_angular_potential(dotHOC);
-    float2 angular2 =                    hbond_angular_potential(dotOHN);
-
-    float val =  radial.x * angular1.x * angular2.x;
-    float c0  =  radial.y * angular1.x * angular2.x;
-    float c1  =  radial.x * angular1.y * angular2.x;
-    float c2  = -radial.x * angular1.x * angular2.y;
-
-    drOC[0] += c1*rHO[0]; drHN[0] += c2*rHO[0];
-    drOC[1] += c1*rHO[1]; drHN[1] += c2*rHO[1];
-    drOC[2] += c1*rHO[2]; drHN[2] += c2*rHO[2];
-
-    float dHO[3] = {
-        c0*rHO[0] + (c1*invHOmag)*(rOC[0]-dotHOC*rHO[0]) + (c2*invHOmag)*(rHN[0]+dotOHN*rHO[0]),
-        c0*rHO[1] + (c1*invHOmag)*(rOC[1]-dotHOC*rHO[1]) + (c2*invHOmag)*(rHN[1]+dotOHN*rHO[1]),
-        c0*rHO[2] + (c1*invHOmag)*(rOC[2]-dotHOC*rHO[2]) + (c2*invHOmag)*(rHN[2]+dotOHN*rHO[2])};
-
-    dH[0] += dHO[0]; dO[0] -= dHO[0];
-    dH[1] += dHO[1]; dO[1] -= dHO[1];
-    dH[2] += dHO[2]; dO[2] -= dHO[2];
-
-    return val;
-}
-}
-
-
-void count_hbond(
-        float* potential,
-        const CoordArray virtual_pos,
-        int n_donor,    const VirtualHBondParams * restrict donor_params,
-        int n_acceptor, const VirtualHBondParams * restrict acceptor_params,
-        const float hbond_energy, int n_system)
-{
-#pragma omp parallel for
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        vector<Coord<6>> donors;    donors   .reserve(n_donor);
-        vector<Coord<6>> acceptors; acceptors.reserve(n_acceptor);
-
-        for(int nd=0; nd<n_donor; ++nd) 
-            donors   .emplace_back(virtual_pos, ns, donor_params   [nd].id);
-
-        for(int na=0; na<n_acceptor; ++na)
-            acceptors.emplace_back(virtual_pos, ns, acceptor_params[na].id);
-
-        for(int nd=0; nd<n_donor; ++nd) {
-            for(int na=0; na<n_acceptor; ++na) {
-                if(mag2(donors[nd].f3()-acceptors[na].f3()) < radial_cutoff2) {
-                    int res_disp = donor_params[nd].residue_id - acceptor_params[na].residue_id;
-                    if(abs(res_disp)<2) continue;
-
-                    const float energy = hbond_energy + (res_disp==4) * (donor_params[nd].helix_energy_bonus +
-                            acceptor_params[na].helix_energy_bonus);
-
-                    Coord<6> &H = donors[nd];
-                    Coord<6> &O = acceptors[na];
-                    float hb = hbond_score(H.v, O.v, H.v+3, O.v+3, H.d[0], O.d[0], H.d[0]+3, O.d[0]+3, energy);
-                    if(potential) potential[ns] += hb;
-                }
-            }
-        }
-
-        for(auto& d: donors)    for(int i=0; i<6; ++i) d.flush();
-        for(auto& a: acceptors) for(int i=0; i<6; ++i) a.flush();
     }
 }
 
@@ -269,6 +150,19 @@ struct Infer_H_O : public CoordNode
 
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(6, params[i].atom[j]);
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
+
+        /*
+        if(default_logger) {
+            default_logger->add_logger<float>("virtual", {n_system, n_elem, 3}, [&](float* buffer) {
+                    for(int ns=0; ns<n_system; ++ns) {
+                        for(int nv=0; nv<n_virtual; ++nv) {
+                            StaticCoord<6> x(coords().value, ns, nv);
+                            for(int d=0; d<3; ++d) buffer[ns*n_elem*3 + nv*3 + d] = x.v[d];
+                        }
+                    }
+                });
+        }
+        */
     }
 
     virtual void compute_value(ComputeMode mode) {
@@ -291,68 +185,360 @@ struct Infer_H_O : public CoordNode
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term));
     }
 };
+static RegisterNodeType<Infer_H_O,1>  infer_node("infer_H_O");
+
+
+struct VirtualHBondParams {
+    CoordPair id;
+    unsigned short residue_id;
+};
+
+
+#define radial_cutoff2 (3.5f*3.5f)
+// angular cutoff at 90 degrees
+#define angular_cutoff (0.f)    
+
+float2 hbond_radial_potential(float input) 
+{
+    const float outer_barrier    = 2.5f;
+    const float inner_barrier    = 1.4f;   // barrier to prevent H-O overlap
+    const float inv_outer_width  = 1.f/0.125f;
+    const float inv_inner_width  = 1.f/0.10f;
+
+    float2 outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
+    float2 inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
+
+    return make_float2( outer_sigmoid.x * inner_sigmoid.x,
+            - inv_outer_width * outer_sigmoid.y * inner_sigmoid.x
+            + inv_inner_width * inner_sigmoid.y * outer_sigmoid.x);
+}
+
+
+float2 hbond_angular_potential(float dotp) 
+{
+    const float wall_dp = 0.682f;  // half-height is at 47 degrees
+    const float inv_dp_width = 1.f/0.05f;
+
+    float2 v = sigmoid((dotp-wall_dp)*inv_dp_width);
+    return make_float2(v.x, inv_dp_width*v.y);
+}
+
+
+
+
+float hbond_score(
+        float3   H, float3   O, float3   rHN, float3   rOC,
+        float3& dH, float3& dO, float3& drHN, float3& drOC)
+{
+    float3 HO = H-O;
+    
+    float magHO2 = mag2(HO) + 1e-6; // a bit of paranoia to avoid division by zero later
+    float invHOmag = rsqrtf(magHO2);
+    float magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
+
+    float3 rHO = HO*invHOmag;
+
+    float dotHOC =  dot(rHO,rOC);
+    float dotOHN = -dot(rHO,rHN);
+
+    if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) return 0.f;
+
+    float2 radial   = hbond_radial_potential (magHO );  // x has val, y has deriv
+    float2 angular1 = hbond_angular_potential(dotHOC);
+    float2 angular2 = hbond_angular_potential(dotOHN);
+
+    float val =  radial.x * angular1.x * angular2.x;
+    float c0  =  radial.y * angular1.x * angular2.x;
+    float c1  =  radial.x * angular1.y * angular2.x;
+    float c2  = -radial.x * angular1.x * angular2.y;
+
+    drOC = c1*rHO;
+    drHN = c2*rHO;
+
+    dH = c0*rHO + (c1*invHOmag)*(rOC-dotHOC*rHO) + (c2*invHOmag)*(rHN+dotOHN*rHO);
+    dO = -dH;
+
+    return val;
+}
+
+// displacement is sc-H
+inline float coverage_score(
+        float3 displace, float3 rHN, float3& d_displace, float3& drHN, float radius, float scale)
+{
+    const float cover_angular_cutoff = 0.174f;  // 80 degrees, rather arbitrary
+    const float cover_angular_scale  = 2.865f;  // 20 degrees-ish, rather arbitrary
+
+    float  dist2 = mag2(displace);
+    float  inv_dist = rsqrtf(dist2);
+    float  dist = dist2*inv_dist;
+    float3 displace_unitvec = inv_dist*displace;
+    float  cos_coverage_angle = dot(rHN,displace_unitvec);
+
+    float2 radial_cover  = compact_sigmoid(dist-radius, scale);
+    float2 angular_cover = compact_sigmoid(cover_angular_cutoff-cos_coverage_angle, cover_angular_scale);
+
+    float3 col0, col1, col2;
+    hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
+    float3 deriv_dir = make_float3(dot(col0,rHN), dot(col1,rHN), dot(col2,rHN));
+
+    d_displace = (angular_cover.x*radial_cover.y) * displace_unitvec + (-radial_cover.x*angular_cover.y) * deriv_dir;
+    drHN = (-radial_cover.x*angular_cover.y) * displace_unitvec;
+
+    return radial_cover.x * angular_cover.x;
+}
+
+
+struct SCVirtualCoverageDeriv {
+    int sc_index;
+    int virtual_index;
+
+    float3 d_sc;
+    float3 d_rHN; // or d_rOC depending on donor or acceptor
+    // float3 d_virtual;  // this deriv is the opposite of d_sc
+};
+
+
+struct HBondScoreDeriv {
+    int donor_index, acceptor_index;
+    float3 dH, drHN, dO, drOC;
+};
+
+struct HBondSidechainParams {
+    CoordPair id;
+    float radius, scale, cutoff2;
+};
+   
+
+
+void count_hbond(
+        float* potential,
+        SysArray virtual_scores,
+        const CoordArray virtual_pos,
+        int n_donor,    int n_acceptor,
+        const CoordPair* virtual_pair,
+        const CoordArray sidechain_pos,
+        int n_sidechain, const HBondSidechainParams * restrict sidechains,
+        int n_system,
+        float E_protein,
+        float E_protein_solvent)
+{
+    #pragma omp parallel for
+    for(int ns=0; ns<n_system; ++ns) {
+        int n_virtual = n_donor + n_acceptor;
+        float* vs = virtual_scores.x + virtual_scores.offset*ns;
+        for(int i=0; i<2*n_virtual; ++i) vs[i] = 0.f;
+        if(potential) potential[ns] = 0.f;
+
+        vector<float3> virtual_site(n_donor+n_acceptor);
+        vector<float3> virtual_dir (n_donor+n_acceptor);
+
+        for(int nv=0; nv<n_virtual; ++nv) {
+            StaticCoord<6> x(virtual_pos.value, ns, nv);
+            virtual_site[nv] = make_float3(x.v[0],x.v[1],x.v[2]);
+            virtual_dir [nv] = make_float3(x.v[3],x.v[4],x.v[5]);
+        }
+
+        // Compute coverage and its derivative
+        vector<SCVirtualCoverageDeriv> coverage_deriv;
+        for(int n_sc=0; n_sc<n_sidechain; ++n_sc) {
+            HBondSidechainParams p = sidechains[n_sc];
+            float3 sc_pos = StaticCoord<3>(sidechain_pos.value, ns, p.id.index).f3();
+
+            for(int nv=0; nv<n_virtual; ++nv) {
+                float3 displace  = sc_pos-virtual_site[nv];
+                float dist2 = mag2(displace);
+
+                if(dist2<p.cutoff2) {
+                    coverage_deriv.emplace_back();
+                    auto& d = coverage_deriv.back();
+                    d.sc_index = n_sc;
+                    d.virtual_index = nv;
+
+                    vs[2*nv+1] += coverage_score(displace, virtual_dir[nv], d.d_sc, d.d_rHN, p.radius, p.scale);
+                }
+            }
+        }
+
+        // Compute protein hbonding score and its derivative
+        vector<HBondScoreDeriv> hbond_deriv;
+        for(int nd=0; nd<n_donor; ++nd) {
+            for(int na=n_donor; na<n_donor+n_acceptor; ++na) {
+                if(mag2(virtual_site[nd] - virtual_site[na])<radial_cutoff2) {
+                    hbond_deriv.emplace_back();
+                    auto& d = hbond_deriv.back();
+                    d.donor_index = nd;
+                    d.acceptor_index = na;
+
+                    float hb = hbond_score(virtual_site[nd], virtual_site[na], virtual_dir[nd], virtual_dir[na],
+                                           d.dH,             d.dO,             d.drHN,          d.drOC);
+                    float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
+                    vs[2*nd+0] += hb_log;
+                    vs[2*na+0] += hb_log;
+
+                    float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
+                    d.dH   *= deriv_prefactor;
+                    d.dO   *= deriv_prefactor;
+                    d.drHN *= deriv_prefactor;
+                    d.drOC *= deriv_prefactor;
+                }
+            }
+        }
+
+        // Compute probabilities of P and S states
+        struct PSDeriv {float d_hbond,d_burial;};
+        vector<PSDeriv> ps_deriv(n_virtual);
+        for(int nv=0; nv<n_virtual; ++nv) {
+            float zp = expf(-vs[2*nv+0]);  // protein
+            float zs = expf(-vs[2*nv+1]);  // solvent
+            float2 protein_hbond_prob = make_float2(1.f-zp, zp);
+            float2 solvation_fraction = make_float2(zs,-zs);  // we summed log-coverage to get here
+
+            float P = protein_hbond_prob.x;
+            float S = (1.f-P) * solvation_fraction.x;
+            vs[2*nv+0] = P;
+            vs[2*nv+1] = S;
+
+            if(potential) potential[ns] += P*E_protein + S*E_protein_solvent;  // FIXME add z-dependence
+
+            ps_deriv[nv].d_hbond  = protein_hbond_prob.y*(E_protein-solvation_fraction.x*E_protein_solvent);
+            ps_deriv[nv].d_burial = (1.f-P)*solvation_fraction.y*E_protein_solvent;
+        }
+
+        // now I need to push those derivatives back and accumulate
+        vector<MutableCoord<6>> virtual_deriv; virtual_deriv.reserve(n_virtual);
+        vector<MutableCoord<3>> sc_deriv;      sc_deriv     .reserve(n_sidechain);
+        for(int nv=0; nv<n_virtual;     ++nv) 
+            virtual_deriv.emplace_back(virtual_pos.deriv, ns, virtual_pair[nv].slot, MutableCoord<6>::Zero);
+        for(int nsc=0; nsc<n_sidechain; ++nsc) 
+            sc_deriv.emplace_back(sidechain_pos.deriv, ns, sidechains[nsc].id.slot, MutableCoord<3>::Zero);
+
+        // Push coverage derivatives
+        for(auto& p: coverage_deriv) {
+            float3 d = ps_deriv[p.virtual_index].d_burial * p.d_sc;
+            float3 d_rHN = ps_deriv[p.virtual_index].d_burial * p.d_rHN;
+
+            sc_deriv[p.sc_index] += d;
+            virtual_deriv[p.virtual_index] += -d;
+            virtual_deriv[p.virtual_index].v[3] += d_rHN.x;
+            virtual_deriv[p.virtual_index].v[4] += d_rHN.y;
+            virtual_deriv[p.virtual_index].v[5] += d_rHN.z;
+        }
+
+        // Push protein HBond derivatives
+        for(auto& p: hbond_deriv) {
+            float prefactor = ps_deriv[p.donor_index].d_hbond + ps_deriv[p.acceptor_index].d_hbond;
+            float* d_donor    = virtual_deriv[p.donor_index   ].v;
+            float* d_acceptor = virtual_deriv[p.acceptor_index].v;
+
+            d_donor   [0] += prefactor * p.dH  .x;
+            d_donor   [1] += prefactor * p.dH  .y;
+            d_donor   [2] += prefactor * p.dH  .z;
+            d_donor   [3] += prefactor * p.drHN.x;
+            d_donor   [4] += prefactor * p.drHN.y;
+            d_donor   [5] += prefactor * p.drHN.z;
+
+            d_acceptor[0] += prefactor * p.dO  .x;
+            d_acceptor[1] += prefactor * p.dO  .y;
+            d_acceptor[2] += prefactor * p.dO  .z;
+            d_acceptor[3] += prefactor * p.drOC.x;
+            d_acceptor[4] += prefactor * p.drOC.y;
+            d_acceptor[5] += prefactor * p.drOC.z;
+        }
+
+        // Write the derivatives to memory
+        for(auto& d: virtual_deriv) d.flush();
+        for(auto& d: sc_deriv     ) d.flush();
+    }
+}
+
 
 
 struct HBondEnergy : public HBondCounter
 {
-    int n_donor, n_acceptor;
-    CoordNode& infer;
-    vector<VirtualHBondParams> don_params;
-    vector<VirtualHBondParams> acc_params;
-    float hbond_energy;
+    Infer_H_O& infer;
+    CoordNode& sidechains;
 
-    HBondEnergy(hid_t grp, CoordNode& infer_):
+    int n_donor;
+    int n_acceptor;
+    int n_sidechain;
+    vector<float> virtual_score;
+    vector<CoordPair> virtual_pair;
+    vector<HBondSidechainParams> sidechain_params;
+
+    float E_protein;
+    float E_protein_solvent;
+
+    HBondEnergy(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
         HBondCounter(infer_.n_system),
-        n_donor   (get_dset_size(1, grp, "donors/residue_id")[0]), 
-        n_acceptor(get_dset_size(1, grp, "acceptors/residue_id")[0]),
-        infer(infer_), 
-        don_params(n_donor), acc_params(n_acceptor), 
-        hbond_energy(        read_attribute<float>(grp, ".", "hbond_energy"))
+        infer(dynamic_cast<Infer_H_O&>(infer_)), 
+        sidechains(sidechains_),
+        n_donor    (infer.n_donor),
+        n_acceptor (infer.n_acceptor),
+        n_sidechain(sidechains.n_elem),
+        virtual_score(2*(n_donor+n_acceptor)*n_system),
+        virtual_pair (n_donor+n_acceptor),
+        sidechain_params(sidechains.n_elem),
+
+        E_protein(        read_attribute<float>(grp, ".", "protein_hbond_energy")),
+        E_protein_solvent(read_attribute<float>(grp, ".", "solvent_hbond_energy"))
     {
-        check_elem_width(infer, 6);
+        check_elem_width(sidechains, 3);
 
-        auto don = h5_obj(H5Gclose, H5Gopen2(grp, "donors",    H5P_DEFAULT));
-        auto acc = h5_obj(H5Gclose, H5Gopen2(grp, "acceptors", H5P_DEFAULT));
-        
-        check_size(don.get(), "residue_id",     n_donor);
-        check_size(don.get(), "helix_energy_bonus", n_donor);
+        check_size(grp, "sidechain_id",     n_sidechain);
+        check_size(grp, "sidechain_radius", n_sidechain);
+        check_size(grp, "sidechain_scale",  n_sidechain);
 
-        check_size(acc.get(), "residue_id",     n_acceptor);
-        check_size(acc.get(), "helix_energy_bonus", n_acceptor);
+        traverse_dset<1,int>  (grp, "sidechain_id",     [&](int n_sc, int   x) {sidechain_params[n_sc].id.index = x;});
+        traverse_dset<1,float>(grp, "sidechain_radius", [&](int n_sc, float x) {sidechain_params[n_sc].radius = x;});
+        traverse_dset<1,float>(grp, "sidechain_scale",  [&](int n_sc, float x) {sidechain_params[n_sc].scale = x;});
 
-        traverse_dset<1,float>(don.get(),"residue_id",        [&](size_t i, float x){don_params[i].residue_id        =x;});
-        traverse_dset<1,float>(don.get(),"helix_energy_bonus",[&](size_t i, float x){don_params[i].helix_energy_bonus=x;});
+        for(auto &p: sidechain_params) {
+            p.cutoff2 = sqr(p.radius + 1.f/p.scale);
+            sidechains.slot_machine.add_request(1,p.id);
+        }
 
-        traverse_dset<1,float>(acc.get(),"residue_id",        [&](size_t i, float x){acc_params[i].residue_id        =x;});
-        traverse_dset<1,float>(acc.get(),"helix_energy_bonus",[&](size_t i, float x){acc_params[i].helix_energy_bonus=x;});
+        for(int i=0; i<n_donor+n_acceptor; ++i) {
+            virtual_pair[i].index = i;
+            infer.slot_machine.add_request(1, virtual_pair[i]);
+        }
 
-        for(int nd=0; nd<n_donor;    ++nd) don_params[nd].id.index = nd;
-        for(int na=0; na<n_acceptor; ++na) acc_params[na].id.index = na + n_donor;
-
-        for(auto &p: don_params) infer.slot_machine.add_request(1, p.id);
-        for(auto &p: acc_params) infer.slot_machine.add_request(1, p.id);
+        /*
+        if(default_logger) {
+            default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
+                    copy_n(virtual_score.data(), n_system*2*(n_donor+n_acceptor), buffer);});
+        }
+        */
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_energy"));
-        count_hbond(potential.data(),
-                infer.coords(), 
-                n_donor, don_params.data(), n_acceptor, acc_params.data(),
-                hbond_energy, infer.n_system);
 
-        n_hbond = 0.f;
-        for(float e: potential) n_hbond += e;
-        n_hbond *= 1.f/hbond_energy;
+        count_hbond(
+                potential.data(),
+                SysArray(virtual_score.data(), 2*(n_donor+n_acceptor)),
+                infer.coords(),
+                n_donor,    n_acceptor,
+                virtual_pair.data(),
+                sidechains.coords(),
+                n_sidechain, sidechain_params.data(),
+                n_system,
+                E_protein,
+                E_protein_solvent);
+
+        n_hbond = -2.f; // FIXME handle this later / more generally report P, S, and N values
     }
 
     virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
-        for(auto &p: don_params) coord_pairs.back().push_back(p.id);
-        for(auto &p: acc_params) coord_pairs.back().push_back(p.id);
+        vector<vector<CoordPair>> virtual_coord_pairs(1);
+        vector<vector<CoordPair>> sidechain_coord_pairs(1);
+        virtual_coord_pairs.back() = virtual_pair;
+        for(auto &p: sidechain_params) sidechain_coord_pairs.back().push_back(p.id);
         
-        return compute_relative_deviation_for_node<6>(*this, infer, coord_pairs);
+        double virtual_dev   = compute_relative_deviation_for_node<6>(*this, infer, virtual_coord_pairs);
+        double sidechain_dev = compute_relative_deviation_for_node<3>(*this, sidechains, sidechain_coord_pairs);
+        return 0.5 * (virtual_dev+sidechain_dev);
     }
 };
 
-static RegisterNodeType<Infer_H_O,1>  _16("infer_H_O");
-static RegisterNodeType<HBondEnergy,1>_17("hbond_energy");
+
+static RegisterNodeType<HBondEnergy,2> hbond_node("hbond_energy");

@@ -3,6 +3,7 @@
 #include "affine.h"
 #include <vector>
 #include "spline.h"
+#include "state_logger.h"
 
 using namespace std;
 using namespace h5;
@@ -20,11 +21,12 @@ void backbone_dependent_point(
         CoordArray alignment,
         BackboneSCParam* params,
         const LayeredPeriodicSpline2D<3> &map,
-        int n_term, int n_system) {
+        int n_term, int n_system) 
+{
     const float scale = map.nx * (0.5f/M_PI_F - 1e-7f);
     const float shift = M_PI_F;
 
-#pragma omp parallel for
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<3> com_rotated(output, ns, nt);
@@ -98,6 +100,13 @@ struct BackboneDependentPoint : public CoordNode
                 [&](size_t rt, size_t nb1, size_t nb2, size_t d, float x) {
                 backbone_point_map_data.at(((rt*bbm.nx + nb1)*bbm.ny + nb2)*3 + d) = x;});
         bbm.fit_spline(backbone_point_map_data.data());
+
+        /*
+        if(default_logger) {
+            default_logger->add_logger<float>("com", {n_system, n_elem, 3}, [&](float* buffer) {
+                    copy_sys_array_to_buffer(coords().value, n_system, n_elem*3, buffer);});
+        }
+        */
 
         for(size_t i=0; i<params.size(); ++i) rama     .slot_machine.add_request(3, params[i].rama_residue);
         for(size_t i=0; i<params.size(); ++i) alignment.slot_machine.add_request(3, params[i].alignment_residue);
