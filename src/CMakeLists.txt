@@ -68,6 +68,7 @@ python_executable(support extract_vtf.py)
 python_executable(support PDB_to_initial_structure.py)
 python_executable(support P_of_r.py)
 python_executable(support attr_overview.py)
+python_executable(support ugly_hack_break_chain.py)
 
 add_executable(rotamer_sidechain generate_from_rotamer.cpp test_rotamer.cpp)
 target_link_libraries(rotamer_sidechain stdc++ m ${HDF5_LIBRARIES})
