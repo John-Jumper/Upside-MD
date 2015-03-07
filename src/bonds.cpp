@@ -25,7 +25,7 @@ struct DistSpringParams {
 };
 
 struct ZFlatBottomParams {
-    CoordPair atom;
+    CoordPair id;
     float     z0;
     float     radius;
     float     spring_constant;
@@ -293,6 +293,80 @@ struct DistSpring : public PotentialNode
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
 
 
+struct CavityRadialParams {
+    CoordPair id;
+    float     radius;
+    float     spring_constant;
+};
+
+
+void cavity_radial(
+        float* potential,
+        const CoordArray pos,
+        const CavityRadialParams* params,
+        int n_terms, int n_system)
+{
+    for(int ns=0; ns<n_system; ++ns) {
+        if(potential) potential[ns] = 0.f;
+
+        for(int nt=0; nt<n_terms; ++nt) {
+            CavityRadialParams p = params[nt];
+            Coord<3> x(pos, ns, p.id);
+
+            float r2 = mag2(x.f3());
+            if(r2>sqr(p.radius)) {
+                float inv_r = rsqrtf(r2);
+                float r = r2*inv_r;
+                float excess = r-p.radius;
+
+                if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(excess);
+                x.set_deriv((p.spring_constant*excess*inv_r)*x.f3());
+            } else {
+                x.set_deriv(make_float3(0.f,0.f,0.f));
+            }
+            x.flush();
+        }
+    }
+}
+
+struct CavityRadial : public PotentialNode
+{
+    int n_term;
+    CoordNode& pos;
+    vector<CavityRadialParams> params;
+
+    CavityRadial(hid_t hdf_group, CoordNode& pos_):
+        PotentialNode(pos_.n_system),
+        pos(pos_), params(get_dset_size(1, hdf_group, "id")[0] )
+    {
+        n_term = params.size();
+        check_size(hdf_group, "id",              n_term);
+        check_size(hdf_group, "radius",          n_term);
+        check_size(hdf_group, "spring_constant", n_term);
+
+        traverse_dset<1,int  >(hdf_group, "id", [&](size_t nt, int i) {params[nt].id.index=i;});
+        traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
+        traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
+                params[nt].spring_constant = x;});
+
+        for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].id);
+    }
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("cavity_radial"));
+        cavity_radial((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                pos.coords(), params.data(), n_term, pos.n_system);
+    }
+
+    double test_value_deriv_agreement() {
+        vector<vector<CoordPair>> coord_pairs(1);
+        for(auto &p: params) coord_pairs.back().push_back(p.id);
+        return compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
+    }
+};
+static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
+
+
 void z_flat_bottom_spring(
         float* potential,
         const CoordArray pos,
@@ -304,7 +378,7 @@ void z_flat_bottom_spring(
 
         for(int nt=0; nt<n_terms; ++nt) {
             ZFlatBottomParams p = params[nt];
-            Coord<3> atom_pos(pos, ns, p.atom);
+            Coord<3> atom_pos(pos, ns, p.id);
             
             float z = atom_pos.f3().z;
             float3 deriv = make_float3(0.f,0.f,0.f);
@@ -318,6 +392,8 @@ void z_flat_bottom_spring(
         }
     }
 }
+
+
 
 
 struct ZFlatBottom : public PotentialNode
@@ -336,13 +412,13 @@ struct ZFlatBottom : public PotentialNode
         check_size(hdf_group, "radius",          n_term);
         check_size(hdf_group, "spring_constant", n_term);
 
-        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].atom.index=i;});
+        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].id.index=i;});
         traverse_dset<1,float>(hdf_group, "z0", [&](size_t nt, float x) {params[nt].z0 = x;});
         traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
         traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
                 params[nt].spring_constant = x;});
 
-        for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].atom);
+        for(int nt=0; nt<n_term; ++nt) pos.slot_machine.add_request(1, params[nt].id);
     }
 
     virtual void compute_value(ComputeMode mode) {
@@ -352,8 +428,9 @@ struct ZFlatBottom : public PotentialNode
     }
 
     double test_value_deriv_agreement() {
-        return -1.;
-        // return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+        vector<vector<CoordPair>> coord_pairs(1);
+        for(auto &p: params) coord_pairs.back().push_back(p.id);
+        return compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");

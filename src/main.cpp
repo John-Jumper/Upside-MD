@@ -348,8 +348,16 @@ try {
             for(auto &n: engine.nodes) {
                 if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom"))
                     throw string("You have z-centering and a z-dependent potential turned on.  "
-                            "This is not what you want.  Considering --disable-z-recentering "
+                            "This is not what you want.  Consider --disable-z-recentering "
                             "or --disable-recentering.");
+            }
+        }
+
+        if(do_recenter) {
+            for(auto &n: engine.nodes) {
+                if(is_prefix(n.name, "cavity_radial"))
+                    throw string("You have re-centering and a radial potential turned on.  "
+                            "This is not what you want.  Consider --disable-recentering.");
             }
         }
 

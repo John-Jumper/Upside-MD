@@ -49,6 +49,16 @@ def vmag(x):
 def create_array(grp, nm, obj=None):
     return t.create_earray(grp, nm, obj=obj, filters=default_filter)
 
+
+def write_cavity_radial(cavity_radius):
+    g = t.create_group(t.root.input.potential, 'cavity_radial')
+    g._v_attrs.arguments = np.array(['pos'])
+
+    create_array(g, 'id',              np.arange(n_atom))
+    create_array(g, 'radius',          np.ones(n_atom)*cavity_radius)
+    create_array(g, 'spring_constant', np.ones(n_atom)*5.)
+
+
 def write_z_flat_bottom(parser, fasta, z_spring_table):
     fields = [ln.split() for ln in open(z_spring_table,'U')]
     header = 'residue z0 radius spring_constant'
@@ -915,6 +925,8 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     grp.energy._v_attrs.z_max = z[-1]
 
 
+
+
 def parse_segments(s):
     ''' Parse segments of the form 10-30,50-60 '''
     import argparse
@@ -1031,6 +1043,10 @@ def main():
             'Normally, this argument is only turned on when user wants to determine the burial orientation of a given membrane protein ' +
 	    'and the residues with unsatisfied hbonds are awared of (same format as --restraint-group). ' + 
 	    'User must also supply --membrane-potential.')
+    parser.add_argument('--cavity-radius', default=0., type=float,
+            help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
+            'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
+
 
     args = parser.parse_args()
     if args.restraint_group and not (args.initial_structures or args.target_structures):
@@ -1093,6 +1109,9 @@ def main():
 
     if args.dihedral_range:
         write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)
+
+    if args.cavity_radius:
+        write_cavity_radial(args.cavity_radius)
 
     if args.backbone:
         do_alignment = True
