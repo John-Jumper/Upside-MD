@@ -300,12 +300,13 @@ struct CavityRadialParams {
 };
 
 
-void cavity_radial(
+__attribute__ ((noinline)) void cavity_radial(
         float* potential,
         const CoordArray pos,
         const CavityRadialParams* params,
         int n_terms, int n_system)
 {
+    #pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
 
