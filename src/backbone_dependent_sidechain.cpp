@@ -36,22 +36,22 @@ void backbone_dependent_point(
             float v[9];
             map.evaluate_value_and_deriv(v, params[nt].restype,
                     (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
-            float3 dcom_dphi = make_float3(v[0], v[3], v[6]) * scale;
-            float3 dcom_dpsi = make_float3(v[1], v[4], v[7]) * scale;
-            float3 com       = make_float3(v[2], v[5], v[8]);
+            float3 dcom_dphi = make_vec3(v[0], v[3], v[6]) * scale;
+            float3 dcom_dpsi = make_vec3(v[1], v[4], v[7]) * scale;
+            float3 com       = make_vec3(v[2], v[5], v[8]);
 
             // rotate reference derivatives into the body frame
             com_rotated.set_value(body.apply(com));
             float3 dcom_dphi_rotated = body.apply_rotation(dcom_dphi);
             float3 dcom_dpsi_rotated = body.apply_rotation(dcom_dpsi);
 
-            r.d[0][0] = dcom_dphi_rotated.x;  r.d[0][1] = dcom_dpsi_rotated.x;
-            r.d[1][0] = dcom_dphi_rotated.y;  r.d[1][1] = dcom_dpsi_rotated.y;
-            r.d[2][0] = dcom_dphi_rotated.z;  r.d[2][1] = dcom_dpsi_rotated.z;
+            r.d[0][0] = dcom_dphi_rotated.x();  r.d[0][1] = dcom_dpsi_rotated.x();
+            r.d[1][0] = dcom_dphi_rotated.y();  r.d[1][1] = dcom_dpsi_rotated.y();
+            r.d[2][0] = dcom_dphi_rotated.z();  r.d[2][1] = dcom_dpsi_rotated.z();
 
-            body.add_deriv_at_location(0, com_rotated.f3(), make_float3(1.f, 0.f, 0.f));
-            body.add_deriv_at_location(1, com_rotated.f3(), make_float3(0.f, 1.f, 0.f));
-            body.add_deriv_at_location(2, com_rotated.f3(), make_float3(0.f, 0.f, 1.f));
+            body.add_deriv_at_location(0, com_rotated.f3(), make_vec3(1.f, 0.f, 0.f));
+            body.add_deriv_at_location(1, com_rotated.f3(), make_vec3(0.f, 1.f, 0.f));
+            body.add_deriv_at_location(2, com_rotated.f3(), make_vec3(0.f, 0.f, 1.f));
 
             com_rotated.flush();
             body.flush();

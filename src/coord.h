@@ -89,26 +89,26 @@ struct Coord
 
         //! Extract first 3 dimensions of the value as a float3
         float3 f3() const {
-            return make_float3(v[0], v[1], v[2]);
+            return make_vec3(v[0], v[1], v[2]);
         }
 
         //! Extract first 3 dimensions of the idx'th component of the derivative as a float3
         float3 df3(int idx) const {
-            return make_float3(d[idx][0], d[idx][1], d[idx][2]);
+            return make_vec3(d[idx][0], d[idx][1], d[idx][2]);
         }
 
         //! Set the derivative for the 0'th component using a float3
-        void set_deriv(float3 d_) {
-            d[0][0] = d_.x;
-            d[0][1] = d_.y;
-            d[0][2] = d_.z;
+        template <int D>
+        void set_deriv(Vec<D,float> d_) {
+            #pragma unroll
+            for(int j=0; j<D; ++j) d[0][j] = d_[j];
         }
 
         //! Set the derivative for the i'th component using a float3
-        void set_deriv(int i, float3 d_) {
-            d[i][0] = d_.x;
-            d[i][1] = d_.y;
-            d[i][2] = d_.z;
+        template <int D>
+        void set_deriv(int i, Vec<D,float> d_) {
+            #pragma unroll
+            for(int j=0; j<D; ++j) d[i][j] = d_[j];
         }
 
         //! Write the derivative to the derivative array in the CoordArray
@@ -145,20 +145,20 @@ struct TempCoord
     TempCoord() { for(int nd=0; nd<N_DIM; ++nd) v[nd] = 0.f; }
 
     //! Extract first 3 dimensions of the value as a float3
-    float3 f3() const { return make_float3(v[0], v[1], v[2]); }
+    float3 f3() const { return make_vec3(v[0], v[1], v[2]); }
 
     //! Set first 3 dimensions of the value as a float3
     void set_value(float3 val) {
-        v[0] = val.x;
-        v[1] = val.y;
-        v[2] = val.z;
+        v[0] = val.x();
+        v[1] = val.y();
+        v[2] = val.z();
     }
 
     //! Add float3 to first 3 dimensions of coordinate
     TempCoord<N_DIM>& operator+=(const float3 &o) {
-        v[0] += o.x;
-        v[1] += o.y;
-        v[2] += o.z;
+        v[0] += o.x();
+        v[1] += o.y();
+        v[2] += o.z();
         return *this;
     }
 };
@@ -182,7 +182,7 @@ struct StaticCoord
 
     //! Extract first 3 dimensions of the value as a float3
     float3 f3() const {
-        return make_float3(v[0], v[1], v[2]);
+        return make_vec3(v[0], v[1], v[2]);
     }
 
     //! Add another StaticCoord's value to this object's value
@@ -217,21 +217,21 @@ struct MutableCoord
 
         //! Extract first 3 dimensions of the value as a float3
         float3 f3() const {
-            return make_float3(v[0], v[1], v[2]);
+            return make_vec3(v[0], v[1], v[2]);
         }
 
         //! Set first 3 dimensions of the value as a float3
         void set_value(float3 val) {
-            v[0] = val.x;
-            v[1] = val.y;
-            v[2] = val.z;
+            v[0] = val.x();
+            v[1] = val.y();
+            v[2] = val.z();
         }
 
         //! Add float3 to first 3 dimensions of coordinate
         MutableCoord<N_DIM>& operator+=(const float3 &o) {
-            v[0] += o.x;
-            v[1] += o.y;
-            v[2] += o.z;
+            v[0] += o.x();
+            v[1] += o.y();
+            v[2] += o.z();
             return *this;
         }
 

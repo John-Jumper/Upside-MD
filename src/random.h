@@ -46,7 +46,7 @@ struct RandomGenerator
 
         float4 uniform_open_closed() {
             threefry4x32_ctr_t bits = random_bits();
-            return make_float4(
+            return make_vec4(
                     r123::u01<float>(bits.v[0]),
                     r123::u01<float>(bits.v[1]),
                     r123::u01<float>(bits.v[2]),
@@ -57,13 +57,13 @@ struct RandomGenerator
             threefry4x32_ctr_t bits = random_bits();
             r123::float2 n1 = r123::boxmuller(bits.v[0], bits.v[1]);
             r123::float2 n2 = r123::boxmuller(bits.v[2], bits.v[3]);
-            return make_float4(n1.x, n1.y, n2.x, n2.y);
+            return make_vec4(n1.x, n1.y, n2.x, n2.y);
         }
 
         float3 normal3 () {
             // just discard the 4th random number
             float4 ret = normal();
-            return make_float3(ret.x, ret.y, ret.z);
+            return make_vec3(ret.x(), ret.y(), ret.z());
         };
 };
 

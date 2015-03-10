@@ -28,7 +28,7 @@ nonbonded_kernel_or_deriv_over_r(float r_mag2)
     const float sharpness = 1.f/(wall*width);  // ensure character
 
     const float2 V = compact_sigmoid(r_mag2-wall_squared, sharpness);
-    return return_deriv ? 2.f*V.y : V.x;
+    return return_deriv ? 2.f*V.y() : V.x();
 }
 
 // template <bool return_deriv>
@@ -155,7 +155,7 @@ struct BackbonePairs : public PotentialNode
         traverse_dset<1,int>(grp, "n_atom", [&](size_t nr, int x) {ref_pos[nr].n_atom = x;});
 
         traverse_dset<3,float>(grp, "ref_pos", [&](size_t nr, size_t na, size_t d, float x) {
-                component(ref_pos[nr].pos[na], d) = x;});
+                ref_pos[nr].pos[na][d] = x;});
 
         for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
     }

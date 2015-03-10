@@ -74,9 +74,9 @@ void radial_pairs(
                     float  deriv_over_r = -2.f*at.scale * at.energy * z * (w*w);
                     float3 deriv = deriv_over_r * disp;
 
-                    r1.coord.d[0][0] += deriv.x; r2.coord.d[0][0] += -deriv.x; 
-                    r1.coord.d[0][1] += deriv.y; r2.coord.d[0][1] += -deriv.y; 
-                    r1.coord.d[0][2] += deriv.z; r2.coord.d[0][2] += -deriv.z; 
+                    r1.coord.d[0][0] += deriv.x(); r2.coord.d[0][0] += -deriv.x(); 
+                    r1.coord.d[0][1] += deriv.y(); r2.coord.d[0][1] += -deriv.y(); 
+                    r1.coord.d[0][2] += deriv.z(); r2.coord.d[0][2] += -deriv.z(); 
                 }
             }
         }
@@ -215,7 +215,7 @@ struct ContactEnergy : public PotentialNode
 
         traverse_dset<2,int  >(grp, "id",         [&](size_t nc, size_t i, int x) {params[nc].loc[i].index = x;});
         traverse_dset<3,float>(grp, "sc_ref_pos", [&](size_t nc, size_t i, size_t d, float x) {
-                component(params[nc].sc_ref_pos[i], d) = x;});
+                params[nc].sc_ref_pos[i][d] = x;});
 
         traverse_dset<1,float>(grp, "r0",     [&](size_t nc, float x) {params[nc].r0     = x;});
         traverse_dset<1,float>(grp, "scale",  [&](size_t nc, float x) {params[nc].scale  = x;});

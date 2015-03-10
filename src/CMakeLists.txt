@@ -34,7 +34,6 @@ add_executable (upside
     bonds.cpp 
     hbond.cpp 
     backbone_dependent_sidechain.cpp
-    hmm.cpp 
     eig.cpp 
     dihedral_range.cpp
     membrane_potential.cpp

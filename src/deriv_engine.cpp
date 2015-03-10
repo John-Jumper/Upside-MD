@@ -306,8 +306,8 @@ vector<float> central_difference_deriviative(
                 const float* o = &output[no+3];
                 float* ome = &output_minus_eps[no+3];
 
-                float4 qo   = make_float4(o  [0],o  [1],o  [2],o  [3]);
-                float4 qome = make_float4(ome[0],ome[1],ome[2],ome[3]);
+                float4 qo   = make_vec4(o  [0],o  [1],o  [2],o  [3]);
+                float4 qome = make_vec4(ome[0],ome[1],ome[2],ome[3]);
 
                 // resolve whether q or -q is closer
                 if(mag2(qo+qome) < mag2(qo-qome)) for(int d=0; d<4; ++d) ome[d] *= -1.f;

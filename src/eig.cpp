@@ -66,7 +66,7 @@ void givens(float *c, float *s, float a, float b)
     if(b==0.f) {
         *c=1.f; *s=0.f;
     } else {
-        float inv_r = rsqrtf(a*a+b*b);
+        float inv_r = rsqrt(a*a+b*b);
         *c =  a*inv_r;
         *s = -b*inv_r;
     }

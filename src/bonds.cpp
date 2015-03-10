@@ -48,7 +48,7 @@ void pos_spring(
         for(int nt=0; nt<n_terms; ++nt) {
             PosSpringParams p = params[nt];
             Coord<3> x1(pos, ns, p.atom[0]);
-            float3 disp = x1.f3() - make_float3(p.x,p.y,p.z);
+            float3 disp = x1.f3() - make_vec3(p.x,p.y,p.z);
             if(potential) potential[ns] += 0.5f * p.spring_constant * mag2(disp);
             x1.set_deriv(p.spring_constant * disp);
             x1.flush();
@@ -172,14 +172,14 @@ void rama_coord(
                             d1, d2, d3, d4);
                 } else {
                     rama_pos.v[0] = -1.3963f;  // -80 degrees
-                    d1 = d2 = d3 = d4 = make_float3(0.f,0.f,0.f);
+                    d1 = d2 = d3 = d4 = make_vec3(0.f,0.f,0.f);
                 }
 
                 prev_C.set_deriv(0,d1);
                 N     .set_deriv(0,d2);
                 CA    .set_deriv(0,d3);
                 C     .set_deriv(0,d4);
-                next_N.set_deriv(0,make_float3(0.f,0.f,0.f));
+                next_N.set_deriv(0,make_vec3(0.f,0.f,0.f));
             }
 
             {
@@ -190,10 +190,10 @@ void rama_coord(
                             d2, d3, d4, d5);
                 } else {
                     rama_pos.v[1] = -1.3963f;  // -80 degrees
-                    d2 = d3 = d4 = d5 = make_float3(0.f,0.f,0.f);
+                    d2 = d3 = d4 = d5 = make_vec3(0.f,0.f,0.f);
                 }
 
-                prev_C.set_deriv(1,make_float3(0.f,0.f,0.f));
+                prev_C.set_deriv(1,make_vec3(0.f,0.f,0.f));
                 N     .set_deriv(1,d2);
                 CA    .set_deriv(1,d3);
                 C     .set_deriv(1,d4);
@@ -363,14 +363,14 @@ __attribute__ ((noinline)) void cavity_radial(
 
             float r2 = mag2(x.f3());
             if(r2>sqr(p.radius)) {
-                float inv_r = rsqrtf(r2);
+                float inv_r = rsqrt(r2);
                 float r = r2*inv_r;
                 float excess = r-p.radius;
 
                 if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(excess);
                 x.set_deriv((p.spring_constant*excess*inv_r)*x.f3());
             } else {
-                x.set_deriv(make_float3(0.f,0.f,0.f));
+                x.set_deriv(make_vec3(0.f,0.f,0.f));
             }
             x.flush();
         }
@@ -428,11 +428,11 @@ void z_flat_bottom_spring(
             ZFlatBottomParams p = params[nt];
             Coord<3> atom_pos(pos, ns, p.id);
             
-            float z = atom_pos.f3().z;
-            float3 deriv = make_float3(0.f,0.f,0.f);
+            float z = atom_pos.f3().z();
+            float3 deriv = make_vec3(0.f,0.f,0.f);
             float excess = z-p.z0 >  p.radius ? z-p.z0 - p.radius
                 :         (z-p.z0 < -p.radius ? z-p.z0 + p.radius : 0.f);
-            deriv.z = p.spring_constant * excess;
+            deriv.z() = p.spring_constant * excess;
             atom_pos.set_deriv(deriv);
             atom_pos.flush();
 

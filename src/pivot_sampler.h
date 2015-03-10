@@ -102,12 +102,12 @@ struct PivotSampler {
             float4 random_values = random.uniform_open_closed();
 
             // pick a random pivot location
-            int loc = int(n_pivot_loc * random_values.z);
+            int loc = int(n_pivot_loc * random_values.z());
             if(loc == n_pivot_loc) loc--;  // this may occur due to rounding
             auto p = pivot_loc[loc];
 
             // select a bin
-            float cdf_value = random_values.w;
+            float cdf_value = random_values.w();
             
             int pivot_bin = std::lower_bound(
                     proposal_prob_cdf.data()+ p.restype   *n_bin*n_bin, 
@@ -120,7 +120,7 @@ struct PivotSampler {
 
             // now pick a random location in that bin
             // Note the half-bin shift because we want the bin center of the left-most bin at 0
-            float2 new_rama = (2.f*M_PI_F/n_bin)*make_float2(phi_bin+random_values.x-0.5f, psi_bin+random_values.y-0.5f) - M_PI_F;
+            float2 new_rama = (2.f*M_PI_F/n_bin)*make_vec2(phi_bin+random_values.x()-0.5f, psi_bin+random_values.y()-0.5f) - M_PI_F;
 
             // find deviation from old rama
             float3 d1,d2,d3,d4;
@@ -130,13 +130,13 @@ struct PivotSampler {
             float3 C     = StaticCoord<3>(pos, ns, p.rama_atom[3]).f3();
             float3 nextN = StaticCoord<3>(pos, ns, p.rama_atom[4]).f3();
 
-            float2 old_rama = make_float2(
+            float2 old_rama = make_vec2(
                     dihedral_germ(prevC,N,CA,C, d1,d2,d3,d4),
                     dihedral_germ(N,CA,C,nextN, d1,d2,d3,d4));
 
             // reverse the half-bin shift
-            int old_phi_bin = (old_rama.x+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
-            int old_psi_bin = (old_rama.y+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
+            int old_phi_bin = (old_rama.x()+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
+            int old_psi_bin = (old_rama.y()+M_PI_F) * (0.5f/M_PI_F) * n_bin + 0.5f;
             old_phi_bin = old_phi_bin>=n_bin ? 0 : old_phi_bin;  // enforce periodicity
             old_psi_bin = old_psi_bin>=n_bin ? 0 : old_psi_bin;
             float old_lprob = proposal_pot[(p.restype*n_bin + old_phi_bin)*n_bin + old_psi_bin];
@@ -146,8 +146,8 @@ struct PivotSampler {
             float3 psi_origin = C;
 
             float2 delta_rama = new_rama - old_rama;
-            float phi_U[9]; axis_angle_to_rot(phi_U, delta_rama.x, normalize3(CA-N ));
-            float psi_U[9]; axis_angle_to_rot(psi_U, delta_rama.y, normalize3(C -CA));
+            float phi_U[9]; axis_angle_to_rot(phi_U, delta_rama.x(), normalized(CA-N ));
+            float psi_U[9]; axis_angle_to_rot(psi_U, delta_rama.y(), normalized(C -CA));
 
             {
                 MutableCoord<3> y(pos, ns, p.rama_atom[3]);  // C
@@ -202,7 +202,7 @@ struct PivotSampler {
             RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, ns, round);
             pivot_stats[ns].n_attempt++;
 
-            if(lboltz_diff >= 0.f || expf(lboltz_diff) >= random.uniform_open_closed().x) {
+            if(lboltz_diff >= 0.f || expf(lboltz_diff) >= random.uniform_open_closed().x()) {
                 pivot_stats[ns].n_success++;
             } else {
                 // If we reject the pivot, we must reverse it

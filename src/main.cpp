@@ -48,7 +48,7 @@ void parallel_tempering_step(
     RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
 
     // attempt neighbor swaps, first (2*i,2*i+1) swaps, then (2*i-1,2*i)
-    int start = random.uniform_open_closed().x < 0.5f;  // must start at 0 or 1 randomly
+    int start = random.uniform_open_closed().x() < 0.5f;  // must start at 0 or 1 randomly
 
     auto old_lboltz = compute_log_boltzmann();
     for(int i=start; i+1<n_system; i+=2) coord_swap(i,i+1);
@@ -61,7 +61,7 @@ void parallel_tempering_step(
         n_trial++;
         float lboltz_diff = (new_lboltz[i] + new_lboltz[i+1]) - (old_lboltz[i]+old_lboltz[i+1]);
         // If we reject the swap, we must reverse it
-        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x) {
+        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x()) {
             coord_swap(i,i+1);
         } else {
             n_accept++;
@@ -379,9 +379,9 @@ try {
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {
-                    float3 com = make_float3(0.f, 0.f, 0.f);
-                    for(int na=0; na<n_atom; ++na) 
-                        com += StaticCoord<3>(engine.pos->coords().value, ns, na).f3();
+                    float3 com = make_vec3(0.f, 0.f, 0.f);
+                    for(int na=0; na<n_atom; ++na)
+                        com += StaticCoord<3>(engine.pos->coords().value, ns, na).f3();;
                     com *= 1.f/n_atom;
 
                     for(int na=0; na<n_atom; ++na) 

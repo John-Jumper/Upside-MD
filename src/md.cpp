@@ -82,11 +82,11 @@ recenter(
         )
 {
     for(int ns=0; ns<n_system; ++ns) {
-        float3 center = {0.f, 0.f, 0.f};
+        float3 center = make_vec3(0.f, 0.f, 0.f);
         for(int na=0; na<n_atom; ++na) center += StaticCoord<3>(pos,ns,na).f3();
-        center /= n_atom;
+        center /= float(n_atom);
 
-        if(xy_recenter_only) center.z = 0.f;
+        if(xy_recenter_only) center.z() = 0.f;
 
         for(int na=0; na<n_atom; ++na) {
             MutableCoord<3> x(pos,ns,na);

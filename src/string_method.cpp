@@ -56,13 +56,13 @@ void dihedral_string_deriv(
                 for(int i=0; i<4; ++i) {
                     int loc = id[nd*4+i];
                     if(ns<2) {
-                        M[ns%2].insert  (nd,loc*3+0)  = dd[i].x;
-                        M[ns%2].insert  (nd,loc*3+1)  = dd[i].y;
-                        M[ns%2].insert  (nd,loc*3+2)  = dd[i].z;
+                        M[ns%2].insert  (nd,loc*3+0)  = dd[i].x();
+                        M[ns%2].insert  (nd,loc*3+1)  = dd[i].y();
+                        M[ns%2].insert  (nd,loc*3+2)  = dd[i].z();
                     } else {  // all positions have been inserted
-                        M[ns%2].coeffRef(nd,loc*3+0) += dd[i].x;
-                        M[ns%2].coeffRef(nd,loc*3+1) += dd[i].y;
-                        M[ns%2].coeffRef(nd,loc*3+2) += dd[i].z;
+                        M[ns%2].coeffRef(nd,loc*3+0) += dd[i].x();
+                        M[ns%2].coeffRef(nd,loc*3+1) += dd[i].y();
+                        M[ns%2].coeffRef(nd,loc*3+2) += dd[i].z();
                     }
                 }
             }

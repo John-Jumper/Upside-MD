@@ -2,168 +2,269 @@
 #define VECTOR_MATH_H
 
 #include <cmath>
+#include <type_traits>
 
-//! Two dimensional vector (x,y)
-struct float2 {
-    float x,y;
-    float2(): x(0.f),y(0.f) {};
-    float2(float x_, float y_):
-        x(x_), y(y_){}
-};
-//! Three dimensional vector (x,y,z)
-struct float3 {
-    float x,y,z;
-    float3(): x(0.f),y(0.f),z(0.f) {};
-    float3(float x_, float y_, float z_):
-        x(x_), y(y_), z(z_) {}
-};
-//! Four dimensional vector (x,y,z,w)
-struct float4 {
-    float x,y,z,w;
-    float4(): x(0.f),y(0.f),z(0.f),w(0.f) {};
-    float4(float x_, float y_, float z_, float w_):
-        x(x_), y(y_), z(z_), w(w_) {}
+template <int ndim, typename ScalarT = float>
+struct alignas(std::alignment_of<ScalarT>::value) Vec {
+    ScalarT v[ndim];
+
+    ScalarT&       x()       {return           v[0];}
+    const ScalarT& x() const {return           v[0];}
+    ScalarT&       y()       {return ndim>=1 ? v[1] : v[0];}
+    const ScalarT& y() const {return ndim>=1 ? v[1] : v[0];}
+    ScalarT&       z()       {return ndim>=2 ? v[2] : v[0];}
+    const ScalarT& z() const {return ndim>=2 ? v[2] : v[0];}
+    ScalarT&       w()       {return ndim>=3 ? v[3] : v[0];}
+    const ScalarT& w() const {return ndim>=3 ? v[3] : v[0];}
+
+    ScalarT& operator[](int i) {return v[i];}
+    const ScalarT& operator[](int i) const {return v[i];}
 };
 
-//! Get component of float3 by index
 
-//! component(v,0) == v.x, component(v,1) == v.y, component(v,2) == v.z,
-//! any other value for dim is an error
-inline float& component(float3 &v, int dim) {
-    switch(dim) {
-        case 0: return v.x;
-        case 1: return v.y;
-        case 2: return v.z;
-    }
-    throw -1;  // abort and die
-    return v.x;  
-}
+typedef Vec<2,float> float2;
+typedef Vec<3,float> float3;
+typedef Vec<4,float> float4;
 
-//! Get component of float4 by index
-
-//! component(v,0) == v.x, component(v,1) == v.y, component(v,2) == v.z, component(v,3) == v.w,
-//! any other value for dim is an error
-inline float& component(float4 &v, int dim) {
-    switch(dim) {
-        case 0: return v.x;
-        case 1: return v.y;
-        case 2: return v.z;
-        case 3: return v.w;
-    }
-    throw -1;  // abort and die
-    return v.x;  
-}
-
+//! Get component of vector by index
 
 static const float M_PI_F   = 3.141592653589793f;   //!< value of pi as float
 static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
-inline float rsqrtf(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
-inline float sqr(float x) {return x*x;}  //!< square a number (x^2)
+inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
+inline float sqr  (float x) {return x*x;}  //!< square a number (x^2)
+inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
+inline float blendv(bool b, float x, float y) {return b ? x : y;}
 
-
-inline float2 make_float2(float x, float y                  ) {return float2(x,y);    } //!< make float2 from scalars
-inline float3 make_float3(float x, float y, float z         ) {return float3(x,y,z);  } //!< make float3 from scalars
-inline float4 make_float4(float x, float y, float z, float w) {return float4(x,y,z,w);} //!< make float4 from scalars
-inline float4 make_float4(float3 v, float w) { return make_float4(v.x,v.y,v.z,w); } //!< make float4 from float3 (as x,y,z) and scalar (as w)
-
-inline float3 xyz(const float4& x) { return make_float3(x.x,x.y,x.z); } //!< return x,y,z as float3 from a float4
-
-//! \cond
-inline float2 operator*(float a, const float2 &b) { return make_float2(a*b.x, a*b.y); }
-inline float2 operator+(float a, const float2 &b) { return make_float2(a+b.x, a+b.y); }
-inline float2 operator-(float a, const float2 &b) { return make_float2(a-b.x, a-b.y); }
-inline float2 operator/(float a, const float2 &b) { return make_float2(a/b.x, a/b.y); }
-
-inline float2 operator*(const float2 &a, const float2 &b) { return make_float2(a.x*b.x, a.y*b.y); }
-inline float2 operator+(const float2 &a, const float2 &b) { return make_float2(a.x+b.x, a.y+b.y); }
-inline float2 operator-(const float2 &a, const float2 &b) { return make_float2(a.x-b.x, a.y-b.y); }
-inline float2 operator/(const float2 &a, const float2 &b) { return make_float2(a.x/b.x, a.y/b.y); }
-
-inline float2 operator*(const float2 &a, const float  &b) { return make_float2(a.x*b, a.y*b); }
-inline float2 operator+(const float2 &a, const float  &b) { return make_float2(a.x+b, a.y+b); }
-inline float2 operator-(const float2 &a, const float  &b) { return make_float2(a.x-b, a.y-b); }
-inline float2 operator/(const float2 &a, const float  &b) { return make_float2(a.x/b, a.y/b); }
-
-inline float2 operator*=(      float2 &a, const float2 &b) { a.x*=b.x; a.y*=b.y; return a;}
-inline float2 operator+=(      float2 &a, const float2 &b) { a.x+=b.x; a.y+=b.y; return a;}
-inline float2 operator-=(      float2 &a, const float2 &b) { a.x-=b.x; a.y-=b.y; return a;}
-inline float2 operator/=(      float2 &a, const float2 &b) { a.x/=b.x; a.y/=b.y; return a;}
-
-inline float3 operator*(const float  &a, const float3 &b) { return make_float3(a*b.x, a*b.y, a*b.z); }
-inline float3 operator+(const float  &a, const float3 &b) { return make_float3(a+b.x, a+b.y, a+b.z); }
-inline float3 operator-(const float  &a, const float3 &b) { return make_float3(a-b.x, a-b.y, a-b.z); }
-inline float3 operator/(const float  &a, const float3 &b) { return make_float3(a/b.x, a/b.y, a/b.z); }
-
-inline float3 operator*(const float3 &a, const float  &b) { return make_float3(a.x*b, a.y*b, a.z*b); }
-inline float3 operator+(const float3 &a, const float  &b) { return make_float3(a.x+b, a.y+b, a.z+b); }
-inline float3 operator-(const float3 &a, const float  &b) { return make_float3(a.x-b, a.y-b, a.z-b); }
-inline float3 operator/(const float3 &a, const float  &b) { return make_float3(a.x/b, a.y/b, a.z/b); }
-
-inline float3 operator*(const float3 &a, const float3 &b) { return make_float3(a.x*b.x, a.y*b.y, a.z*b.z); }
-inline float3 operator+(const float3 &a, const float3 &b) { return make_float3(a.x+b.x, a.y+b.y, a.z+b.z); }
-inline float3 operator-(const float3 &a, const float3 &b) { return make_float3(a.x-b.x, a.y-b.y, a.z-b.z); }
-inline float3 operator/(const float3 &a, const float3 &b) { return make_float3(a.x/b.x, a.y/b.y, a.z/b.z); }
-
-inline float3 operator*=(      float3 &a, const float  &b) { a.x*=b;   a.y*=b;   a.z*=b;   return a;}
-inline float3 operator+=(      float3 &a, const float  &b) { a.x+=b;   a.y+=b;   a.z+=b;   return a;}
-inline float3 operator-=(      float3 &a, const float  &b) { a.x-=b;   a.y-=b;   a.z-=b;   return a;}
-inline float3 operator/=(      float3 &a, const float  &b) { a.x/=b;   a.y/=b;   a.z/=b;   return a;}
-
-inline float3 operator*=(      float3 &a, const float3 &b) { a.x*=b.x; a.y*=b.y; a.z*=b.z; return a;}
-inline float3 operator+=(      float3 &a, const float3 &b) { a.x+=b.x; a.y+=b.y; a.z+=b.z; return a;}
-inline float3 operator-=(      float3 &a, const float3 &b) { a.x-=b.x; a.y-=b.y; a.z-=b.z; return a;}
-inline float3 operator/=(      float3 &a, const float3 &b) { a.x/=b.x; a.y/=b.y; a.z/=b.z; return a;}
-
-inline float4 operator*(const float  &a, const float4 &b) { return make_float4(a*b.x, a*b.y, a*b.z, a*b.w); }
-inline float4 operator+(const float  &a, const float4 &b) { return make_float4(a+b.x, a+b.y, a+b.z, a+b.w); }
-inline float4 operator-(const float  &a, const float4 &b) { return make_float4(a-b.x, a-b.y, a-b.z, a-b.w); }
-inline float4 operator/(const float  &a, const float4 &b) { return make_float4(a/b.x, a/b.y, a/b.z, a/b.w); }
-
-inline float4 operator*(const float4 &a, const float  &b) { return make_float4(a.x*b, a.y*b, a.z*b, a.w*b); }
-inline float4 operator+(const float4 &a, const float  &b) { return make_float4(a.x+b, a.y+b, a.z+b, a.w+b); }
-inline float4 operator-(const float4 &a, const float  &b) { return make_float4(a.x-b, a.y-b, a.z-b, a.w-b); }
-inline float4 operator/(const float4 &a, const float  &b) { return make_float4(a.x/b, a.y/b, a.z/b, a.w/b); }
-
-inline float4 operator*(const float4 &a, const float4 &b) { return make_float4(a.x*b.x, a.y*b.y, a.z*b.z, a.w*b.w); }
-inline float4 operator+(const float4 &a, const float4 &b) { return make_float4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w); }
-inline float4 operator-(const float4 &a, const float4 &b) { return make_float4(a.x-b.x, a.y-b.y, a.z-b.z, a.w-b.w); }
-inline float4 operator/(const float4 &a, const float4 &b) { return make_float4(a.x/b.x, a.y/b.y, a.z/b.z, a.w/b.w); }
-
-inline float4 operator*=(      float4 &a, const float  &b) { a.x*=b;   a.y*=b;   a.z*=b;   a.w*=b;   return a;}
-inline float4 operator+=(      float4 &a, const float  &b) { a.x+=b;   a.y+=b;   a.z+=b;   a.w+=b;   return a;}
-inline float4 operator-=(      float4 &a, const float  &b) { a.x-=b;   a.y-=b;   a.z-=b;   a.w-=b;   return a;}
-inline float4 operator/=(      float4 &a, const float  &b) { a.x/=b;   a.y/=b;   a.z/=b;   a.w/=b;   return a;}
-                                                                                                     
-inline float4 operator*=(      float4 &a, const float4 &b) { a.x*=b.x; a.y*=b.y; a.z*=b.z; a.w*=b.w; return a;}
-inline float4 operator+=(      float4 &a, const float4 &b) { a.x+=b.x; a.y+=b.y; a.z+=b.z; a.w+=b.w; return a;}
-inline float4 operator-=(      float4 &a, const float4 &b) { a.x-=b.x; a.y-=b.y; a.z-=b.z; a.w-=b.w; return a;}
-inline float4 operator/=(      float4 &a, const float4 &b) { a.x/=b.x; a.y/=b.y; a.z/=b.z; a.w/=b.w; return a;}
-
-inline float3 operator-(const float3 &a) {return make_float3(-a.x, -a.y, -a.z);}
-inline float4 operator-(const float4 &a) {return make_float4(-a.x, -a.y, -a.z, -a.w);}
-//! \endcond
-
-inline float inv_mag(float3 a){return rsqrtf(a.x*a.x + a.y*a.y + a.z*a.z);} //!< 1/sqrt(|v|), where |v| is the magnitude of v
-
-//! cross-product of the vectors a and b
-inline float3 cross(float3 a, float3 b){
-    return make_float3(
-        a.y*b.z - a.z*b.y,
-        a.z*b.x - a.x*b.z,
-        a.x*b.y - a.y*b.x);
+// FIXME more general blendv needed
+template <int D>
+inline Vec<D,float> blendv(bool which, const Vec<D,float>& a, const Vec<D,float>& b) {
+    return which ? a : b;
 }
 
-inline float mag(float3 a){return sqrtf(a.x*a.x + a.y*a.y + a.z*a.z);}  //!< vector magnitude
 
-inline float mag2(float3 a){return a.x*a.x + a.y*a.y + a.z*a.z;} //!< vector magnitude squared (faster than mag)
-inline float mag2(float4 a){return a.x*a.x + a.y*a.y + a.z*a.z + a.w*a.w;} //!< vector magnitude squared (faster than mag)
 
-inline float inv_mag2(float3 a){float m=inv_mag(a); return m*m;} //!< reciprocal of vector magnitude squared (1/|v|^2)
+inline float2 make_vec2(float x, float y                  ) {float2 a; a[0]=x; a[1]=y;                 return a;} //!< make float2 from scalars
+inline float3 make_vec3(float x, float y, float z         ) {float3 a; a[0]=x; a[1]=y; a[2]=z;         return a;} //!< make float3 from scalars
+inline float4 make_vec4(float x, float y, float z, float w) {float4 a; a[0]=x; a[1]=y; a[2]=z; a[3]=w; return a;} //!< make float4 from scalars
+inline float4 make_vec4(float3 v, float w) { return make_vec4(v.x(),v.y(),v.z(),w); } //!< make float4 from float3 (as x,y,z) and scalar (as w)
 
-inline float3 normalize3(float3 a){return a*inv_mag(a);} //!< unit vector (v/|v|)
+inline float3 xyz(const float4& x) { return make_vec3(x.x(),x.y(),x.z()); } //!< return x,y,z as float3 from a float4
 
-inline float dot(float3 a, float3 b){return a.x*b.x + a.y*b.y + a.z*b.z;} //!< dot product of vectors
+//! \cond
+template <int D, typename S> 
+inline Vec<D,S> operator+(const Vec<D,S>& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]+b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator-(const Vec<D,S>& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]-b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator*(const Vec<D,S>& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]*b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator/(const Vec<D,S>& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]/b[i];
+    return c;
+}
+
+
+template <int D, typename S> 
+inline Vec<D,S> operator+(const S& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a   +b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator-(const S& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a   -b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator*(const S& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a   *b[i];
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator/(const S& a, const Vec<D,S>& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a   /b[i];
+    return c;
+}
+
+
+template <int D, typename S> 
+inline Vec<D,S> operator+(const Vec<D,S>& a, const S& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]+b;
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator-(const Vec<D,S>& a, const S& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]-b;
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator*(const Vec<D,S>& a, const S& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]*b;
+    return c;
+}
+template <int D, typename S> 
+inline Vec<D,S> operator/(const Vec<D,S>& a, const S& b) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = a[i]/b;
+    return c;
+}
+
+
+template <int D, typename S> 
+inline Vec<D,S>& operator+=(Vec<D,S>& a, const Vec<D,S>& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]+=b[i];
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator-=(Vec<D,S>& a, const Vec<D,S>& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]-=b[i];
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator*=(Vec<D,S>& a, const Vec<D,S>& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]*=b[i];
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator/=(Vec<D,S>& a, const Vec<D,S>& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]/=b[i];
+    return a;
+}
+
+
+template <int D, typename S> 
+inline Vec<D,S>& operator+=(Vec<D,S>& a, const S& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]+=b;
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator-=(Vec<D,S>& a, const S& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]-=b;
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator*=(Vec<D,S>& a, const S& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]*=b;
+    return a;
+}
+template <int D, typename S> 
+inline Vec<D,S>& operator/=(Vec<D,S>& a, const S& b) {
+    #pragma unroll
+    for(int i=0; i<D; ++i) a[i]/=b;
+    return a;
+}
+
+
+template <int D, typename S> 
+inline Vec<D,S> operator-(const Vec<D,S>& a) {
+    Vec<D,S> c;
+    #pragma unroll
+    for(int i=0; i<D; ++i) c[i] = -a[i];
+    return c;
+}
+//! \endcond
+
+// FIXME how to handle sqrtf, rsqrtf for simd types?
+// I will assume there are functions rsqrt(s) and rcp(s) and sqrt(s) and I will write sqr(s)
+
+template <typename S>
+inline S zero() {return 0.f;} // depend on implicit conversion
+
+template <typename S>
+inline S one () {return 1.f;} // depend on implicit conversion
+
+template <typename S>
+inline S a_sqrt(const S& a) {
+    return a * rsqrt(a);
+}
+
+template <int D, typename S>
+inline S mag2(const Vec<D,S>& a) {
+    S m = zero<S>();
+    #pragma unroll
+    for(int i=0; i<D; ++i) m += sqr(a[i]);
+    return m;
+}
+
+template <int ndim, typename S>
+inline S inv_mag(const Vec<ndim,S>& a) {
+    return rsqrt(mag2(a));
+}
+
+template <int ndim, typename S>
+inline S inv_mag2(const Vec<ndim,S>& a) {
+    return rcp(mag2(a));
+}
+
+template <int ndim, typename S>
+inline S mag(const Vec<ndim,S>& a) {
+    return a_sqrt(mag2(a));
+}
+
+
+//! cross-product of the vectors a and b
+template <typename S>
+inline Vec<3,S> cross(const Vec<3,S>& a, const Vec<3,S>& b){
+    Vec<3,S> c;
+    c[0] = a.y()*b.z() - a.z()*b.y();
+    c[1] = a.z()*b.x() - a.x()*b.z();
+    c[2] = a.x()*b.y() - a.y()*b.x();
+    return c;
+}
+
+template <int D, typename S>
+inline Vec<D,S> normalized(const Vec<D,S>& a) { return a*inv_mag(a); }
+
+template <int D, typename S>
+inline float dot(const Vec<D,S>& a, const Vec<D,S>& b){
+    S c = zero<S>();
+    #pragma unroll
+    for(int i=0; i<D; ++i) c += a[i]*b[i];
+    return c;
+}
+
+// FIXME assume implementation of blendv functions
+// I probably need a logical type to make this work right
+
 
 //! sigmoid function and its derivative 
 
@@ -171,52 +272,56 @@ inline float dot(float3 a, float3 b){return a.x*b.x + a.y*b.y + a.z*b.z;} //!< d
 //! exp(x)/(1+exp(x))^2
 inline float2 sigmoid(float x) {
 #ifdef APPROX_SIGMOID
-    float z = rsqrtf(4.f+x*x);
-    return make_float2(0.5f*(1.f + x*z), (2.f*z)*(z*z));
+    float z = rsqrt(4.f+x*x);
+    return make_vec2(0.5f*(1.f + x*z), (2.f*z)*(z*z));
 #else
-    //return make_float2(0.5f*(tanh(0.5f*x) + 1.f), 0.5f / (1.f + cosh(x)));
+    //return make_vec2(0.5f*(tanh(0.5f*x) + 1.f), 0.5f / (1.f + cosh(x)));
     float z = exp(-x);
     float w = 1.f/(1.f+z);
-    return make_float2(w, z*w*w);
+    return make_vec2(w, z*w*w);
 #endif
 }
 
 
 // Sigmoid-like function that has zero derivative outside (-1/sharpness,1/sharpness)
 // This function is 1 for large negative values and 0 for large positive values
-inline float2 compact_sigmoid(float x, float sharpness) {
-    float y = x*sharpness;
-    if     (y> 1.f) return make_float2(0.f, 0.f);
-    else if(y<-1.f) return make_float2(1.f, 0.f);
-    else            return make_float2(0.25f*(y+2.f)*(y-1.f)*(y-1.f), (sharpness*0.75f)*(y*y-1.f));
+template <typename S>
+inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
+    S y = x*sharpness;
+    Vec<2,S> z = make_vec2(S(0.25f)*(y+S(2.f))*(y-S(1.f))*(y-one<S>()), (sharpness*S(0.75f))*(sqr(y)-one<S>()));
+    z = blendv((y>S( 1.f)), make_vec2(zero<S>(), zero<S>()), z);
+    z = blendv((y<S(-1.f)), make_vec2(one <S>(), zero<S>()), z);
+    return z;
 }
 
 
 //! Sigmoid-like function that has zero derivative outside the two intervals (-half_width-1/sharpness,-half_width+1/sharpness)
 //! and (half_width-1/sharpness,half_width+1/sharpness).  The function is the product of opposing half-sigmoids.
-inline float2 compact_double_sigmoid(float x, float half_width, float sharpness) {
-    float2 v1 = compact_sigmoid( x-half_width, sharpness);
-    float2 v2 = compact_sigmoid(-x-half_width, sharpness);
-    return make_float2(v1.x*v2.x, v1.y*v2.x-v1.x*v2.y);
+template <typename S>
+inline Vec<2,S> compact_double_sigmoid(const S& x, const S& half_width, const S& sharpness) {
+    Vec<2,S> v1 = compact_sigmoid( x-half_width, sharpness);
+    Vec<2,S> v2 = compact_sigmoid(-x-half_width, sharpness);
+    return make_vec2(v1.x()*v2.x(), v1.y()*v2.x()-v1.x()*v2.y());
 }
 
 
 //! compact_double_sigmoid that also handles periodicity
 //! note that both theta and center must be in the range (-PI,PI)
-inline float2 angular_compact_double_sigmoid(float theta, float center, float half_width, float sharpness) {
-    float dev = theta - center;
-    if(dev <-M_PI_F) dev += 2.f*M_PI_F;
-    if(dev > M_PI_F) dev -= 2.f*M_PI_F;
+template <typename S>
+inline Vec<2,S> angular_compact_double_sigmoid(const S& theta, const S& center, const S& half_width, const S& sharpness) {
+    S dev = theta - center;
+    dev = blendv((dev <-M_PI_F), dev + S(2.f*M_PI_F), dev);
+    dev = blendv((dev > M_PI_F), dev - S(2.f*M_PI_F), dev);
     return compact_double_sigmoid(dev, half_width, sharpness);
 }
 
 //! order is value, then dvalue/dphi, dvalue/dpsi
-inline float3 rama_box(float2 rama, float2 center, float2 half_width, float sharpness) {
-    float2 phi = angular_compact_double_sigmoid(rama.x, center.x, half_width.x, sharpness);
-    float2 psi = angular_compact_double_sigmoid(rama.y, center.y, half_width.y, sharpness);
-    return make_float3(phi.x*psi.x, phi.y*psi.x, phi.x*psi.y);
+template <typename S>
+inline Vec<3,S> rama_box(const Vec<2,S>& rama, const Vec<2,S>& center, const Vec<2,S>& half_width, const S& sharpness) {
+    Vec<2,S> phi = angular_compact_double_sigmoid(rama.x(), center.x(), half_width.x(), sharpness);
+    Vec<2,S> psi = angular_compact_double_sigmoid(rama.y(), center.y(), half_width.y(), sharpness);
+    return make_vec3(phi.x()*psi.x(), phi.y()*psi.x(), phi.x()*psi.y());
 }
-    
 
 
 //! Compute a dihedral angle and its derivative from four positions
@@ -224,9 +329,10 @@ inline float3 rama_box(float2 rama, float2 center, float2 half_width, float shar
 //! The angle is always in the range [-pi,pi].  If the arguments are NaN or Inf, the result is undefined.
 //! The arguments d1,d2,d3,d4 are output values, and d1 corresponds to the derivative of the dihedral angle
 //! with respect to r1.
+template <typename S>
 static float dihedral_germ(
-        float3  r1, float3  r2, float3  r3, float3  r4,
-        float3 &d1, float3 &d2, float3 &d3, float3 &d4)
+        Vec<3,S>  r1, Vec<3,S>  r2, Vec<3,S>  r3, Vec<3,S>  r4,
+        Vec<3,S> &d1, Vec<3,S> &d2, Vec<3,S> &d3, Vec<3,S> &d4)
     // Formulas and notation taken from Blondel and Karplus, 1995
 {
     float3 F = r1-r2;
@@ -241,7 +347,7 @@ static float dihedral_germ(
     float inv_Bmag2 = inv_mag2(B);
 
     float Gmag2    = mag2(G);
-    float inv_Gmag = rsqrtf(Gmag2);
+    float inv_Gmag = rsqrt(Gmag2);
     float Gmag     = Gmag2 * inv_Gmag;
 
     d1 = -Gmag * inv_Amag2 * A;

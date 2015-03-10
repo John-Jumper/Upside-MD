@@ -7,18 +7,18 @@ namespace {
 inline float3 apply_rotation(const float* restrict U, const float3 &r)
 {
     float3 ret;
-    ret.x = U[0]*r.x + U[1]*r.y + U[2]*r.z;
-    ret.y = U[3]*r.x + U[4]*r.y + U[5]*r.z;
-    ret.z = U[6]*r.x + U[7]*r.y + U[8]*r.z;
+    ret.x() = U[0]*r.x() + U[1]*r.y() + U[2]*r.z();
+    ret.y() = U[3]*r.x() + U[4]*r.y() + U[5]*r.z();
+    ret.z() = U[6]*r.x() + U[7]*r.y() + U[8]*r.z();
     return ret;
 }
 
 inline float3 apply_inverse_rotation(const float* restrict U, const float3 &r)
 {
     float3 ret;
-    ret.x = U[0]*r.x + U[3]*r.y + U[6]*r.z;
-    ret.y = U[1]*r.x + U[4]*r.y + U[7]*r.z;
-    ret.z = U[2]*r.x + U[5]*r.y + U[8]*r.z;
+    ret.x() = U[0]*r.x() + U[3]*r.y() + U[6]*r.z();
+    ret.y() = U[1]*r.x() + U[4]*r.y() + U[7]*r.z();
+    ret.z() = U[2]*r.x() + U[5]*r.y() + U[8]*r.z();
     return ret;
 }
 
@@ -27,9 +27,9 @@ inline void axis_angle_to_rot(
         float* U,
         float angle,
         float3 axis) { // must be normalized
-    float x = axis.x;
-    float y = axis.y;
-    float z = axis.z;
+    float x = axis.x();
+    float y = axis.y();
+    float z = axis.z();
 
     float c = std::cos(angle);
     float s = std::sin(angle);
@@ -107,9 +107,9 @@ struct AffineCoord
     //! to the laboratory frame of the simulation.
     float3 apply(const float3& r) {
         float3 ret;
-        ret.x = U[0]*r.x + U[1]*r.y + U[2]*r.z + t[0];
-        ret.y = U[3]*r.x + U[4]*r.y + U[5]*r.z + t[1];
-        ret.z = U[6]*r.x + U[7]*r.y + U[8]*r.z + t[2];
+        ret.x() = U[0]*r.x() + U[1]*r.y() + U[2]*r.z() + t[0];
+        ret.y() = U[3]*r.x() + U[4]*r.y() + U[5]*r.z() + t[1];
+        ret.z() = U[6]*r.x() + U[7]*r.y() + U[8]*r.z() + t[2];
         return ret;
     }
 
@@ -122,9 +122,9 @@ struct AffineCoord
         float3 s = r-tf3();
 
         float3 ret;
-        ret.x = U[0]*s.x + U[3]*s.y + U[6]*s.z;
-        ret.y = U[1]*s.x + U[4]*s.y + U[7]*s.z;
-        ret.z = U[2]*s.x + U[5]*s.y + U[8]*s.z;
+        ret.x() = U[0]*s.x() + U[3]*s.y() + U[6]*s.z();
+        ret.y() = U[1]*s.x() + U[4]*s.y() + U[7]*s.z();
+        ret.z() = U[2]*s.x() + U[5]*s.y() + U[8]*s.z();
         return ret;
     }
 
@@ -135,17 +135,17 @@ struct AffineCoord
     //! of the simulation.
     float3 apply_rotation(const float3& r) {
         float3 ret;
-        ret.x = U[0]*r.x + U[1]*r.y + U[2]*r.z;
-        ret.y = U[3]*r.x + U[4]*r.y + U[5]*r.z;
-        ret.z = U[6]*r.x + U[7]*r.y + U[8]*r.z;
+        ret.x() = U[0]*r.x() + U[1]*r.y() + U[2]*r.z();
+        ret.y() = U[3]*r.x() + U[4]*r.y() + U[5]*r.z();
+        ret.z() = U[6]*r.x() + U[7]*r.y() + U[8]*r.z();
         return ret;
     }
 
     //! Same as apply() above, but acts on float* instead of float3
-    float3 apply(const float* r) { return apply(make_float3(r[0], r[1], r[2])); }
+    float3 apply(const float* r) { return apply(make_vec3(r[0], r[1], r[2])); }
 
     //! Return translation vector as a float3
-    float3 tf3() const {return make_float3(t[0], t[1], t[2]);}
+    float3 tf3() const {return make_vec3(t[0], t[1], t[2]);}
 
     //! Add a derivative and torque for a force applied at a specified point for CoordNode
 
@@ -153,17 +153,17 @@ struct AffineCoord
     //! use this version if you have multiple output values (only applies to CoordNode's).
     void add_deriv_at_location(int ndo, const float3& r_lab_frame, const float3& r_deriv) {
         // add translation derivs
-        d[ndo][0] += r_deriv.x;
-        d[ndo][1] += r_deriv.y;
-        d[ndo][2] += r_deriv.z;
+        d[ndo][0] += r_deriv.x();
+        d[ndo][1] += r_deriv.y();
+        d[ndo][2] += r_deriv.z();
 
         // work relative to the center of the rigid body
         float3 r = r_lab_frame - tf3();
 
         // add torque derivs
-        d[ndo][3] += r.y*r_deriv.z - r.z*r_deriv.y;
-        d[ndo][4] += r.z*r_deriv.x - r.x*r_deriv.z;
-        d[ndo][5] += r.x*r_deriv.y - r.y*r_deriv.x;
+        d[ndo][3] += r.y()*r_deriv.z() - r.z()*r_deriv.y();
+        d[ndo][4] += r.z()*r_deriv.x() - r.x()*r_deriv.z();
+        d[ndo][5] += r.x()*r_deriv.y() - r.y()*r_deriv.x();
     }
     //! Add a derivative and torque for a force applied at a specified point for CoordNode
 
@@ -183,13 +183,13 @@ struct AffineCoord
 
     //! Only useful when writing CoordNode, otherwise see add_deriv_and_torque(r_deriv, torque).
     void add_deriv_and_torque(int ndo, const float3& r_deriv, const float3& torque) {
-        d[ndo][0] += r_deriv.x;
-        d[ndo][1] += r_deriv.y;
-        d[ndo][2] += r_deriv.z;
+        d[ndo][0] += r_deriv.x();
+        d[ndo][1] += r_deriv.y();
+        d[ndo][2] += r_deriv.z();
 
-        d[ndo][3] += torque.x;
-        d[ndo][4] += torque.y;
-        d[ndo][5] += torque.z;
+        d[ndo][3] += torque.x();
+        d[ndo][4] += torque.y();
+        d[ndo][5] += torque.z();
     }
     //! Add a derivative and torque
 
@@ -224,9 +224,9 @@ namespace {
 // 
 //     float3 apply(const float3& r) {
 //         float3 ret;
-//         ret.x = xx*r.x + xy*r.y + xz*r.z + tx;
-//         ret.y = yx*r.x + yy*r.y + yz*r.z + ty;
-//         ret.z = zx*r.x + zy*r.y + zz*r.z + tz;
+//         ret.x() = xx*r.x() + xy*r.y() + xz*r.z() + tx;
+//         ret.y() = yx*r.x() + yy*r.y() + yz*r.z() + ty;
+//         ret.z() = zx*r.x() + zy*r.y() + zz*r.z() + tz;
 //         return ret;
 //     }
 // }

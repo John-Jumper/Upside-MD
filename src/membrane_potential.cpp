@@ -30,8 +30,8 @@ void membrane_potential(
         for(int nr=0; nr<n_residue; ++nr) {	                                                         
             Coord<3> pos1(sc_com_pos, ns, params[nr].residue); 
             float result[2];  // deriv then value
-            energy_spline.evaluate_value_and_deriv(result, params[nr].restype, (pos1.f3().z+z_shift)*z_scale);
-            pos1.set_deriv(make_float3(0.f, 0.f, result[0]*z_scale));
+            energy_spline.evaluate_value_and_deriv(result, params[nr].restype, (pos1.f3().z()+z_shift)*z_scale);
+            pos1.set_deriv(make_vec3(0.f, 0.f, result[0]*z_scale));
             if(potential) potential[ns] += result[1];
             pos1.flush();
         }

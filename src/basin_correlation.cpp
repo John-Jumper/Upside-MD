@@ -43,15 +43,15 @@ void basin_correlation_pot(
             float2 basin_prob_deriv2[N_BASIN];
 
             for(int nb=0; nb<N_BASIN; ++nb) {
-                float3 prob1 = rama_box(make_float2(rama1.v[0], rama1.v[1]), 
+                float3 prob1 = rama_box(make_vec2(rama1.v[0], rama1.v[1]), 
                         basins[nb].center, basins[nb].half_width, basin_sharpness);
-                basin_prob1[nb] = prob1.x;
-                basin_prob_deriv1[nb] = make_float2(prob1.y, prob1.z);
+                basin_prob1[nb] = prob1.x();
+                basin_prob_deriv1[nb] = make_vec2(prob1.y(), prob1.z());
 
-                float3 prob2 = rama_box(make_float2(rama2.v[0], rama2.v[1]), 
+                float3 prob2 = rama_box(make_vec2(rama2.v[0], rama2.v[1]), 
                         basins[nb].center, basins[nb].half_width, basin_sharpness);
-                basin_prob2[nb] = prob2.x;
-                basin_prob_deriv2[nb] = make_float2(prob2.y, prob2.z);
+                basin_prob2[nb] = prob2.x();
+                basin_prob_deriv2[nb] = make_vec2(prob2.y(), prob2.z());
             }
 
 
@@ -83,13 +83,13 @@ void basin_correlation_pot(
             float prefactor = -1.f/total_prob;
             if(potential) potential[ns] += -log(total_prob);
 
-            float2 deriv1 = make_float2(0.f,0.f);
+            float2 deriv1 = make_vec2(0.f,0.f);
             for(int nb=0; nb<N_BASIN; ++nb) deriv1 += basin_prob_deriv1[nb] * mat_times_basin_prob2[nb];
-            rama1.d[0][0] = deriv1.x*prefactor; rama1.d[0][1] = deriv1.y*prefactor; 
+            rama1.d[0][0] = deriv1.x()*prefactor; rama1.d[0][1] = deriv1.y()*prefactor; 
 
-            float2 deriv2 = make_float2(0.f,0.f);
+            float2 deriv2 = make_vec2(0.f,0.f);
             for(int nb=0; nb<N_BASIN; ++nb) deriv2 += basin_prob_deriv2[nb] * basin_prob1_times_mat[nb];
-            rama2.d[0][0] = deriv2.x*prefactor; rama2.d[0][1] = deriv2.y*prefactor; 
+            rama2.d[0][0] = deriv2.x()*prefactor; rama2.d[0][1] = deriv2.y()*prefactor; 
 
             rama1.flush();
             rama2.flush();
@@ -128,9 +128,9 @@ struct BasinCorrelationPot : public PotentialNode
         check_size(grp, "connection_matrices",  n_matrices, N_BASIN, N_BASIN);
 
         traverse_dset<2,float> (grp, "basin_center", [&](size_t nb, size_t phipsi, float x) {
-                if(phipsi==0) basins[nb].center.x = x; else basins[nb].center.y = x;});
+                if(phipsi==0) basins[nb].center.x() = x; else basins[nb].center.y() = x;});
         traverse_dset<2,float> (grp, "basin_half_width", [&](size_t nb, size_t phipsi, float x) {
-                if(phipsi==0) basins[nb].half_width.x = x; else basins[nb].half_width.y = x;});
+                if(phipsi==0) basins[nb].half_width.x() = x; else basins[nb].half_width.y() = x;});
 
         traverse_dset<2,int>   (grp, "residue_id",  [&](size_t nt, size_t nr, int x) {params[nt].residue[nr].index = x;});
         traverse_dset<1,int>   (grp, "connection_matrix_id", [&](size_t i, int x) {params[i].connection_matrix_id = x;});
@@ -147,8 +147,8 @@ struct BasinCorrelationPot : public PotentialNode
                             StaticCoord<2> rama1(rama.coords().value, ns, nr);
                             for(int nb=0; nb<N_BASIN; ++nb) 
                                 buffer[(ns*rama.n_elem + nr)*N_BASIN + nb] = rama_box(
-                                    make_float2(rama1.v[0], rama1.v[1]), 
-                                    basins[nb].center, basins[nb].half_width, basin_sharpness).x;
+                                    make_vec2(rama1.v[0], rama1.v[1]), 
+                                    basins[nb].center, basins[nb].half_width, basin_sharpness).x();
                         }
                     }});
         }

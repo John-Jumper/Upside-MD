@@ -36,9 +36,9 @@ hat_deriv(
         float3 &col0, float3 &col1, float3 &col2) // matrix is symmetric, so these are rows or cols
 {
     float s = v_invmag;
-    col0 = make_float3(s*(1.f-v_hat.x*v_hat.x), s*    -v_hat.y*v_hat.x , s*    -v_hat.z*v_hat.x );
-    col1 = make_float3(s*    -v_hat.x*v_hat.y , s*(1.f-v_hat.y*v_hat.y), s*    -v_hat.z*v_hat.y );
-    col2 = make_float3(s*    -v_hat.x*v_hat.z , s*    -v_hat.y*v_hat.z , s*(1.f-v_hat.z*v_hat.z));
+    col0 = make_vec3(s*(1.f-v_hat.x()*v_hat.x()), s*    -v_hat.y()*v_hat.x() , s*    -v_hat.z()*v_hat.x() );
+    col1 = make_vec3(s*    -v_hat.x()*v_hat.y() , s*(1.f-v_hat.y()*v_hat.y()), s*    -v_hat.z()*v_hat.y() );
+    col2 = make_vec3(s*    -v_hat.x()*v_hat.z() , s*    -v_hat.y()*v_hat.z() , s*(1.f-v_hat.z()*v_hat.z()));
 }
 
 template <typename MutableCoordT, typename CoordT>
@@ -63,17 +63,17 @@ void infer_x_body(
     float3 drow0, drow1, drow2; hat_deriv(disp, disp_invmag, drow0, drow1, drow2);
 
     // prev derivatives
-    prev_c.set_deriv(3, -make_float3(dot(drow0,pcol0), dot(drow0,pcol1), dot(drow0,pcol2)));
-    prev_c.set_deriv(4, -make_float3(dot(drow1,pcol0), dot(drow1,pcol1), dot(drow1,pcol2)));
-    prev_c.set_deriv(5, -make_float3(dot(drow2,pcol0), dot(drow2,pcol1), dot(drow2,pcol2)));
+    prev_c.set_deriv(3, -make_vec3(dot(drow0,pcol0), dot(drow0,pcol1), dot(drow0,pcol2)));
+    prev_c.set_deriv(4, -make_vec3(dot(drow1,pcol0), dot(drow1,pcol1), dot(drow1,pcol2)));
+    prev_c.set_deriv(5, -make_vec3(dot(drow2,pcol0), dot(drow2,pcol1), dot(drow2,pcol2)));
 
     // position derivative is direction derivative times bond length
     for(int no=0; no<3; ++no) for(int nc=0; nc<3; ++nc) prev_c.d[no][nc] = bond_length*prev_c.d[no+3][nc];
 
     // next derivatives
-    next_c.set_deriv(3, -make_float3(dot(drow0,ncol0), dot(drow0,ncol1), dot(drow0,ncol2)));
-    next_c.set_deriv(4, -make_float3(dot(drow1,ncol0), dot(drow1,ncol1), dot(drow1,ncol2)));
-    next_c.set_deriv(5, -make_float3(dot(drow2,ncol0), dot(drow2,ncol1), dot(drow2,ncol2)));
+    next_c.set_deriv(3, -make_vec3(dot(drow0,ncol0), dot(drow0,ncol1), dot(drow0,ncol2)));
+    next_c.set_deriv(4, -make_vec3(dot(drow1,ncol0), dot(drow1,ncol1), dot(drow1,ncol2)));
+    next_c.set_deriv(5, -make_vec3(dot(drow2,ncol0), dot(drow2,ncol1), dot(drow2,ncol2)));
 
     // position derivative is direction derivative times bond length
     for(int no=0; no<3; ++no) for(int nc=0; nc<3; ++nc) next_c.d[no][nc] = bond_length*next_c.d[no+3][nc];
@@ -87,12 +87,12 @@ void infer_x_body(
     }
 
     // set values
-    hbond_pos.v[0] = curr_c.v[0] - bond_length*disp.x;
-    hbond_pos.v[1] = curr_c.v[1] - bond_length*disp.y;
-    hbond_pos.v[2] = curr_c.v[2] - bond_length*disp.z;
-    hbond_pos.v[3] = -disp.x;
-    hbond_pos.v[4] = -disp.y;
-    hbond_pos.v[5] = -disp.z;
+    hbond_pos.v[0] = curr_c.v[0] - bond_length*disp.x();
+    hbond_pos.v[1] = curr_c.v[1] - bond_length*disp.y();
+    hbond_pos.v[2] = curr_c.v[2] - bond_length*disp.z();
+    hbond_pos.v[3] = -disp.x();
+    hbond_pos.v[4] = -disp.y();
+    hbond_pos.v[5] = -disp.z();
 }
 
 
@@ -208,9 +208,9 @@ float2 hbond_radial_potential(float input)
     float2 outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
     float2 inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
 
-    return make_float2( outer_sigmoid.x * inner_sigmoid.x,
-            - inv_outer_width * outer_sigmoid.y * inner_sigmoid.x
-            + inv_inner_width * inner_sigmoid.y * outer_sigmoid.x);
+    return make_vec2( outer_sigmoid.x() * inner_sigmoid.x(),
+            - inv_outer_width * outer_sigmoid.y() * inner_sigmoid.x()
+            + inv_inner_width * inner_sigmoid.y() * outer_sigmoid.x());
 }
 
 
@@ -220,7 +220,7 @@ float2 hbond_angular_potential(float dotp)
     const float inv_dp_width = 1.f/0.05f;
 
     float2 v = sigmoid((dotp-wall_dp)*inv_dp_width);
-    return make_float2(v.x, inv_dp_width*v.y);
+    return make_vec2(v.x(), inv_dp_width*v.y());
 }
 
 
@@ -233,7 +233,7 @@ float hbond_score(
     float3 HO = H-O;
     
     float magHO2 = mag2(HO) + 1e-6; // a bit of paranoia to avoid division by zero later
-    float invHOmag = rsqrtf(magHO2);
+    float invHOmag = rsqrt(magHO2);
     float magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
 
     float3 rHO = HO*invHOmag;
@@ -247,10 +247,10 @@ float hbond_score(
     float2 angular1 = hbond_angular_potential(dotHOC);
     float2 angular2 = hbond_angular_potential(dotOHN);
 
-    float val =  radial.x * angular1.x * angular2.x;
-    float c0  =  radial.y * angular1.x * angular2.x;
-    float c1  =  radial.x * angular1.y * angular2.x;
-    float c2  = -radial.x * angular1.x * angular2.y;
+    float val =  radial.x() * angular1.x() * angular2.x();
+    float c0  =  radial.y() * angular1.x() * angular2.x();
+    float c1  =  radial.x() * angular1.y() * angular2.x();
+    float c2  = -radial.x() * angular1.x() * angular2.y();
 
     drOC = c1*rHO;
     drHN = c2*rHO;
@@ -269,7 +269,7 @@ inline float coverage_score(
     const float cover_angular_scale  = 2.865f;  // 20 degrees-ish, rather arbitrary
 
     float  dist2 = mag2(displace);
-    float  inv_dist = rsqrtf(dist2);
+    float  inv_dist = rsqrt(dist2);
     float  dist = dist2*inv_dist;
     float3 displace_unitvec = inv_dist*displace;
     float  cos_coverage_angle = dot(rHN,displace_unitvec);
@@ -279,12 +279,12 @@ inline float coverage_score(
 
     float3 col0, col1, col2;
     hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
-    float3 deriv_dir = make_float3(dot(col0,rHN), dot(col1,rHN), dot(col2,rHN));
+    float3 deriv_dir = make_vec3(dot(col0,rHN), dot(col1,rHN), dot(col2,rHN));
 
-    d_displace = (angular_cover.x*radial_cover.y) * displace_unitvec + (-radial_cover.x*angular_cover.y) * deriv_dir;
-    drHN = (-radial_cover.x*angular_cover.y) * displace_unitvec;
+    d_displace = (angular_cover.x()*radial_cover.y()) * displace_unitvec + (-radial_cover.x()*angular_cover.y()) * deriv_dir;
+    drHN = (-radial_cover.x()*angular_cover.y()) * displace_unitvec;
 
-    return radial_cover.x * angular_cover.x;
+    return radial_cover.x() * angular_cover.x();
 }
 
 
@@ -334,8 +334,8 @@ void count_hbond(
 
         for(int nv=0; nv<n_virtual; ++nv) {
             StaticCoord<6> x(virtual_pos.value, ns, nv);
-            virtual_site[nv] = make_float3(x.v[0],x.v[1],x.v[2]);
-            virtual_dir [nv] = make_float3(x.v[3],x.v[4],x.v[5]);
+            virtual_site[nv] = make_vec3(x.v[0],x.v[1],x.v[2]);
+            virtual_dir [nv] = make_vec3(x.v[3],x.v[4],x.v[5]);
         }
 
         // Compute coverage and its derivative
@@ -390,18 +390,18 @@ void count_hbond(
         for(int nv=0; nv<n_virtual; ++nv) {
             float zp = expf(-vs[2*nv+0]);  // protein
             float zs = expf(-vs[2*nv+1]);  // solvent
-            float2 protein_hbond_prob = make_float2(1.f-zp, zp);
-            float2 solvation_fraction = make_float2(zs,-zs);  // we summed log-coverage to get here
+            float2 protein_hbond_prob = make_vec2(1.f-zp, zp);
+            float2 solvation_fraction = make_vec2(zs,-zs);  // we summed log-coverage to get here
 
-            float P = protein_hbond_prob.x;
-            float S = (1.f-P) * solvation_fraction.x;
+            float P = protein_hbond_prob.x();
+            float S = (1.f-P) * solvation_fraction.x();
             vs[2*nv+0] = P;
             vs[2*nv+1] = S;
 
             if(potential) potential[ns] += P*E_protein + S*E_protein_solvent;  // FIXME add z-dependence
 
-            ps_deriv[nv].d_hbond  = protein_hbond_prob.y*(E_protein-solvation_fraction.x*E_protein_solvent);
-            ps_deriv[nv].d_burial = (1.f-P)*solvation_fraction.y*E_protein_solvent;
+            ps_deriv[nv].d_hbond  = protein_hbond_prob.y()*(E_protein-solvation_fraction.x()*E_protein_solvent);
+            ps_deriv[nv].d_burial = (1.f-P)*solvation_fraction.y()*E_protein_solvent;
         }
 
         // now I need to push those derivatives back and accumulate
@@ -419,9 +419,9 @@ void count_hbond(
 
             sc_deriv[p.sc_index] += d;
             virtual_deriv[p.virtual_index] += -d;
-            virtual_deriv[p.virtual_index].v[3] += d_rHN.x;
-            virtual_deriv[p.virtual_index].v[4] += d_rHN.y;
-            virtual_deriv[p.virtual_index].v[5] += d_rHN.z;
+            virtual_deriv[p.virtual_index].v[3] += d_rHN.x();
+            virtual_deriv[p.virtual_index].v[4] += d_rHN.y();
+            virtual_deriv[p.virtual_index].v[5] += d_rHN.z();
         }
 
         // Push protein HBond derivatives
@@ -430,19 +430,19 @@ void count_hbond(
             float* d_donor    = virtual_deriv[p.donor_index   ].v;
             float* d_acceptor = virtual_deriv[p.acceptor_index].v;
 
-            d_donor   [0] += prefactor * p.dH  .x;
-            d_donor   [1] += prefactor * p.dH  .y;
-            d_donor   [2] += prefactor * p.dH  .z;
-            d_donor   [3] += prefactor * p.drHN.x;
-            d_donor   [4] += prefactor * p.drHN.y;
-            d_donor   [5] += prefactor * p.drHN.z;
+            d_donor   [0] += prefactor * p.dH  .x();
+            d_donor   [1] += prefactor * p.dH  .y();
+            d_donor   [2] += prefactor * p.dH  .z();
+            d_donor   [3] += prefactor * p.drHN.x();
+            d_donor   [4] += prefactor * p.drHN.y();
+            d_donor   [5] += prefactor * p.drHN.z();
 
-            d_acceptor[0] += prefactor * p.dO  .x;
-            d_acceptor[1] += prefactor * p.dO  .y;
-            d_acceptor[2] += prefactor * p.dO  .z;
-            d_acceptor[3] += prefactor * p.drOC.x;
-            d_acceptor[4] += prefactor * p.drOC.y;
-            d_acceptor[5] += prefactor * p.drOC.z;
+            d_acceptor[0] += prefactor * p.dO  .x();
+            d_acceptor[1] += prefactor * p.dO  .y();
+            d_acceptor[2] += prefactor * p.dO  .z();
+            d_acceptor[3] += prefactor * p.drOC.x();
+            d_acceptor[4] += prefactor * p.drOC.y();
+            d_acceptor[5] += prefactor * p.drOC.z();
         }
 
         // Write the derivatives to memory
