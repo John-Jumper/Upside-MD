@@ -3,21 +3,22 @@
 
 #include "vector_math.h"
 
-//! Array containing data for each system in the simulation
-struct SysArray {
-    float *x;      //!< data pointer
-    int   offset;  //!< offset per system, units of floats
-    //! Initialize from existing data
-    SysArray(float* x_, int offset_):
-        x(x_), offset(offset_) {}
-    //! Default initialization makes x the null pointer
-    SysArray(): x(nullptr), offset(0) {}
-};
+// //! Array containing data for each system in the simulation
+// struct SysArray {
+//     float *x;      //!< data pointer
+//     int   offset;  //!< offset per system, units of floats
+//     //! Initialize from existing data
+//     SysArray(float* x_, int offset_):
+//         x(x_), offset(offset_) {}
+//     //! Default initialization makes x the null pointer
+//     SysArray(): x(nullptr), offset(0) {}
+// };
 
-inline void copy_sys_array_to_buffer(SysArray arr, int n_system, int n_val, float* buffer) {
+inline void copy_sys_array_to_buffer(SysArray arr, int n_system, int n_elem, int n_dim, float* buffer) {
     for(int ns=0; ns<n_system; ++ns)
-        for(int i=0; i<n_val; ++i)
-            buffer[ns*n_val+i] = arr.x[ns*arr.offset+i];
+        for(int i=0; i<n_elem; ++i)
+            for(int d=0; d<n_dim; ++d) 
+                buffer[ns*n_elem*n_dim+i*n_dim+d] = arr[ns](d,i);
 }
 
 
@@ -70,17 +71,18 @@ struct Coord
         float d[N_DIM_OUTPUT][N_DIM];   //!< derivative of the coordinate with respect to each output dimension
 
     protected:
-        float * const deriv_arr;  
+        int i_slot;
+        mutable VecArray deriv_arr;
 
     public:
-        Coord(): deriv_arr(0) {};
+        Coord(): i_slot(0), deriv_arr(nullptr,0) {};
 
         //! Initialize by specifying a coordinate array, a specific system, and the location within the coordinate array
-        Coord(const CoordArray arr, int system, CoordPair c):
-            deriv_arr(arr.deriv.x + system*arr.deriv.offset + c.slot*N_DIM)
+        Coord(CoordArray arr, int system, CoordPair c):
+            i_slot(c.slot), deriv_arr(arr.deriv[system])
         {
             for(int nd=0; nd<N_DIM; ++nd) 
-                v[nd] = arr.value.x[system*arr.value.offset + c.index*N_DIM + nd];
+                v[nd] = arr.value[system](nd,c.index);
 
             for(int no=0; no<N_DIM_OUTPUT; ++no) 
                 for(int nd=0; nd<N_DIM; ++nd) 
@@ -120,14 +122,14 @@ struct Coord
             switch(WRITE_POLICY) {
                 case OverwriteWritePolicy:
                     for(int no=0; no<N_DIM_OUTPUT; ++no) 
-                        for(int nd=0; nd<N_DIM; ++nd) 
-                            deriv_arr[no*N_DIM + nd]  = d[no][nd];
+                        for(int nd=0; nd<N_DIM; ++nd)
+                            deriv_arr(nd,i_slot+no)  = d[no][nd];
                     break;
 
                 case SumWritePolicy:
                     for(int no=0; no<N_DIM_OUTPUT; ++no) 
                         for(int nd=0; nd<N_DIM; ++nd) 
-                            deriv_arr[no*N_DIM + nd] += d[no][nd];
+                            deriv_arr(nd,i_slot+no) += d[no][nd];
                     break;
             }
         }
@@ -177,7 +179,7 @@ struct StaticCoord
     StaticCoord(SysArray value, int ns, int index)
     {
         for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = value.x[ns*value.offset + index*N_DIM + nd];
+            v[nd] = value[ns](nd,index);
     }
 
     //! Extract first 3 dimensions of the value as a float3
@@ -199,20 +201,22 @@ struct MutableCoord
         // Note that allocating v with size 0 is rejected by some compilers (and maybe the standard)
         float v[(N_DIM==0) ? 1 : N_DIM];  //!< value of the coordinate
     protected:
-        float * const value_arr;
+        int i_slot;
+        VecArray value_arr;
 
     public:
         //! Enum representing whether to initialize by reading an array or just with zeros
         enum Init { ReadValue, Zero };
 
-        MutableCoord(): value_arr(nullptr) {};
+        MutableCoord(): value_arr(nullptr,0) {};
 
         //! Initialize by specifying a SysArray, a specific system, and the location within the SysArray
         MutableCoord(SysArray arr, int system, int index, Init init = ReadValue):
-            value_arr(arr.x + system*arr.offset + index*N_DIM)
+            i_slot(index),
+            value_arr(arr[system])
         {
             for(int nd=0; nd<N_DIM; ++nd) 
-                v[nd] = init==ReadValue ? value_arr[nd] : 0.f;
+                v[nd] = init==ReadValue ? value_arr(nd,i_slot) : 0.f;
         }
 
         //! Extract first 3 dimensions of the value as a float3
@@ -238,43 +242,8 @@ struct MutableCoord
         //! Write the value to the SysArray
         void flush() {
             for(int nd=0; nd<N_DIM; ++nd) 
-                value_arr[nd] = v[nd];
+                value_arr(nd,i_slot) = v[nd];
         }
 };
-
-/*
-template <typename CoordT, typename FuncT>
-void finite_difference(FuncT& f, CoordT& x, float* expected, float eps = 1e-2) 
-{
-    int ndim_output = decltype(f(x))::n_dim;
-    auto y = x;
-    int ndim_input  = decltype(y)::n_dim;
-
-    vector<float> ret(ndim_output*ndim_input);
-    for(int d=0; d<ndim_input; ++d) {
-        CoordT x_prime1 = x; x_prime1.v[d] += eps;
-        CoordT x_prime2 = x; x_prime2.v[d] -= eps;
-
-        auto val1 = f(x_prime1);
-        auto val2 = f(x_prime2);
-        for(int no=0; no<ndim_output; ++no) ret[no*ndim_input+d] = (val1.v[no]-val2.v[no]) / (2*eps);
-    }
-    float z = 0.f;
-    for(int no=0; no<ndim_output; ++no) {
-        printf("exp:");
-        for(int ni=0; ni<ndim_input; ++ni) printf(" % f", expected[no*ndim_input+ni]);
-        printf("\n");
-
-        printf("fd: ");
-        for(int ni=0; ni<ndim_input; ++ni) printf(" % f", ret     [no*ndim_input+ni]);
-        printf("\n\n");
-        for(int ni=0; ni<ndim_input; ++ni) {
-            float t = expected[no*ndim_input+ni]-ret[no*ndim_input+ni];
-            z += t*t;
-        }
-    }
-    printf("rmsd % f\n\n\n", sqrtf(z/ndim_output/ndim_input));
-}
-*/
 
 #endif

@@ -206,10 +206,10 @@ struct PivotSampler {
                 pivot_stats[ns].n_success++;
             } else {
                 // If we reject the pivot, we must reverse it
-                std::copy(
-                        pos_copy.data()+ ns   *pos_sys.offset,
-                        pos_copy.data()+(ns+1)*pos_sys.offset, 
-                        pos_sys.x+ns*pos_sys.offset);
+                std::copy_n(
+                        pos_copy.data() + ns*pos_sys.system_offset, 
+                        pos_sys.system_offset, 
+                        pos_sys[ns].v);
             }
         }
     }

@@ -456,7 +456,7 @@ affine_reverse_autodiff(
         for(int na=0; na<n_res; ++na) {
             float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
 
-            float q[4]; for(int d=0; d<4; ++d) q[d] = affine.x[ns*affine.offset+na*7+d+3];
+            float q[4]; for(int d=0; d<4; ++d) q[d] = affine[ns](d+3,na);
 
             // push back torque to affine derivatives (multiply by quaternion)
             // the torque is in the tangent space of the rotated frame

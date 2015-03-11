@@ -104,7 +104,7 @@ struct BackboneDependentPoint : public CoordNode
         /*
         if(default_logger) {
             default_logger->add_logger<float>("com", {n_system, n_elem, 3}, [&](float* buffer) {
-                    copy_sys_array_to_buffer(coords().value, n_system, n_elem*3, buffer);});
+                    copy_sys_array_to_buffer(coords().value, n_system, n_elem, 3, buffer);});
         }
         */
 
@@ -142,7 +142,6 @@ struct BackboneDependentPoint : public CoordNode
         double align_rel_error = compute_relative_deviation_for_node<7,BackboneDependentPoint,BODY_VALUE>(
                 *this, alignment, coord_pairs);
 
-        // printf("both relative errors %f %f\n", rama_rel_error, align_rel_error);
         return align_rel_error + rama_rel_error;
     }
 };

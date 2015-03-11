@@ -325,8 +325,8 @@ void count_hbond(
     #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         int n_virtual = n_donor + n_acceptor;
-        float* vs = virtual_scores.x + virtual_scores.offset*ns;
-        for(int i=0; i<2*n_virtual; ++i) vs[i] = 0.f;
+        VecArray vs = virtual_scores[ns];
+        for(int nv=0; nv<n_virtual; ++nv) for(int d=0; d<2; ++d) vs(d,nv) = 0.f;
         if(potential) potential[ns] = 0.f;
 
         vector<float3> virtual_site(n_donor+n_acceptor);
@@ -354,7 +354,7 @@ void count_hbond(
                     d.sc_index = n_sc;
                     d.virtual_index = nv;
 
-                    vs[2*nv+1] += coverage_score(displace, virtual_dir[nv], d.d_sc, d.d_rHN, p.radius, p.scale);
+                    vs(1,nv) += coverage_score(displace, virtual_dir[nv], d.d_sc, d.d_rHN, p.radius, p.scale);
                 }
             }
         }
@@ -372,8 +372,8 @@ void count_hbond(
                     float hb = hbond_score(virtual_site[nd], virtual_site[na], virtual_dir[nd], virtual_dir[na],
                                            d.dH,             d.dO,             d.drHN,          d.drOC);
                     float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
-                    vs[2*nd+0] += hb_log;
-                    vs[2*na+0] += hb_log;
+                    vs(0,nd) += hb_log;
+                    vs(0,na) += hb_log;
 
                     float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
                     d.dH   *= deriv_prefactor;
@@ -388,15 +388,15 @@ void count_hbond(
         struct PSDeriv {float d_hbond,d_burial;};
         vector<PSDeriv> ps_deriv(n_virtual);
         for(int nv=0; nv<n_virtual; ++nv) {
-            float zp = expf(-vs[2*nv+0]);  // protein
-            float zs = expf(-vs[2*nv+1]);  // solvent
+            float zp = expf(-vs(0,nv));  // protein
+            float zs = expf(-vs(1,nv));  // solvent
             float2 protein_hbond_prob = make_vec2(1.f-zp, zp);
             float2 solvation_fraction = make_vec2(zs,-zs);  // we summed log-coverage to get here
 
             float P = protein_hbond_prob.x();
             float S = (1.f-P) * solvation_fraction.x();
-            vs[2*nv+0] = P;
-            vs[2*nv+1] = S;
+            vs(0,nv) = P;
+            vs(1,nv) = S;
 
             if(potential) potential[ns] += P*E_protein + S*E_protein_solvent;  // FIXME add z-dependence
 
@@ -515,7 +515,7 @@ struct HBondEnergy : public HBondCounter
 
         count_hbond(
                 potential.data(),
-                SysArray(virtual_score.data(), 2*(n_donor+n_acceptor)),
+                SysArray(virtual_score.data(), (n_donor+n_acceptor)*2, n_donor+n_acceptor),
                 infer.coords(),
                 n_donor,    n_acceptor,
                 virtual_pair.data(),

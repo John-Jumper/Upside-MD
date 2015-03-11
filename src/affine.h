@@ -80,17 +80,19 @@ struct AffineCoord
     float U[9];    //!< rotation matrix
     float d[NDIM_OUTPUT][6]; //!< first three components are translation deriv, second 3 are torque deriv
 
-    float* deriv_arr;
+    int i_slot;
+    mutable VecArray deriv_arr;
 
     AffineCoord() {};
 
     //! Initialize from coordinate array, system index, and an index into the coordinate array
     AffineCoord(const CoordArray arr, int system, const CoordPair &c):
-        deriv_arr(arr.deriv.x + system*arr.deriv.offset + c.slot*6)
+        i_slot(c.slot),
+        deriv_arr(arr.deriv[system])
     {
         float q[4];
-        for(int nd=0; nd<3; ++nd) t[nd] = arr.value.x[system*arr.value.offset + c.index*7 + nd    ];
-        for(int nd=0; nd<4; ++nd) q[nd] = arr.value.x[system*arr.value.offset + c.index*7 + nd + 3];
+        for(int nd=0; nd<3; ++nd) t[nd] = arr.value[system](nd,  c.index);
+        for(int nd=0; nd<4; ++nd) q[nd] = arr.value[system](nd+3,c.index);
 
         // FIXME remove normalization
         float norm_factor = 1.f/sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
@@ -204,7 +206,7 @@ struct AffineCoord
     void flush() const {
         for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) 
             for(int nd=0; nd<6; ++nd) 
-                deriv_arr[ndo*6+nd] = d[ndo][nd];
+                deriv_arr(nd,i_slot+ndo) = d[ndo][nd];
     }
 };
 

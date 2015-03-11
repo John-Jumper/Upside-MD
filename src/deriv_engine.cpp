@@ -49,7 +49,7 @@ void check_arguments_length(const ArgList& arguments, int n_expected) {
 
 void Pos::propagate_deriv() {
     Timer timer(string("pos_deriv"));
-    deriv_accumulation(SysArray(deriv.data(),n_atom*3), 
+    deriv_accumulation(deriv_array(),
             slot_machine.accum_array(), slot_machine.deriv_tape.data(), 
             slot_machine.deriv_tape.size(), n_atom, n_system);
 }
@@ -136,7 +136,7 @@ void DerivEngine::compute(ComputeMode mode) {
 }
 
 
-void DerivEngine::integration_cycle(float* mom, float dt, float max_force, IntegratorType type) {
+void DerivEngine::integration_cycle(SysArray mom, float dt, float max_force, IntegratorType type) {
     // integrator from Predescu et al., 2012
     // http://dx.doi.org/10.1080/00268976.2012.681311
 
@@ -150,9 +150,9 @@ void DerivEngine::integration_cycle(float* mom, float dt, float max_force, Integ
         compute(DerivMode);   // compute derivatives
         Timer timer(string("integration"));
         integration_stage( 
-                SysArray(mom,                pos->n_atom*3), 
-                SysArray(pos->output.data(), pos->n_atom*3), 
-                SysArray(pos->deriv.data(),  pos->n_atom*3),
+                mom,
+                pos->coords().value,
+                pos->deriv_array(),
                 dt*mom_update[stage], dt*pos_update[stage], max_force, 
                 pos->n_atom, pos->n_system);
     }

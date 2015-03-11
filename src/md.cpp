@@ -37,7 +37,7 @@ integration_stage(
         int n_atom,
         int n_system)
 {
-#pragma omp parallel for
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int na=0; na<n_atom; ++na) {
             MutableCoord<3> p(mom,   ns, na);
@@ -67,8 +67,9 @@ void deriv_accumulation(
 
         for(int nt=0; nt<n_tape; ++nt) {
             auto tape_elem = tape[nt];
-            for(int rec=0; rec<int(tape_elem.output_width); ++rec) 
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
                 coords[tape_elem.atom] += StaticCoord<3>(accum_buffer, ns, tape_elem.loc + rec).f3();
+            }
         }
 
         for(int na=0; na<n_atom; ++na) coords[na].flush();

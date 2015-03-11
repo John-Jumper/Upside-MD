@@ -247,7 +247,7 @@ struct RamaCoord : public CoordNode
         /*
         if(default_logger) {
             default_logger->add_logger<float>("rama", {n_system,n_elem,2}, [&](float* buffer) {
-                    copy_sys_array_to_buffer(coords().value, n_system, n_elem*2, buffer);});
+                    copy_sys_array_to_buffer(coords().value, n_system, n_elem,2, buffer);});
         }
         */
     }
@@ -294,6 +294,8 @@ void dist_spring(
             float3 disp = x1.f3() - x2.f3();
             float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
             if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist);
+  //          printf("distance(%3i,%3i) = %.2f  %.2f\n", p.atom[0].index, p.atom[1].index, mag(disp),
+// 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist));
 
             x1.set_deriv( deriv);
             x2.set_deriv(-deriv);

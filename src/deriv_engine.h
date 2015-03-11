@@ -23,23 +23,25 @@ struct SlotMachine
     const int width;
     const int n_elem;
     const int n_system;
-    int offset;
 
+    int n_slot;
     std::vector<DerivRecord> deriv_tape;
     std::vector<float>       accum;
 
     SlotMachine(int width_, int n_elem_, int n_system_): 
-        width(width_), n_elem(n_elem_), n_system(n_system_), offset(0) {}
+        width(width_), n_elem(n_elem_), n_system(n_system_), n_slot(0) {}
 
     void add_request(int output_width, CoordPair &pair) { 
         DerivRecord prev_record = deriv_tape.size() ? deriv_tape.back() : DerivRecord(-1,0,0);
         deriv_tape.emplace_back(pair.index, prev_record.loc+prev_record.output_width, output_width);
         pair.slot = deriv_tape.back().loc;
         for(int i=0; i<output_width*width*n_system; ++i) accum.push_back(0.f);
-        offset += output_width*width;
+        n_slot += output_width;
     }
 
-    SysArray accum_array() { return SysArray(accum.data(), offset); }
+    SysArray accum_array() { 
+        return SysArray(accum.data(), n_slot*width, n_slot); 
+    }
 };
 
 
@@ -102,7 +104,7 @@ struct CoordNode : public DerivComputation
         output(n_system*n_elem*elem_width), 
         slot_machine(elem_width, n_elem, n_system) {}
     virtual CoordArray coords() {
-        return CoordArray(SysArray(output.data(), n_elem*elem_width), slot_machine.accum_array());
+        return CoordArray(SysArray(output.data(), n_elem*elem_width, n_elem), slot_machine.accum_array());
     }
 };
 
@@ -136,7 +138,10 @@ struct Pos : public CoordNode
     virtual void propagate_deriv();
     virtual double test_value_deriv_agreement() {return 0.;};
     CoordArray coords() {
-        return CoordArray(SysArray(output.data(), n_atom*3), slot_machine.accum_array());
+        return CoordArray(SysArray(output.data(), n_atom*3,n_atom), slot_machine.accum_array());
+    }
+    SysArray deriv_array() {
+        return SysArray(deriv.data(), n_atom*3, n_atom);
     }
 };
 
@@ -183,7 +188,7 @@ struct DerivEngine
 
     void compute(ComputeMode mode);
     enum IntegratorType {Verlet=0, Predescu=1};
-    void integration_cycle(float* mom, float dt, float max_force, IntegratorType type = Verlet);
+    void integration_cycle(SysArray mom, float dt, float max_force, IntegratorType type = Verlet);
 };
 
 double get_n_hbond(DerivEngine &engine);
@@ -247,7 +252,7 @@ void reverse_autodiff(
         int n_atom, 
         int n_system)
 {
-#pragma omp parallel for
+    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         std::vector<TempCoord<my_width>> sens(n_atom);
         for(int nt=0; nt<n_tape; ++nt) {
@@ -328,7 +333,7 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
             for(int eo=0; eo<elem_width_output; ++eo) {
                 StaticCoord<NDIM_INPUT> d(accum_array, 0, cp.slot+eo);
                 for(int i=0; i<NDIM_INPUT; ++i) {
-                    jacobian[no*elem_width_output*input_size + eo*input_size + cp.index*NDIM_INPUT + i] += d.v[i];
+                    jacobian[eo*coord_pairs.size()*input_size + no*input_size + i*(input_size/NDIM_INPUT) + cp.index] += d.v[i];
                 }
             }
         }
@@ -410,26 +415,35 @@ double compute_relative_deviation_for_node(
     if(arg_type == BODY_VALUE) {
         // we need to convert the torque to a quaternion derivative
         if(NDIM_INPUT != 7) throw "impossible";
-        std::vector<float> pred_deriv_quat;
+        std::vector<float> pred_deriv_quat((pred_deriv.size()/6) * 7);
 
         if(pred_deriv.size()%6) throw "wrong";
         if(argument.elem_width != 7) throw "wrong";
         if((pred_deriv.size()/6) % argument.n_elem) throw "inconsistent";
 
-        for(unsigned i=0; 6*i<pred_deriv.size(); ++i) {
-            // just copy over CoM derivatives
-            pred_deriv_quat.push_back(pred_deriv[6*i+0]);
-            pred_deriv_quat.push_back(pred_deriv[6*i+1]);
-            pred_deriv_quat.push_back(pred_deriv[6*i+2]);
+        // dummy system index will function as a output index
+        SysArray quat_sys(pred_deriv_quat.data(), 7*argument.n_elem, argument.n_elem);
+        SysArray torq_sys(pred_deriv     .data(), 6*argument.n_elem, argument.n_elem);
+        printf("FIXME testing code for quaternion coordinates is not right yet\n");
 
-            const float* q = argument.output.data() + 7*(i%argument.n_elem)+3;
+        unsigned arg_size = argument.n_elem*argument.elem_width;
+        for(int no=0; no<pred_deriv.size()/torq_sys.system_offset; ++no) {
+            for(unsigned i=0; 6*i<pred_deriv.size()/arg_size; ++i) {
+                // just copy over CoM derivatives
+                quat_sys[no](0,i) = torq_sys[no](0,i);
+                quat_sys[no](1,i) = torq_sys[no](1,i);
+                quat_sys[no](2,i) = torq_sys[no](2,i);
 
-            // rotate torque back to the reference frame
-            float torque[3] = {pred_deriv[6*i+3], pred_deriv[6*i+4], pred_deriv[6*i+5]};
-            pred_deriv_quat.push_back(2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]));
-            pred_deriv_quat.push_back(2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]));
-            pred_deriv_quat.push_back(2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]));
-            pred_deriv_quat.push_back(2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]));
+                StaticCoord<7> inp(argument.coords().value, 0, i%argument.n_elem);
+                const float* q = inp.v+3;
+
+                // rotate torque back to the reference frame
+                float torque[3] = {torq_sys[no](3,i), torq_sys[no](4,i), torq_sys[no](5,i)};
+                quat_sys[no](3,i) = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
+                quat_sys[no](4,i) = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
+                quat_sys[no](5,i) = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
+                quat_sys[no](6,i) = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+            }
         }
 
         pred_deriv = pred_deriv_quat;

@@ -4,6 +4,47 @@
 #include <cmath>
 #include <type_traits>
 
+struct VecArray {
+    float* v;
+    int component_offset;
+
+    VecArray(float* v_, int component_offset_):
+        v(v_), component_offset(component_offset_) {}
+
+    VecArray shifted(int shift_amount) {
+        return VecArray(v + shift_amount*component_offset, component_offset);
+    }
+
+    float& operator()(int i_comp, int i_elem) {
+        return v[i_comp*component_offset + i_elem];
+    }
+
+    const float& operator()(int i_comp, int i_elem) const {
+        return v[i_comp*component_offset + i_elem];
+    }
+};
+
+
+struct SysArray {
+    float* v;
+    int system_offset;
+    int component_offset;
+
+    SysArray(float* v_, int system_offset_, int component_offset_):
+        v(v_), system_offset(system_offset_), component_offset(component_offset_) {}
+    SysArray():
+        v(nullptr), system_offset(0), component_offset(0) {}
+    
+    VecArray operator[](int ns) {
+        return VecArray(v + ns*system_offset, component_offset);
+    }
+
+    const VecArray operator[](int ns) const {
+        return VecArray(v + ns*system_offset, component_offset);
+    }
+};
+
+
 template <int ndim, typename ScalarT = float>
 struct alignas(std::alignment_of<ScalarT>::value) Vec {
     ScalarT v[ndim];
@@ -21,10 +62,16 @@ struct alignas(std::alignment_of<ScalarT>::value) Vec {
     const ScalarT& operator[](int i) const {return v[i];}
 };
 
-
 typedef Vec<2,float> float2;
 typedef Vec<3,float> float3;
 typedef Vec<4,float> float4;
+
+template <int D>
+Vec<D,float> load_vec(const VecArray& a, int idx) {
+    Vec<D,float> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = a(d,idx);
+}
 
 //! Get component of vector by index
 

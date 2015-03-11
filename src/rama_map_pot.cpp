@@ -41,6 +41,8 @@ void rama_map_pot(
             if(potential) potential[ns] += map_value[2];
             r.d[0][0] = map_value[0] * scale;
             r.d[0][1] = map_value[1] * scale;
+            // printf("%2i %2i writing deriv %f %f\n", params[nr].residue.index, params[nr].residue.slot, 
+            //         map_value[0]*scale, map_value[1]*scale);
             r.flush();
         }
     }

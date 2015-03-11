@@ -22,7 +22,7 @@ struct Basin {
 template<int N_BASIN>
 void basin_correlation_pot(
         float* restrict potential,
-        const CoordArray rama,
+        CoordArray rama,
         const BasinCorrelationParams* restrict params,
         const float* connection_matrices,
         float basin_sharpness, Basin* basins,
