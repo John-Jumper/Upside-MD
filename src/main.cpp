@@ -194,6 +194,15 @@ try {
     SwitchArg generate_expected_deriv_arg("", "generate-expected-deriv", 
             "write an expected deriv to the input for later testing (developer only)", 
             cmd, false);
+    ValueArg<string> re_energize_arg("", "re-energize", 
+            "path to .h5 file with a trajectory under /output/pos for which the energy will be recalculated "
+            "using the energy in --config.  Must have the same number of systems as --config and must be a "
+            "different file than --config.", false, "", "file path", cmd);
+    SwitchArg potential_deriv_agreement_arg("", "potential-deriv-agreement",
+            "(developer use only) check the agreement of the derivative with finite differences "
+            "of the potential for the initial structure.  This may give strange answers for native structures "
+            "(no steric clashes may given an agreement of NaN) or random structures (where bonds and angles are "
+            "exactly at their equilibrium values).  Interpret these results at your own risk.", cmd, false);
     cmd.parse(argc, argv);
 
     printf("invocation:");
@@ -247,18 +256,18 @@ try {
         printf("\n");
 
         deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
-        // {
-        //     if(n_system>1) throw string("Testing code does not support n_system > 1");
-        //     printf("Initial agreement:\n");
-        //     for(auto &n: engine.nodes)
-        //         printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
-        //     printf("\n");
+        if(potential_deriv_agreement_arg.getValue()){
+            if(n_system>1) throw string("Testing code does not support n_system > 1");
+            printf("Initial agreement:\n");
+            for(auto &n: engine.nodes)
+                printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
+            printf("\n");
 
-        //     auto relative_error = potential_deriv_agreement(engine);
-        //     printf("overall potential relative error: ");
-        //     for(auto r: relative_error) printf(" %.5f", r);
-        //     printf("\n");
-        // }
+            auto relative_error = potential_deriv_agreement(engine);
+            printf("overall potential relative error: ");
+            for(auto r: relative_error) printf(" %.5f", r);
+            printf("\n");
+        }
 
         float dt = time_step_arg.getValue();
         double duration = duration_arg.getValue();
@@ -374,9 +383,53 @@ try {
             }
         }
 
-        auto tstart = chrono::high_resolution_clock::now();
         double physical_time = 0.;
         state_logger.add_logger<double>("time", {}, [&](double* time_buffer) {*time_buffer=physical_time;});
+
+        if(re_energize_arg.getValue() != "") {
+            H5Obj coord_config;
+            try {
+                coord_config = h5_obj(H5Fclose, H5Fopen(re_energize_arg.getValue().c_str(), 
+                            H5F_ACC_RDWR, H5P_DEFAULT));
+            } catch(string &s) {
+                throw string("Unable to open configuration file at ") + config_arg.getValue();
+            }
+
+            int n_frame = get_dset_size(1, coord_config.get(), "/output/time")[0];
+            printf("number of frames to re-energize %i\n", n_frame);
+            check_size(coord_config.get(), "/output/time", n_frame);
+            check_size(coord_config.get(), "/output/pos",  n_frame, n_system, n_atom, 3);
+
+            // first read the physical times
+            vector<double> all_times(n_frame);
+            traverse_dset<1,double>(coord_config.get(), "/output/time", [&](size_t nf, double x) {
+                    all_times.push_back(x);});
+
+            // now load the coordinate information, processing a frame as soon as it is ready
+            SysArray pos_sys = engine.pos->coords().value;
+            traverse_dset<4,float>(coord_config.get(), "/output/pos", 
+                    [&](size_t nf, size_t ns, size_t na, size_t d, float x) {
+                    pos_sys[ns](d,na) = x;
+                    if(na==n_atom-1 && d==2) { 
+                         // we are done loading a frame, so process it
+                         physical_time = all_times[nf];
+                         state_logger.collect_samples();
+                    }});
+
+            if(h5_exists(coord_config.get(), "/output/potential")) {
+                check_size(coord_config.get(), "/output/potential", n_frame, n_system);
+                vector<double> old_potential(n_frame*n_system);
+                traverse_dset<2,double>(coord_config.get(), "/output/potential", [&](int nf, int ns, double x){
+                        old_potential[nf*n_system + ns] = x;});
+
+                state_logger.log_once<double>("old_potential", {n_frame, n_system}, 
+                        [&](double* buffer) {for(int i=0; i<n_frame*n_system; ++i) buffer[i] = old_potential[i];});
+            }
+
+            return 0; // do not run dynamics
+        }
+
+        auto tstart = chrono::high_resolution_clock::now();
         for(uint64_t nr=0; nr<n_round; ++nr) {
             physical_time = nr*3*double(dt);
 

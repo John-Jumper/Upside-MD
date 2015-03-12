@@ -207,7 +207,9 @@ try {
     auto dset  = h5_obj(H5Dclose, H5Dopen2(group, name, H5P_DEFAULT));
     auto space = h5_obj(H5Sclose, H5Dget_space(dset.get()));
 
-    if(H5Sget_simple_extent_ndims(space.get()) != ndims) throw std::string("wrong size for id array");
+    if(H5Sget_simple_extent_ndims(space.get()) != ndims) 
+        throw std::string("wrong size for array, expected ") + std::to_string(ndims) + " but got " + 
+                std::to_string(H5Sget_simple_extent_ndims(space.get()));
     hsize_t dims[ndims]; h5_noerr(H5Sget_simple_extent_dims(space.get(), dims, NULL));
 
     size_t dim_product = 1;

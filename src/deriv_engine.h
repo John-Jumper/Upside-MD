@@ -427,7 +427,7 @@ double compute_relative_deviation_for_node(
         printf("FIXME testing code for quaternion coordinates is not right yet\n");
 
         unsigned arg_size = argument.n_elem*argument.elem_width;
-        for(int no=0; no<pred_deriv.size()/torq_sys.system_offset; ++no) {
+        for(int no=0; no<int(pred_deriv.size()/torq_sys.system_offset); ++no) {
             for(unsigned i=0; 6*i<pred_deriv.size()/arg_size; ++i) {
                 // just copy over CoM derivatives
                 quat_sys[no](0,i) = torq_sys[no](0,i);
