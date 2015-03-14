@@ -23,12 +23,12 @@ def cut_out_rows(hdf_array, remove_row):
     hdf_array.truncate(n_keep)
 
 
-def multicut(chain_starts, pot, grp_name, id_name, other_names):
+def multicut(chain_starts, pot, grp_name, id_name, other_names, consider_row = None):
     if grp_name not in pot: return
     grp = pot._v_children[grp_name]
 
-
     multichain = find_multichain_terms(grp._v_children[id_name], chain_starts)
+    if consider_row is not None: multichain = multichain & consider_row
     print 'Cutting %s (%i rows)' % (grp, multichain.sum())
     for nm in [id_name] + list(other_names):
         print '    %s' % nm
@@ -61,7 +61,7 @@ def main():
 
     multicut(chain_starts, pot, 'angle_spring', 'id', 'equil_dist spring_const'.split())
     multicut(chain_starts, pot, 'dihedral_spring', 'id', 'equil_dist spring_const'.split())
-    multicut(chain_starts, pot, 'dist_spring', 'id', 'equil_dist spring_const bonded_atoms'.split())
+    multicut(chain_starts, pot, 'dist_spring', 'id', 'equil_dist spring_const bonded_atoms'.split(), pot.dist_spring.bonded_atoms[:].astype('bool'))
 
     if 'infer_H_O' in pot: 
         print 'Checking %s' % pot.infer_H_O
