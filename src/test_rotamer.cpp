@@ -204,68 +204,94 @@ Affine3f rigid_alignment(
     return Affine3f(Matrix4f(transform));
 }
 
-// int old_main(int argc, char** argv) try {
-//     auto config = h5_obj(H5Fclose, H5Fopen("/rust/work/residues.h5", H5F_ACC_RDONLY, H5P_DEFAULT));
-//     auto residues = open_group(config.get(), "residues");
+// int main_CoM(int argc, char** argv) try {
+//     auto config = h5_obj(H5Fclose, H5Fopen("/home/jumper/Dropbox/code/upside-parameters/Dunbrack-Rotamer-Simple1-5.h5", H5F_ACC_RDONLY, H5P_DEFAULT));
 // 
-//     struct ModelResidue {
-//         float psi;
-//         MatrixX3f pos;
-//     };
+//     auto output = h5_obj(H5Fclose, H5Fcreate("backbone-dependent-CoM.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
 // 
-//     // auto& res_func = *(res_func_map().find(rname)->second);
+//     const int n_bin = 37;
+//     const float bin_size = (2*M_PI_F) / (n_bin-1);
+// 
 //     for(auto &rf: res_func_map()) {
 //         string rname   = rf.first;
 //         auto &res_func = *rf.second;
-//         
-//         std::vector<ModelResidue> res;
+//         printf("%s\n", rname.c_str());
 // 
-//         int n_res  = get_dset_size(3, residues.get(), (rname+"/pos").c_str())[0];
-//         int n_atom = get_dset_size(3, residues.get(), (rname+"/pos").c_str())[1];
+//         std::vector<float> centers;
+//         auto out_grp = ensure_group(output.get(), rname.c_str());
 // 
-//         check_size(residues.get(), (rname+"/rama").c_str(), n_res, 2);
-//         check_size(residues.get(), (rname+"/pos").c_str(),  n_res, n_atom, 3);
+//         if(rname == "ALA" || rname == "GLY") {
+//             for(int i1=0; i1<n_bin; ++i1) {
+//                 for(int i2=0; i2<n_bin; ++i2) {
+//                     float psi = i2*bin_size - M_PI_F;
+//                     MatrixX3f pos;
+//                     array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
+//                     res_func(pos, psi, chi);
+//                     RowVector3f curr_center = pos.row((rname == "GLY") ?  1 : 4);
+//                     Vector3d center = curr_center.transpose().cast<double>();
+//                     centers.push_back(center[0]);
+//                     centers.push_back(center[1]);
+//                     centers.push_back(center[2]);
+//                     // cout << rname << " " << center.transpose() << "\n";
+//                 }
+//             }
+//         } else {
+//             auto grp     = open_group  (config.get(), rname.c_str());
 // 
-//         traverse_dset<2,float>(residues.get(),(rname+"/rama").c_str(),[&](size_t nr, size_t nd, float x) {
-//                 if(nd==1) {res.emplace_back(); res.back().psi = x; res.back().pos.resize(n_atom,3);}});
-//         traverse_dset<3,float>(residues.get(),(rname+"/pos").c_str(),[&](size_t nr, size_t na, size_t d, float x) {
-//                 res[nr].pos(na,d) = x; });
+//             // int n_bin = get_dset_size(3, grp.get(), "rama_index_range")[0];
+//             int n_res_total = get_dset_size(2, grp.get(), "chi")[0];
 // 
-//         // shift backbone CoM to the origin
-//         for(auto &p: res)
-//             p.pos.rowwise() -= RowVector3f(p.pos.topRows(3).colwise().mean());
+//             check_size(grp.get(), "rama_index_range", n_bin, n_bin, 2);
+//             check_size(grp.get(), "chi",  n_res_total, 4);
+//             check_size(grp.get(), "prob", n_res_total);
 // 
-//         res.erase(remove_if(begin(res), end(res), [](ModelResidue& r){ return isnan(r.psi); }), end(res));
-//         cout << setprecision(3) << fixed;
+//             MatrixXi starts(n_bin,n_bin);
+//             MatrixXi stops (n_bin,n_bin);
+//             traverse_dset<3,int>(grp.get(), "rama_index_range", [&](size_t nb1, size_t nb2, size_t ss, int x) {
+//                     if(ss==0) starts(nb1,nb2) = x;
+//                     else      stops (nb1,nb2) = x; });
 // 
-//         double all_rmsd = 0.;
-//         int n_iter = res.size();
-//         Vector4d linear_part      = Vector4d::Zero();
-//         Vector3d translation_part = Vector3d::Zero();
+//             MatrixXf chis(n_res_total,4);
+//             traverse_dset<2,float>(grp.get(), "chi", [&](size_t nr, size_t nchi, float x) { chis(nr,nchi)=x; });
 // 
-//         for(int nr=0; nr<n_iter; ++nr) {
-//             auto &p = res[nr];
-//             std::array<float,4> chi{{0.f, 0.f, 0.f, 0.f}};
-//             get_rotamer(rname, p.pos, chi);
-//             MatrixX3f ref;
-//             res_func(ref, p.psi, chi);
-//             Affine3f alignment = Affine3f::Identity(); //rigid_alignment(p.pos, ref);
-//             linear_part      += quat2vec(Quaterniond(alignment.linear().cast<double>()));
-//             translation_part += alignment.translation().cast<double>();
-//             MatrixX3f dev = p.pos - (alignment * ref.transpose().colwise().homogeneous()).transpose();
+//             VectorXf prob(n_res_total);
+//             traverse_dset<1,float>(grp.get(), "prob", [&](size_t nr, float x) { prob[nr]=x; });
 // 
-//             //printf("psi %.2f %.2f\n", p.psi/deg, angle_wrap(M_PI_F+dihedral(ref.topRows(4)))/deg);
-//             // all_rmsd += rmsd(MatrixX3f(dev.topRows(3)));
-//             all_rmsd += rmsd(dev);
-//             // cout << rmsd(dev) << "\n\n";
+//             for(int i1=0; i1<n_bin; ++i1) {
+//                 for(int i2=0; i2<n_bin; ++i2) {
+//                     Vector3d center = Vector3d::Zero();
+//                     MatrixX3f pos;
+// 
+//                     float psi = i2*bin_size - M_PI_F;
+// 
+//                     double total_prob = 0.;
+//                     for(int nr=starts(i1,i2); nr<stops(i1,i2); ++nr) {
+//                         array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
+//                         for(int nchi=0; nchi<4; ++nchi) chi[nchi] = chis(nr,nchi);
+//                         res_func(pos, psi, chi);
+// 
+//                         RowVector3f curr_center = pos.bottomRows(pos.rows()-5).colwise().mean();
+//                         center += (prob[nr]*curr_center).transpose().cast<double>();
+//                         total_prob += prob[nr];
+//                     }
+//                     center *= 1./total_prob;
+//                     centers.push_back(center[0]);
+//                     centers.push_back(center[1]);
+//                     centers.push_back(center[2]);
+//                     // cout << rname << " " << center.transpose() << "\n";
+//                 }
+//             }
 //         }
-//         linear_part      /= n_iter;
-//         translation_part /= n_iter;
-//         cout << rname << " avg_rmsd: " << all_rmsd/n_iter << "(" << n_iter << ")\n";
-//         // cout << Quaterniond(linear_part).norm() << "\n";
-//         // cout << Quaterniond(linear_part).normalized().toRotationMatrix() << "\n";
-//         // cout << translation_part << "\n";
 // 
+//         auto center_array = create_earray(out_grp.get(), "center", H5T_NATIVE_FLOAT,
+//                 {0,n_bin,3}, {1,n_bin,3});
+//         append_to_dset(center_array.get(), centers, 0);
+// 
+//         vector<float> bin_vals(n_bin);
+//         for(int nb=0; nb<n_bin; ++nb) bin_vals[nb] = nb*bin_size - M_PI_F;
+//         auto bin_array = create_earray(out_grp.get(), "bin_values", H5T_NATIVE_FLOAT,
+//                 {0}, {n_bin});
+//         append_to_dset(bin_array.get(), bin_vals, 0);
 //     }
 // 
 //     return 0;
@@ -275,12 +301,13 @@ Affine3f rigid_alignment(
 
 
 int main(int argc, char** argv) try {
-    auto config = h5_obj(H5Fclose, H5Fopen("/home/jumper/Dropbox/code/upside-parameters/Dunbrack-Rotamer-Simple1-5.h5", H5F_ACC_RDONLY, H5P_DEFAULT));
-
-    auto output = h5_obj(H5Fclose, H5Fcreate("backbone-dependent-CoM.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
+    auto config = h5_obj(H5Fclose, 
+            H5Fopen("/home/jumper/Dropbox/code/upside-parameters/Dunbrack-Rotamer-Simple1-5.h5", 
+                H5F_ACC_RDWR, H5P_DEFAULT));
 
     const int n_bin = 37;
     const float bin_size = (2*M_PI_F) / (n_bin-1);
+    H5Obj out_grp;
 
     for(auto &rf: res_func_map()) {
         string rname   = rf.first;
@@ -288,9 +315,22 @@ int main(int argc, char** argv) try {
         printf("%s\n", rname.c_str());
 
         std::vector<float> centers;
-        auto out_grp = ensure_group(output.get(), rname.c_str());
+        auto grp = ensure_group(config.get(), rname.c_str());
 
         if(rname == "ALA" || rname == "GLY") {
+            auto rir_array = create_earray(grp.get(), "rama_index_range", H5T_NATIVE_INT,
+                    {0,n_bin,2}, {n_bin,n_bin,2});
+            std::vector<float> rir;
+            for(int i=0; i<n_bin*n_bin; ++i) {
+                rir.push_back(i);
+                rir.push_back(i+1);
+            }
+            append_to_dset(rir_array.get(), rir, 0);
+
+            auto prob_array = create_earray(grp.get(), "prob", H5T_NATIVE_INT, {0}, {n_bin*n_bin});
+            std::vector<float> prob(n_bin*n_bin,1.f);
+            append_to_dset(prob_array.get(), prob, 0);
+
             for(int i1=0; i1<n_bin; ++i1) {
                 for(int i2=0; i2<n_bin; ++i2) {
                     float psi = i2*bin_size - M_PI_F;
@@ -302,18 +342,14 @@ int main(int argc, char** argv) try {
                     centers.push_back(center[0]);
                     centers.push_back(center[1]);
                     centers.push_back(center[2]);
-                    // cout << rname << " " << center.transpose() << "\n";
                 }
             }
         } else {
-            auto grp     = open_group  (config.get(), rname.c_str());
-
-            // int n_bin = get_dset_size(3, grp.get(), "rama_index_range")[0];
             int n_res_total = get_dset_size(2, grp.get(), "chi")[0];
-
-            check_size(grp.get(), "rama_index_range", n_bin, n_bin, 2);
             check_size(grp.get(), "chi",  n_res_total, 4);
-            check_size(grp.get(), "prob", n_res_total);
+
+            MatrixXf chis(n_res_total,4);
+            traverse_dset<2,float>(grp.get(), "chi", [&](size_t nr, size_t nchi, float x) { chis(nr,nchi)=x; });
 
             MatrixXi starts(n_bin,n_bin);
             MatrixXi stops (n_bin,n_bin);
@@ -321,46 +357,33 @@ int main(int argc, char** argv) try {
                     if(ss==0) starts(nb1,nb2) = x;
                     else      stops (nb1,nb2) = x; });
 
-            MatrixXf chis(n_res_total,4);
-            traverse_dset<2,float>(grp.get(), "chi", [&](size_t nr, size_t nchi, float x) { chis(nr,nchi)=x; });
-
-            VectorXf prob(n_res_total);
-            traverse_dset<1,float>(grp.get(), "prob", [&](size_t nr, float x) { prob[nr]=x; });
-
             for(int i1=0; i1<n_bin; ++i1) {
                 for(int i2=0; i2<n_bin; ++i2) {
-                    Vector3d center = Vector3d::Zero();
                     MatrixX3f pos;
 
                     float psi = i2*bin_size - M_PI_F;
 
-                    double total_prob = 0.;
                     for(int nr=starts(i1,i2); nr<stops(i1,i2); ++nr) {
                         array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
                         for(int nchi=0; nchi<4; ++nchi) chi[nchi] = chis(nr,nchi);
                         res_func(pos, psi, chi);
 
                         RowVector3f curr_center = pos.bottomRows(pos.rows()-5).colwise().mean();
-                        center += (prob[nr]*curr_center).transpose().cast<double>();
-                        total_prob += prob[nr];
+
+                        centers.push_back(curr_center[0]);
+                        centers.push_back(curr_center[1]);
+                        centers.push_back(curr_center[2]);
                     }
-                    center *= 1./total_prob;
-                    centers.push_back(center[0]);
-                    centers.push_back(center[1]);
-                    centers.push_back(center[2]);
-                    // cout << rname << " " << center.transpose() << "\n";
                 }
             }
         }
 
-        auto center_array = create_earray(out_grp.get(), "center", H5T_NATIVE_FLOAT,
-                {0,n_bin,3}, {1,n_bin,3});
+        auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {0,3}, {1,3});
         append_to_dset(center_array.get(), centers, 0);
 
         vector<float> bin_vals(n_bin);
         for(int nb=0; nb<n_bin; ++nb) bin_vals[nb] = nb*bin_size - M_PI_F;
-        auto bin_array = create_earray(out_grp.get(), "bin_values", H5T_NATIVE_FLOAT,
-                {0}, {n_bin});
+        auto bin_array = create_earray(grp.get(), "bin_values", H5T_NATIVE_FLOAT, {0}, {n_bin});
         append_to_dset(bin_array.get(), bin_vals, 0);
     }
 
