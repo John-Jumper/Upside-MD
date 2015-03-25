@@ -64,6 +64,13 @@ inline H5Obj duplicate_obj(H5Obj& obj) {
     return H5Obj(obj.get(), obj.get_deleter());
 }
 
+static H5Obj open_file(char* path, decltype(H5F_ACC_RDONLY) flags) {
+    if(flags == H5F_ACC_RDONLY || flags == H5F_ACC_RDWR)
+        return h5_obj(H5Fclose, H5Fopen(path, flags, H5P_DEFAULT));
+    else 
+        return h5_obj(H5Fclose, H5Fcreate(path, flags, H5P_DEFAULT, H5P_DEFAULT));
+
+}
 
 //! Check that an HDF object exists at a given path
 

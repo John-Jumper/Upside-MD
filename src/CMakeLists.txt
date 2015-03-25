@@ -13,7 +13,7 @@ else()
     set(DEBUG_FLAGS "-g")
 endif()
 
-set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") #"-fsanitize=address")#
+set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
 set (OPT     " -O3 -ffast-math -fno-finite-math-only -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
@@ -72,3 +72,10 @@ python_executable(support ugly_hack_break_chain.py)
 add_executable(rotamer_sidechain generate_from_rotamer.cpp test_rotamer.cpp h5_support.cpp)
 target_link_libraries(rotamer_sidechain stdc++ m ${HDF5_LIBRARIES})
 set_target_properties(rotamer_sidechain PROPERTIES EXCLUDE_FROM_ALL 1)
+
+include_directories(SYSTEM "/home/jumper/code/external/libdai/include")
+# add_library(optimize_rotamer SHARED EXCLUDE_FROM_ALL rotameric_sidechain.cpp)
+add_executable(optimize_rotamer optimize_rotamer.cpp h5_support.cpp spline.cpp timing.cpp eig.cpp deriv_engine.cpp md.cpp)
+target_link_libraries(optimize_rotamer stdc++ ${HDF5_LIBRARIES} dai gmpxx gmp m)
+set_target_properties(optimize_rotamer PROPERTIES EXCLUDE_FROM_ALL 1)
+# set_target_properties(optimize_rotamer PROPERTIES PREFIX "")

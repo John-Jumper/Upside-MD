@@ -284,6 +284,7 @@ symm_QR_4x4(
     return 1;
 #endif
 }
+}
 
 
 void 
@@ -378,6 +379,7 @@ three_atom_alignment(
     }
 }
 
+namespace {
 
 template <typename CoordT, typename MutableCoordT>
 void affine_alignment_body(

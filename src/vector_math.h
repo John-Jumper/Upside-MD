@@ -45,6 +45,34 @@ struct SysArray {
 };
 
 
+struct range {
+    int start;
+    int stop;
+    int stride;
+
+    range(int stop_): start(0), stop(stop_), stride(1) {}
+    range(int start_, int stop_): start(start_), stop(stop_), stride(1) {}
+    range(int start_, int stop_, int stride_): start(start_), stop(stop_), stride(stride_) {}
+
+    struct iterator {
+        int index;
+        int stride;
+
+        iterator(int index_, int stride_): index(index_), stride(stride_) {}
+        // this operator!= is designed to reprod
+        bool operator!=(iterator other) {return index<other.index;}
+        int  operator*() {return index;}
+        iterator& operator++() {
+            index+=stride;
+            return *this;
+        }
+    };
+
+   iterator begin() {return iterator(start, stride);}
+   iterator end()   {return iterator(stop,  stride);}
+};
+
+
 template <int ndim, typename ScalarT = float>
 struct alignas(std::alignment_of<ScalarT>::value) Vec {
     ScalarT v[ndim];
@@ -71,6 +99,7 @@ Vec<D,float> load_vec(const VecArray& a, int idx) {
     Vec<D,float> r;
     #pragma unroll
     for(int d=0; d<D; ++d) r[d] = a(d,idx);
+    return r;
 }
 
 //! Get component of vector by index

@@ -22,6 +22,14 @@ inline float3 apply_inverse_rotation(const float* restrict U, const float3 &r)
     return ret;
 }
 
+inline float3 apply_affine(const float* restrict U, const float3& t, const float3& r) {
+    float3 ret;
+    ret.x() = U[0]*r.x() + U[1]*r.y() + U[2]*r.z() + t[0];
+    ret.y() = U[3]*r.x() + U[4]*r.y() + U[5]*r.z() + t[1];
+    ret.z() = U[6]*r.x() + U[7]*r.y() + U[8]*r.z() + t[2];
+    return ret;
+}
+
 
 inline void axis_angle_to_rot(
         float* U,
