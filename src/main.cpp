@@ -410,7 +410,7 @@ try {
             traverse_dset<4,float>(coord_config.get(), "/output/pos", 
                     [&](size_t nf, size_t ns, size_t na, size_t d, float x) {
                     pos_sys[ns](d,na) = x;
-                    if(na==n_atom-1 && d==2) { 
+                    if(int(na)==n_atom-1 && int(d)==2) { 
                          // we are done loading a frame, so process it
                          physical_time = all_times[nf];
                          state_logger.collect_samples();

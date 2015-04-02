@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <type_traits>
+#include <memory>
 
 struct VecArray {
     float* v;
@@ -42,6 +43,55 @@ struct SysArray {
     const VecArray operator[](int ns) const {
         return VecArray(v + ns*system_offset, component_offset);
     }
+};
+
+static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
+    for(int d=0; d<n_dim; ++d) 
+        for(int ne=0; ne<n_elem; ++ne) 
+            v(d,ne) = fill_value;
+}
+
+
+static void fill(SysArray s, int n_system, int n_dim, int n_elem, float value) {
+    #pragma omp parallel for schedule(static,1)
+    for(int ns=0; ns<n_system; ++ns) {
+        fill(s[ns], n_dim, n_elem, value);
+    }
+}
+
+
+struct SysArrayStorage {
+    int n_system;
+    int n_dim;
+    int n_elem;
+
+    int component_offset;
+    int system_offset;
+    std::unique_ptr<float[], std::default_delete<float[]>> storage;
+
+    SysArrayStorage(): SysArrayStorage(0,0,0) {}
+
+    SysArrayStorage(int n_system_, int n_dim_, int n_elem_):
+        n_system(n_system_), n_dim(n_dim_), n_elem(n_elem_),
+        component_offset(n_elem),               // FIXME add padding for SIMD alignment
+        system_offset(n_dim*component_offset),  // FIXME add padding for NUMA alignment
+        storage(new float[n_system*system_offset])
+    {}
+
+    SysArray       array()       {return SysArray(storage.get(), system_offset, component_offset);}
+    const SysArray array() const {return SysArray(storage.get(), system_offset, component_offset);}
+
+    void reset(int n_system_, int n_dim_, int n_elem_) {
+        n_system = n_system_;
+        n_dim = n_dim_;
+        n_elem = n_elem_;
+        component_offset = n_elem;
+        system_offset = n_dim*component_offset;
+        storage.reset(new float[n_system*n_dim*n_elem]);
+    }
+
+    VecArray       operator[](int ns)       {return array()[ns];}
+    const VecArray operator[](int ns) const {return array()[ns];}
 };
 
 
@@ -95,12 +145,25 @@ typedef Vec<3,float> float3;
 typedef Vec<4,float> float4;
 
 template <int D>
-Vec<D,float> load_vec(const VecArray& a, int idx) {
+inline Vec<D,float> load_vec(const VecArray& a, int idx) {
     Vec<D,float> r;
     #pragma unroll
     for(int d=0; d<D; ++d) r[d] = a(d,idx);
     return r;
 }
+
+
+template <int D>
+inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
+    #pragma unroll
+    for(int d=0; d<D; ++d) a(d,idx) = r[d];
+}
+
+template <int D>
+inline void update_vec(VecArray a, int idx, const Vec<D> &r) {
+    store_vec(a,idx, load_vec<D>(a,idx) + r);
+}
+
 
 //! Get component of vector by index
 
@@ -111,6 +174,15 @@ inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root 
 inline float sqr  (float x) {return x*x;}  //!< square a number (x^2)
 inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
 inline float blendv(bool b, float x, float y) {return b ? x : y;}
+
+template <int D, typename S>
+inline Vec<D,S> vec_rcp(const Vec<D,S>& x) {
+    Vec<D,S> y;
+    for(int i=0; i<D; ++i) y[i] = rcp(x[i]);
+    return y;
+}
+
+
 
 // FIXME more general blendv needed
 template <int D>
@@ -316,6 +388,15 @@ inline S mag(const Vec<ndim,S>& a) {
     return a_sqrt(mag2(a));
 }
 
+template <int D, typename S>
+inline S sum(const Vec<D,S>& a) {
+    S m = zero<S>();
+    #pragma unroll
+    for(int i=0; i<D; ++i) m += a[i];
+    return m;
+}
+
+
 
 //! cross-product of the vectors a and b
 template <typename S>
@@ -338,6 +419,47 @@ inline float dot(const Vec<D,S>& a, const Vec<D,S>& b){
     return c;
 }
 
+
+template <int D, typename S>
+Vec<D,S> left_multiply_matrix(Vec<D*D,S> m, Vec<D,S> v) {
+    Vec<D,S> mv;
+    for(int i=0; i<D; ++i) {
+        float x = 0.f;
+        for(int j=0; j<D; ++j)
+            x += m[i*D+j] * v[j];
+        mv[i] = x;
+    }
+    return mv;
+}
+
+template <int D, typename S>
+Vec<D,S> right_multiply_matrix(Vec<D,S> v, Vec<D*D,S> m) {
+    Vec<D,S> vm;
+    for(int j=0; j<D; ++j) {
+        float x = 0.f;
+        for(int i=0; i<D; ++i)
+            x += v[i]*m[i*D+j];
+        vm[j] = x;
+    }
+    return vm;
+}
+
+template <int D, typename S>
+S min(Vec<D,S> y) {
+    S x = y[0];
+    for(int i=1; i<D; ++i) x = blendv((y[i]<x), y[i], x);
+    return x;
+}
+
+template <int D, typename S>
+S max(Vec<D,S> y) {
+    S x = y[0];
+    for(int i=1; i<D; ++i) x = blendv((x<=y[i]), y[i], x);
+    return x;
+}
+
+
+
 // FIXME assume implementation of blendv functions
 // I probably need a logical type to make this work right
 
@@ -352,7 +474,7 @@ inline float2 sigmoid(float x) {
     return make_vec2(0.5f*(1.f + x*z), (2.f*z)*(z*z));
 #else
     //return make_vec2(0.5f*(tanh(0.5f*x) + 1.f), 0.5f / (1.f + cosh(x)));
-    float z = exp(-x);
+    float z = expf(-x);
     float w = 1.f/(1.f+z);
     return make_vec2(w, z*w*w);
 #endif

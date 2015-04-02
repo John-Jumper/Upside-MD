@@ -875,6 +875,21 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     params.close()
 
 
+def write_rotamer(fasta, library):
+    g = t.create_group(t.root.input.potential, 'rotamer')
+    g._v_attrs.arguments = np.array(['rama_coord', 'affine_alignment'])
+    g._v_attrs.max_iter = 200
+    g._v_attrs.tol      = 1e-3
+    g._v_attrs.damping  = 0.3
+
+    create_array(g, 'restype', obj=map(str,fasta))
+
+    params = tables.open_file(library)
+    for nm in 'energy radius width restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
+        create_array(g, nm, obj=params.get_node('/'+nm)[:])
+    params.close()
+
+
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
 		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
@@ -1013,6 +1028,8 @@ def main():
             help='use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--backbone-dependent-point', default=None,
             help='use backbone-depedent sidechain location library')
+    parser.add_argument('--rotamer', default=None, 
+            help='use rotameric sidechain library')
     parser.add_argument('--sidechain-radial', default=None,
             help='use sidechain radial potential library')
     parser.add_argument('--sidechain-radial-exclude-residues', default=[], type=parse_segments,
@@ -1118,7 +1135,7 @@ def main():
         parser.error('--sidechain-radial requires --backbone-dependent-point')
 
     fasta_seq = read_fasta(open(args.fasta,'U'))
-    do_alignment = False
+    require_affine = False
     require_rama = False
     require_backbone_point = False
 
@@ -1179,14 +1196,21 @@ def main():
         write_cavity_radial(args.cavity_radius)
 
     if args.backbone:
-        do_alignment = True
+        require_affine = True
         write_backbone_pair(fasta_seq)
 
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
 
+<<<<<<< bc331056b3d10e34cb7312947f33a34448064a61
     if args.tension:
         write_tension(parser,fasta_seq, args.tension)
+=======
+    if args.rotamer:
+        require_rama = True
+        require_affine = True
+        write_rotamer(fasta_seq, args.rotamer)
+>>>>>>> Rotameric sidechain potential
 
     if args.sidechain_radial:
         require_backbone_point = True
@@ -1214,7 +1238,7 @@ def main():
     if require_backbone_point:
         if args.backbone_dependent_point is None:
             parser.error('--backbone-dependent-point is required, based on other options.')
-        do_alignment = True
+        require_affine = True
         require_rama = True
         write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
 
@@ -1222,10 +1246,10 @@ def main():
         write_rama_coord()
 
     if args.contact_energies:
-        do_alignment = True
+        require_affine = True
         write_contact_energies(parser, fasta_seq, args.contact_energies)
 
-    if do_alignment:
+    if require_affine:
         write_affine_alignment(len(fasta_seq))
 
     if args.restraint_group:
