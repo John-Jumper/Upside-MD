@@ -72,7 +72,7 @@ struct RotamerPlacement {
         psi_deriv(n_system_, n_rot*4, loc.size()),
         n_system(n_system_)
     {
-        if(loc.size() != n_res || global_restype.size() != n_res) throw string("Internal error");
+        if(int(loc.size()) != n_res || int(global_restype.size()) != n_res) throw string("Internal error");
         spline.fit_spline(spline_data);
     }
 

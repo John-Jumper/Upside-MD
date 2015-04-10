@@ -124,7 +124,9 @@ struct range {
 
 
 template <int ndim, typename ScalarT = float>
-struct alignas(std::alignment_of<ScalarT>::value) Vec {
+struct
+// alignas(std::alignment_of<ScalarT>::value)  // GCC 4.8.1 does not like this line
+ Vec {
     ScalarT v[ndim];
 
     ScalarT&       x()       {return           v[0];}
