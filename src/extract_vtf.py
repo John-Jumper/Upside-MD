@@ -104,13 +104,13 @@ def main():
     parser.add_argument('--system', type=int, default=None, help='Only output a single system')
     args = parser.parse_args()
 
-    if args.system is None:
-        sl = slice(None)
-    else:
-        sl = slice(args.system,args.system+1)
     
     t=tables.open_file(args.input_h5); 
     print t.root.output.pos.shape[0], 'frames found,', t.root.output.time[-1], 'time units'
+    if args.system is None:
+        sl = slice(0,t.root.output.pos.shape[1])
+    else:
+        sl = slice(args.system,args.system+1)
 
     
     n_res = t.root.input.sequence.shape[0]
