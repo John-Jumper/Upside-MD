@@ -77,97 +77,84 @@ struct RotamerPlacement {
     }
 
 
-    void push_derivatives(SysArray s_affine_pos, SysArray s_affine_deriv, SysArray s_rama_deriv) {
-        for(int ns=0; ns<n_system; ++ns) {
-            VecArray affine_pos   = s_affine_pos[ns];
-            VecArray affine_deriv = s_affine_deriv[ns];
-            VecArray rama_deriv   = s_rama_deriv[ns];
-            VecArray v_pos = pos[ns];
-            VecArray v_pos_deriv = pos_deriv[ns];
+    void push_derivatives(SysArray s_affine_pos, SysArray s_affine_deriv, SysArray s_rama_deriv, int ns) {
+        VecArray affine_pos   = s_affine_pos[ns];
+        VecArray affine_deriv = s_affine_deriv[ns];
+        VecArray rama_deriv   = s_rama_deriv[ns];
+        VecArray v_pos = pos[ns];
+        VecArray v_pos_deriv = pos_deriv[ns];
 
-            for(int nr: range(n_res)) {
-                auto d = load_vec<n_rot*4>(v_pos_deriv, nr);
-                // printf("d  [%2i] = (", nr);
-                // for(int i: range(n_rot*4)) printf("% 7.3f,", d[i]);
-                // printf(")\n");
-                store_vec(rama_deriv,loc[nr].rama_idx.slot, make_vec2(
-                            dot(d,load_vec<n_rot*4>(phi_deriv[ns],nr)),
-                            dot(d,load_vec<n_rot*4>(psi_deriv[ns],nr))));
-                // printf("phi[%2i] = (", nr);
-                // for(int i: range(n_rot*4)) printf("% 7.3f,", phi_deriv[ns](i,nr));
-                // printf(")\n");
-                // printf("psi[%2i] = (", nr);
-                // for(int i: range(n_rot*4)) printf("% 7.3f,", psi_deriv[ns](i,nr));
-                // printf(")\n");
+        for(int nr: range(n_res)) {
+            auto d = load_vec<n_rot*4>(v_pos_deriv, nr);
+            store_vec(rama_deriv,loc[nr].rama_idx.slot, make_vec2(
+                        dot(d,load_vec<n_rot*4>(phi_deriv[ns],nr)),
+                        dot(d,load_vec<n_rot*4>(psi_deriv[ns],nr))));
 
-                Vec<6> z; z[0]=z[1]=z[2]=z[3]=z[4]=z[5]=0.f;
-                for(int no: range(n_rot)) {
-                    auto dx = make_vec3(d[no*4+0], d[no*4+1], d[no*4+2]);
-                    auto t  = load_vec<3>(affine_pos,loc[nr].affine_idx.index);
-                    auto x  = load_vec<3>(v_pos.shifted(no*4),nr);
-                    auto tq = cross(x-t,dx);  // torque relative to the residue center
-                    z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2];
-                    z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
-                }
-                store_vec(affine_deriv,loc[nr].affine_idx.slot, z);
+            Vec<6> z; z[0]=z[1]=z[2]=z[3]=z[4]=z[5]=0.f;
+            for(int no: range(n_rot)) {
+                auto dx = make_vec3(d[no*4+0], d[no*4+1], d[no*4+2]);
+                auto t  = load_vec<3>(affine_pos,loc[nr].affine_idx.index);
+                auto x  = load_vec<3>(v_pos.shifted(no*4),nr);
+                auto tq = cross(x-t,dx);  // torque relative to the residue center
+                z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2];
+                z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
             }
+            store_vec(affine_deriv,loc[nr].affine_idx.slot, z);
         }
     }
 
 
-    void place_rotamers(const SysArray& affine_pos, const SysArray& rama_pos) {
+    void place_rotamers(const SysArray& affine_pos, const SysArray& rama_pos, int ns) {
         const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
         const float shift = M_PI_F;
 
-        for(int ns=0; ns<pos.n_system; ++ns) {
-            VecArray affine = affine_pos[ns];
-            VecArray rama   = rama_pos  [ns];
-            VecArray pos_s  = pos       [ns];
-            VecArray phi_d  = phi_deriv [ns];
-            VecArray psi_d  = psi_deriv [ns];
+        VecArray affine = affine_pos[ns];
+        VecArray rama   = rama_pos  [ns];
+        VecArray pos_s  = pos       [ns];
+        VecArray phi_d  = phi_deriv [ns];
+        VecArray psi_d  = psi_deriv [ns];
 
-            for(int nr: range(n_res)) {
-                auto aff = load_vec<7>(affine, loc[nr].affine_idx.index);
-                auto r   = load_vec<2>(rama,   loc[nr].rama_idx.index);
-                auto t   = make_vec3(aff[0], aff[1], aff[2]);
-                float U[9]; quat_to_rot(U, aff.v+3);
+        for(int nr: range(n_res)) {
+            auto aff = load_vec<7>(affine, loc[nr].affine_idx.index);
+            auto r   = load_vec<2>(rama,   loc[nr].rama_idx.index);
+            auto t   = make_vec3(aff[0], aff[1], aff[2]);
+            float U[9]; quat_to_rot(U, aff.v+3);
 
-                float germ[n_rot*4*3]; 
-                spline.evaluate_value_and_deriv(germ, loc[nr].restype, 
-                        (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
+            float germ[n_rot*4*3]; 
+            spline.evaluate_value_and_deriv(germ, loc[nr].restype, 
+                    (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
 
-                for(int no: range(n_rot)) {
-                    float* val = germ+no*4*3;
+            for(int no: range(n_rot)) {
+                float* val = germ+no*4*3;
 
-                    float3 dx_dphi = apply_rotation(U, make_vec3(val[0*3+0], val[1*3+0], val[2*3+0])) * scale_x;
-                    float3 dx_dpsi = apply_rotation(U, make_vec3(val[0*3+1], val[1*3+1], val[2*3+1])) * scale_y;
-                    float3  x      = apply_affine(U,t, make_vec3(val[0*3+2], val[1*3+2], val[2*3+2]));
+                float3 dx_dphi = apply_rotation(U, make_vec3(val[0*3+0], val[1*3+0], val[2*3+0])) * scale_x;
+                float3 dx_dpsi = apply_rotation(U, make_vec3(val[0*3+1], val[1*3+1], val[2*3+1])) * scale_y;
+                float3  x      = apply_affine(U,t, make_vec3(val[0*3+2], val[1*3+2], val[2*3+2]));
 
-                    float  dv_dphi = val[3*3+0] * scale_x;
-                    float  dv_dpsi = val[3*3+1] * scale_y;
-                    float   v      = val[3*3+2];
+                float  dv_dphi = val[3*3+0] * scale_x;
+                float  dv_dpsi = val[3*3+1] * scale_y;
+                float   v      = val[3*3+2];
 
-                    phi_d(4*no+0,nr) = dx_dphi[0];
-                    phi_d(4*no+1,nr) = dx_dphi[1];
-                    phi_d(4*no+2,nr) = dx_dphi[2];
-                    phi_d(4*no+3,nr) = dv_dphi;
+                phi_d(4*no+0,nr) = dx_dphi[0];
+                phi_d(4*no+1,nr) = dx_dphi[1];
+                phi_d(4*no+2,nr) = dx_dphi[2];
+                phi_d(4*no+3,nr) = dv_dphi;
 
-                    psi_d(4*no+0,nr) = dx_dpsi[0];
-                    psi_d(4*no+1,nr) = dx_dpsi[1];
-                    psi_d(4*no+2,nr) = dx_dpsi[2];
-                    psi_d(4*no+3,nr) = dv_dpsi;
+                psi_d(4*no+0,nr) = dx_dpsi[0];
+                psi_d(4*no+1,nr) = dx_dpsi[1];
+                psi_d(4*no+2,nr) = dx_dpsi[2];
+                psi_d(4*no+3,nr) = dv_dpsi;
 
-                    pos_s(4*no+0,nr) =  x[0];
-                    pos_s(4*no+1,nr) =  x[1];
-                    pos_s(4*no+2,nr) =  x[2];
-                    pos_s(4*no+3,nr) =  v;
+                pos_s(4*no+0,nr) =  x[0];
+                pos_s(4*no+1,nr) =  x[1];
+                pos_s(4*no+2,nr) =  x[2];
+                pos_s(4*no+3,nr) =  v;
 
-                    // printf("placed %2i %1i", nr, no);
-                    // for(auto &s: {phi_d, psi_d, pos_s}) printf(" (% 7.3f,% 7.3f,% 7.3f,%7.3f)",
-                    //         s(4*no+0,nr), s(4*no+1,nr), s(4*no+2,nr), s(4*no+3,nr));
-                    // printf("\n");
-                }
+                // printf("placed %2i %1i", nr, no);
+                // for(auto &s: {phi_d, psi_d, pos_s}) printf(" (% 7.3f,% 7.3f,% 7.3f,%7.3f)",
+                //         s(4*no+0,nr), s(4*no+1,nr), s(4*no+2,nr), s(4*no+3,nr));
+                // printf("\n");
             }
         }
     }
@@ -215,60 +202,55 @@ void dump_factor_graph(const char* fname,
 
 template <int n_rot1, int n_rot2>  // must have n_dim1 <= n_dim2
 void compute_graph_elements(
-        int* edge_starts,  // length n_system + 1, first index is always 0
+        int* n_edge,  int max_edges,// length n_system
         PairInteraction<n_rot1,n_rot2>* edges,  // must be large enough to fit all generated edges
         int n_res1, const int* restype1, SysArray pos1,  // dimensionality n_rot1*4
         int n_res2, const int* restype2, SysArray pos2,  // dimensionality n_rot2*4
         int n_restype, const SidechainInteractionParams* interactions,
-        int n_system, bool is_self_interaction) {
-    edge_starts[0] = 0;
+        int ns, bool is_self_interaction) {
+    n_edge[ns] = 0;
+    VecArray pos1_s = pos1[ns];
+    VecArray pos2_s = pos2[ns];
 
-    // FIXME because of the edge_starts, these loops cannot run in parallel across systems
-    for(int ns: range(n_system)) {
-        edge_starts[ns+1] = edge_starts[ns];
-        VecArray pos1_s = pos1[ns];
-        VecArray pos2_s = pos2[ns];
+    for(int nr1: range(n_res1)) {
+        int nt1 = restype1[nr1];
+        float3 rot1[n_rot1]; 
+        for(int no1: range(n_rot1)) 
+            rot1[no1] = load_vec<3>(pos1_s.shifted(4*no1), nr1);
 
-        for(int nr1: range(n_res1)) {
-            int nt1 = restype1[nr1];
-            float3 rot1[n_rot1]; 
-            for(int no1: range(n_rot1)) 
-                rot1[no1] = load_vec<3>(pos1_s.shifted(4*no1), nr1);
+        for(int nr2: range((is_self_interaction ? nr1+1 : 0), n_res2)) {
+            int nt2 = restype2[nr2];
 
-            for(int nr2: range((is_self_interaction ? nr1+1 : 0), n_res2)) {
-                int nt2 = restype2[nr2];
+            auto &p = interactions[nt1*n_restype+nt2];
+            float cutoff2 = p.cutoff2;
 
-                auto &p = interactions[nt1*n_restype+nt2];
-                float cutoff2 = p.cutoff2;
+            // FIXME introduce some sort of early cutoff to reduce the cost of 
+            //   checking every rotamer when there cannot be a hit.
+            bool within_cutoff = 0;
+            for(int no2: range(n_rot2)) {
+                float3 rot2 = load_vec<3>(pos2_s.shifted(4*no2), nr2);
+                for(int no1: range(n_rot1))
+                    within_cutoff |= mag2(rot1[no1]-rot2) < cutoff2;
+            }
 
-                // FIXME introduce some sort of early cutoff to reduce the cost of 
-                //   checking every rotamer when there cannot be a hit.
-                bool within_cutoff = 0;
+            if(within_cutoff) {
+                // grab the next edge location available and increment the count of required slots
+                auto& edge = edges[ns*max_edges + (n_edge[ns]++)];
+                edge.nr1 = nr1;
+                edge.nr2 = nr2;
+
                 for(int no2: range(n_rot2)) {
                     float3 rot2 = load_vec<3>(pos2_s.shifted(4*no2), nr2);
-                    for(int no1: range(n_rot1))
-                        within_cutoff |= mag2(rot1[no1]-rot2) < cutoff2;
-                }
+                    for(int no1: range(n_rot1)) {
+                        float3 disp = rot1[no1]-rot2;
+                        float dist2     = mag2(disp);
+                        float inv_dist  = rsqrt(dist2);
+                        float dist      = dist2*inv_dist;
 
-                if(within_cutoff) {
-                    // grab the next edge location available and increment the count of required slots
-                    auto& edge = edges[edge_starts[ns+1]++];
-                    edge.nr1 = nr1;
-                    edge.nr2 = nr2;
-
-                    for(int no2: range(n_rot2)) {
-                        float3 rot2 = load_vec<3>(pos2_s.shifted(4*no2), nr2);
-                        for(int no1: range(n_rot1)) {
-                            float3 disp = rot1[no1]-rot2;
-                            float dist2     = mag2(disp);
-                            float inv_dist  = rsqrt(dist2);
-                            float dist      = dist2*inv_dist;
-
-                            float2 en = p.energy_outer*compact_sigmoid(dist-p.radius_outer, p.scale_outer)
-                                       +p.energy_inner*compact_sigmoid(dist-p.radius_inner, p.scale_inner);
-                            edge.potential[no1][no2] = en.x();
-                            edge.deriv    [no1][no2] = en.y() * (disp*inv_dist);
-                        }
+                        float2 en = p.energy_outer*compact_sigmoid(dist-p.radius_outer, p.scale_outer)
+                            +p.energy_inner*compact_sigmoid(dist-p.radius_inner, p.scale_inner);
+                        edge.potential[no1][no2] = en.x();
+                        edge.deriv    [no1][no2] = en.y() * (disp*inv_dist);
                     }
                 }
             }
@@ -347,23 +329,19 @@ pair<int,float> solve_for_beliefs(
     float max_deviation = 1e10f;
     int iter = 0;
     for(; max_deviation>tol && iter<max_iter; iter+=2) {
-        // Timer timer_iter1(string("rotamer_iter"));
         calculate_new_beliefs(
                 temp_node_belief, temp_edge_belief,
                 node_belief,      edge_belief,
                 n_node, node_prob,
                 n_edge, edge_prob, edge_indices_this_system,
                 damping);
-        // timer_iter1.stop();
 
-        // Timer timer_iter2(string("rotamer_iter"));
         calculate_new_beliefs(
                 node_belief,      edge_belief,
                 temp_node_belief, temp_edge_belief,
                 n_node, node_prob,
                 n_edge, edge_prob, edge_indices_this_system,
                 damping);
-        // timer_iter2.stop();
 
         // compute max deviation
         float node_dev = 0.f;
@@ -384,65 +362,55 @@ pair<int,float> solve_for_beliefs(
 
 
 void convert_potential_graph_to_probability_graph(
-        SysArray node_prob, SysArray edge_prob, int* edge_indices, int max_edges,
-
+        SysArray node_prob, SysArray edge_prob, int* edge_indices,
         int n_res3, SysArray pos3, // last dimension is 1-residue potential
-
-        int* edge_starts13, PairInteraction<1,3>* edges13,
-        int* edge_starts33, PairInteraction<3,3>* edges33,
-        int n_system) {
+        int* n_edge13, int max_edges13, PairInteraction<1,3>* edges13,
+        int* n_edge33, int max_edges33, PairInteraction<3,3>* edges33,
+        int ns) {
 
     // float potential_shift = 0.f;
+    VecArray ep = edge_prob[ns];
 
-    for(int ns=0; ns<n_system; ++ns) {
-        int es33     = edge_starts33[ns];
-        int n_edge33 = edge_starts33[ns+1]-edge_starts33[ns];
-        VecArray ep = edge_prob[ns];
+    for(int ne33: range(n_edge33[ns])) {
+        auto &e = edges33[ns*max_edges33 +ne33];
+        edge_indices[ns*2*max_edges33 + ne33*2 + 0] = e.nr1;
+        edge_indices[ns*2*max_edges33 + ne33*2 + 1] = e.nr2;
 
-        for(int ne33: range(n_edge33)) {
-            auto &e = edges33[es33+ne33];
-            edge_indices[ns*2*max_edges + ne33*2 + 0] = e.nr1;
-            edge_indices[ns*2*max_edges + ne33*2 + 1] = e.nr2;
+        float min_pot = 1e10f;
+        for(int no1: range(3))
+            for(int no2: range(3))
+                min_pot = min(e.potential[no1][no2], min_pot);
+        // potential_shift += min_pot;
 
-            float min_pot = 1e10f;
-            for(int no1: range(3))
-                for(int no2: range(3))
-                    min_pot = min(e.potential[no1][no2], min_pot);
-            // potential_shift += min_pot;
-
-            for(int no1: range(3))
-                for(int no2: range(3))
-                    ep(no1*3+no2,ne33) = expf(-(e.potential[no1][no2] - min_pot));  // shift to avoid underflow later
-        }
-
-        VecArray np = node_prob[ns];
-        VecArray p  = pos3[ns];
-
-        for(int no: range(3))
-            for(int nr: range(n_res3)) 
-                np(no,nr) = p(no*4+3,nr);
-
-        int es13     = edge_starts13[ns];
-        int n_edge13 = edge_starts13[ns+1]-edge_starts13[ns];
-
-        for(int ne13: range(n_edge13)) {
-            auto &e = edges13[es13+ne13];
-            int nr = e.nr2;
-
-            for(int no: range(3)) np(no,nr) += e.potential[0][no];
-        }
-
-        for(int nr: range(n_res3)) {
-            float min_pot = 1e10f;
-            for(int no: range(3))
-                min_pot = min(np(no,nr), min_pot);
-            // potential_shift += min_pot;
-
-            for(int no: range(3)) 
-                np(no,nr) = expf(-(np(no,nr)-min_pot));
-        }
-        // printf("potential_shift %.4f\n", potential_shift);
+        for(int no1: range(3))
+            for(int no2: range(3))
+                ep(no1*3+no2,ne33) = expf(-(e.potential[no1][no2] - min_pot));  // shift to avoid underflow later
     }
+
+    VecArray np = node_prob[ns];
+    VecArray p  = pos3[ns];
+
+    for(int no: range(3))
+        for(int nr: range(n_res3)) 
+            np(no,nr) = p(no*4+3,nr);
+
+    for(int ne13: range(n_edge13[ns])) {
+        auto &e = edges13[ns*max_edges13+ne13];
+        int nr = e.nr2;
+
+        for(int no: range(3)) np(no,nr) += e.potential[0][no];
+    }
+
+    for(int nr: range(n_res3)) {
+        float min_pot = 1e10f;
+        for(int no: range(3))
+            min_pot = min(np(no,nr), min_pot);
+        // potential_shift += min_pot;
+
+        for(int no: range(3)) 
+            np(no,nr) = expf(-(np(no,nr)-min_pot));
+    }
+    // printf("potential_shift %.4f\n", potential_shift);
 }
 
 
@@ -453,103 +421,101 @@ void propagate_derivatives(
         int n_res1, int n_res3,
         SysArray s_node_belief, SysArray s_edge_belief,
         SysArray s_edge_prob,
-        const int* edge_starts11, const PairInteraction<1,1>* edges11,
-        const int* edge_starts13, const PairInteraction<1,3>* edges13,
-        const int* edge_starts33, const PairInteraction<3,3>* edges33,
-        int n_system) {
+        const int* n_edge11, int max_edges11, const PairInteraction<1,1>* edges11,
+        const int* n_edge13, int max_edges13, const PairInteraction<1,3>* edges13,
+        const int* n_edge33, int max_edges33, const PairInteraction<3,3>* edges33,
+        int ns) {
 
-    for(int ns=0; ns<n_system; ++ns) {
-        VecArray pos = s_pos[ns];
-        VecArray node_belief = s_node_belief[ns];
-        VecArray edge_belief = s_edge_belief[ns];
-        VecArray edge_prob = s_edge_prob[ns];
-        VecArray deriv1 = s_deriv1[ns];
-        VecArray deriv3 = s_deriv3[ns];
+    VecArray pos = s_pos[ns];
+    VecArray node_belief = s_node_belief[ns];
+    VecArray edge_belief = s_edge_belief[ns];
+    VecArray edge_prob = s_edge_prob[ns];
+    VecArray deriv1 = s_deriv1[ns];
+    VecArray deriv3 = s_deriv3[ns];
 
-        // start with zero derivative
-        fill(deriv1, 1*4, n_res1, 0.f);
-        fill(deriv3, 3*4, n_res3, 0.f);
+    // start with zero derivative
+    fill(deriv1, 1*4, n_res1, 0.f);
+    fill(deriv3, 3*4, n_res3, 0.f);
 
-        double free_energy = 0.f;
+    double free_energy = 0.f;
 
-        // node beliefs couple directly to the 1-body potentials
-        for(int nr: range(n_res3)) {
-            auto b = load_vec<3>(node_belief, nr);
-            b *= rcp(sum(b)); // normalize probability
+    // node beliefs couple directly to the 1-body potentials
+    for(int nr: range(n_res3)) {
+        auto b = load_vec<3>(node_belief, nr);
+        b *= rcp(sum(b)); // normalize probability
 
-            for(int no: range(3)) {
-                deriv3(no*4+3,nr) = b[no];
-                // potential is given by the 3th element of each position (note that -S is p*log p with no minus)
-                if(potential) free_energy += b[no]*(pos(no*4+3,nr) + logf(1e-10f+b[no])); // 1-body entropies
-            }
+        for(int no: range(3)) {
+            deriv3(no*4+3,nr) = b[no];
+            // potential is given by the 3th element of position (note that -S is p*log p with no minus)
+            if(potential) free_energy += b[no]*(pos(no*4+3,nr) + logf(1e-10f+b[no])); // 1-body entropies
         }
-
-        // edge beliefs couple to the positions
-        for(int ne11: range(edge_starts11[ns], edge_starts11[ns+1])) {
-            auto &e = edges11[ne11];
-            float3 z = e.deriv[0][0];
-            update_vec(deriv1, e.nr1,  z);
-            update_vec(deriv1, e.nr2, -z);
-            if(potential) free_energy += e.potential[0][0]; // no entropy since only 1 state for each
-        }
-
-        for(int ne13: range(edge_starts13[ns], edge_starts13[ns+1])) {
-            auto &e = edges13[ne13];
-            Vec<3> b = load_vec<3>(node_belief, e.nr2);
-            b *= rcp(sum(b)); // normalize probability
-
-            if(potential) free_energy += b[0]*e.potential[0][0] + b[1]*e.potential[0][1] + b[2]*e.potential[0][2];
-
-            float3 d[3] = {b[0]*e.deriv[0][0], b[1]*e.deriv[0][1], b[2]*e.deriv[0][2]};
-
-            update_vec(deriv1,e.nr1,  d[0]+d[1]+d[2]);
-            for(int no2: range(3)) update_vec(deriv3.shifted(4*no2),e.nr2, -d[no2]);
-        }
-
-        // The edge marginal distributions are given by p(x1,x2) *
-        // node_belief_1(x1) * node_belief_2(x2) / (edge_belief_12(x1) *
-        // edge_belief_21(x2)) up to normalization.
-        for(int ne33: range(edge_starts33[ns], edge_starts33[ns+1])) {
-            auto &e = edges33[ne33];
-            float3 b1 = load_vec<3>(node_belief, e.nr1);
-            float3 b2 = load_vec<3>(node_belief, e.nr2);
-
-            // correct for self interaction
-            float3 bc1 = b1 * vec_rcp(load_vec<3>(edge_belief,            ne33));
-            float3 bc2 = b2 * vec_rcp(load_vec<3>(edge_belief.shifted(3), ne33));
-
-            Vec<9> pair_distrib = load_vec<9>(edge_prob, ne33);
-            for(int no1: range(3))
-                for(int no2: range(3))
-                    pair_distrib[no1*3+no2] *= bc1[no1]*bc2[no2];
-            pair_distrib *= rcp(sum(pair_distrib));
-
-            // normalize beliefs to obtain node marginals again
-            b1 *= rcp(sum(b1));
-            b2 *= rcp(sum(b2));
-
-            if(potential) {
-                float local_free_energy = 0.f;
-                for(int no1: range(3)) {
-                    for(int no2: range(3)) {
-                        auto p = pair_distrib[no1*3+no2];
-                        local_free_energy += p*(e.potential[no1][no2] + logf(1e-10f + p * rcp(b1[no1]*b2[no2])));
-                    }
-                }
-                free_energy += local_free_energy;
-            }
-
-            float3 d[3][3];
-            for(int no1: range(3)) 
-                for(int no2: range(3)) 
-                    d[no1][no2] = pair_distrib[no1*3+no2]*e.deriv[no1][no2];
-
-            for(int no1: range(3)) update_vec(deriv3.shifted(4*no1),e.nr1,  d[no1][0]+d[no1][1]+d[no1][2]);
-            for(int no2: range(3)) update_vec(deriv3.shifted(4*no2),e.nr2, -d[0][no2]-d[1][no2]-d[2][no2]);
-        }
-
-        if(potential) potential[ns] = free_energy;
     }
+
+    // edge beliefs couple to the positions
+    for(int ne11: range(n_edge11[ns])) {
+        auto &e = edges11[ns*max_edges11 + ne11];
+        float3 z = e.deriv[0][0];
+        update_vec(deriv1, e.nr1,  z);
+        update_vec(deriv1, e.nr2, -z);
+        if(potential) free_energy += e.potential[0][0]; // no entropy since only 1 state for each
+    }
+
+    for(int ne13: range(n_edge13[ns])) {
+        auto &e = edges13[ns*max_edges13 + ne13];
+        Vec<3> b = load_vec<3>(node_belief, e.nr2);
+        b *= rcp(sum(b)); // normalize probability
+
+        if(potential) free_energy += b[0]*e.potential[0][0]+b[1]*e.potential[0][1]+b[2]*e.potential[0][2];
+
+        float3 d[3] = {b[0]*e.deriv[0][0], b[1]*e.deriv[0][1], b[2]*e.deriv[0][2]};
+
+        update_vec(deriv1,e.nr1,  d[0]+d[1]+d[2]);
+        for(int no2: range(3)) update_vec(deriv3.shifted(4*no2),e.nr2, -d[no2]);
+    }
+
+    // The edge marginal distributions are given by p(x1,x2) *
+    // node_belief_1(x1) * node_belief_2(x2) / (edge_belief_12(x1) *
+    // edge_belief_21(x2)) up to normalization.
+    for(int ne33: range(n_edge33[ns])) {
+        auto &e = edges33[ns*max_edges33+ne33];
+        float3 b1 = load_vec<3>(node_belief, e.nr1);
+        float3 b2 = load_vec<3>(node_belief, e.nr2);
+
+        // correct for self interaction
+        float3 bc1 = b1 * vec_rcp(load_vec<3>(edge_belief,            ne33));
+        float3 bc2 = b2 * vec_rcp(load_vec<3>(edge_belief.shifted(3), ne33));
+
+        Vec<9> pair_distrib = load_vec<9>(edge_prob, ne33);
+        for(int no1: range(3))
+            for(int no2: range(3))
+                pair_distrib[no1*3+no2] *= bc1[no1]*bc2[no2];
+        pair_distrib *= rcp(sum(pair_distrib));
+
+        // normalize beliefs to obtain node marginals again
+        b1 *= rcp(sum(b1));
+        b2 *= rcp(sum(b2));
+
+        if(potential) {
+            float local_free_energy = 0.f;
+            for(int no1: range(3)) {
+                for(int no2: range(3)) {
+                    auto p = pair_distrib[no1*3+no2];
+                    local_free_energy += p*(e.potential[no1][no2] + logf(1e-10f + p*rcp(b1[no1]*b2[no2])));
+                }
+            }
+            free_energy += local_free_energy;
+        }
+
+        float3 d[3][3];
+        for(int no1: range(3)) 
+            for(int no2: range(3)) 
+                d[no1][no2] = pair_distrib[no1*3+no2]*e.deriv[no1][no2];
+
+        for(int no1: range(3)) update_vec(deriv3.shifted(4*no1),e.nr1,  d[no1][0]+d[no1][1]+d[no1][2]);
+        for(int no2: range(3)) update_vec(deriv3.shifted(4*no2),e.nr2, -d[0][no2]-d[1][no2]-d[2][no2]);
+    }
+
+    if(potential) potential[ns] = free_energy;
 }
 
 
@@ -575,7 +541,7 @@ struct RotamerSidechain: public PotentialNode {
     unique_ptr<RotamerPlacement<3>> placement3;
 
     int             max_edges11, max_edges13, max_edges33;
-    vector<int>     edge_starts11, edge_starts13, edge_starts33;
+    vector<int>     n_edge11, n_edge13, n_edge33;
     vector<PairInteraction<1,1>> edges11;
     vector<PairInteraction<1,3>> edges13;
     vector<PairInteraction<3,3>> edges33;
@@ -596,7 +562,7 @@ struct RotamerSidechain: public PotentialNode {
         interactions(n_restype*n_restype),
         rotamer_indices(n_restype),
 
-        edge_starts11(n_system+1), edge_starts13(n_system+1), edge_starts33(n_system+1),
+        n_edge11(n_system), n_edge13(n_system), n_edge33(n_system),
 
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
@@ -738,90 +704,60 @@ struct RotamerSidechain: public PotentialNode {
 
 
     virtual void compute_value(ComputeMode mode) {
-        Timer timer_place(string("rotamer_place"));
+        Timer timer("rotamer");
         auto &p1 = *placement1;
         auto &p3 = *placement3;
 
-        p1.place_rotamers(alignment.coords().value, rama.coords().value);
-        p3.place_rotamers(alignment.coords().value, rama.coords().value);
-        timer_place.stop();
-
-        Timer timer_graph(string("rotamer_graph"));
-        compute_graph_elements<1,1>(edge_starts11.data(), edges11.data(), 
-                p1.n_res, p1.global_restype.data(), p1.pos.array(),
-                p1.n_res, p1.global_restype.data(), p1.pos.array(),
-                n_restype, interactions.data(), n_system, true);
-        compute_graph_elements<1,3>(edge_starts13.data(), edges13.data(), 
-                p1.n_res, p1.global_restype.data(), p1.pos.array(),
-                p3.n_res, p3.global_restype.data(), p3.pos.array(),
-                n_restype, interactions.data(), n_system, false);
-        compute_graph_elements<3,3>(edge_starts33.data(), edges33.data(), 
-                p3.n_res, p3.global_restype.data(), p3.pos.array(),
-                p3.n_res, p3.global_restype.data(), p3.pos.array(),
-                n_restype, interactions.data(), n_system, true);
-        timer_graph.stop();
-
-        //printf("n_res1 %i n_res3 %i n_edge11 %i n_edge13 %i n_edge33 %i\n", p1.n_res, p3.n_res, edge_starts11[1] - edge_starts11[0], edge_starts13[1] - edge_starts13[0], edge_starts33[1] - edge_starts33[0]);
-
-        Timer timer_convert(string("rotamer_convert"));
-        convert_potential_graph_to_probability_graph(
-                node_prob.array(), edge_prob.array(), edge_indices.data(), max_edges33,
-                p3.n_res, p3.pos.array(),  // last dimension is 1-residue potential
-                edge_starts13.data(), edges13.data(),
-                edge_starts33.data(), edges33.data(),
-                n_system);
-        timer_convert.stop();
-
-        // static bool have_printed = false;
-        // if(!have_printed)
-        //     dump_factor_graph("factor_graph0.fg", 
-        //         p3.n_res, node_prob.array()[0],
-        //         edge_starts33[1]-edge_starts33[0], edge_prob[0], edge_indices.data());
-        // have_printed = true;
-
-        Timer timer_solve(string("rotamer_solve"));
+#pragma omp parallel for schedule(dynamic)
         for(int ns=0; ns<n_system; ++ns) {
-            auto result = 
-                solve_for_beliefs<3>(
+            p1.place_rotamers(alignment.coords().value, rama.coords().value, ns);
+            p3.place_rotamers(alignment.coords().value, rama.coords().value, ns);
+
+            compute_graph_elements<1,1>(n_edge11.data(), max_edges11, edges11.data(), 
+                    p1.n_res, p1.global_restype.data(), p1.pos.array(),
+                    p1.n_res, p1.global_restype.data(), p1.pos.array(),
+                    n_restype, interactions.data(), ns, true);
+            compute_graph_elements<1,3>(n_edge13.data(), max_edges13, edges13.data(), 
+                    p1.n_res, p1.global_restype.data(), p1.pos.array(),
+                    p3.n_res, p3.global_restype.data(), p3.pos.array(),
+                    n_restype, interactions.data(), ns, false);
+            compute_graph_elements<3,3>(n_edge33.data(), max_edges33, edges33.data(), 
+                    p3.n_res, p3.global_restype.data(), p3.pos.array(),
+                    p3.n_res, p3.global_restype.data(), p3.pos.array(),
+                    n_restype, interactions.data(), ns, true);
+
+            convert_potential_graph_to_probability_graph(
+                    node_prob.array(), edge_prob.array(), edge_indices.data(),
+                    p3.n_res, p3.pos.array(),  // last dimension is 1-residue potential
+                    n_edge13.data(), max_edges13, edges13.data(),
+                    n_edge33.data(), max_edges33, edges33.data(),
+                    ns);
+
+            auto result = solve_for_beliefs<3>(
                     node_belief[ns], edge_belief[ns], 
                     temp_node_belief[ns], temp_edge_belief[ns],
                     p3.n_res, node_prob[ns],
-                    edge_starts33[ns+1]-edge_starts33[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
+                    n_edge33[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
                     damping, max_iter, tol, true); // do re-initialize beliefs
-            if(result.first >= max_iter-1) printf("solved in %i iterations with error of %f\n", result.first, result.second);
+
+            if(result.first >= max_iter-1) 
+                printf("%2i solved in %i iterations with error of %f\n", ns, result.first, result.second);
+
+            propagate_derivatives(
+                    (mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                    p3.pos.array(),
+                    p1.pos_deriv.array(), p3.pos_deriv.array(),
+                    p1.n_res,             p3.n_res,
+                    node_belief.array(), edge_belief.array(),
+                    edge_prob.array(),
+                    n_edge11.data(), max_edges11, edges11.data(),
+                    n_edge13.data(), max_edges13, edges13.data(),
+                    n_edge33.data(), max_edges33, edges33.data(),
+                    ns);
+
+            p1.push_derivatives(alignment.coords().value,alignment.coords().deriv, rama.coords().deriv, ns);
+            p3.push_derivatives(alignment.coords().value,alignment.coords().deriv, rama.coords().deriv, ns);
         }
-        timer_solve.stop();
-
-        Timer timer_deriv(string("rotamer_deriv"));
-        propagate_derivatives(
-                (mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                p3.pos.array(),
-                p1.pos_deriv.array(), p3.pos_deriv.array(),
-                p1.n_res,             p3.n_res,
-                node_belief.array(), edge_belief.array(),
-                edge_prob.array(),
-                edge_starts11.data(), edges11.data(),
-                edge_starts13.data(), edges13.data(),
-                edge_starts33.data(), edges33.data(),
-                n_system);
-        // if(mode==PotentialAndDerivMode) printf("obtained free energy of %f\n", potential[0]);
-
-        // float4 dsum = make_vec4(0.f,0.f,0.f,0.f);
-        // for(int nr: range(p1.n_res)) for(int no: range(1)) dsum += load_vec<4>(p1.pos_deriv[0].shifted(4*no), nr);
-        // for(int nr: range(p3.n_res)) for(int no: range(3)) dsum += load_vec<4>(p3.pos_deriv[0].shifted(4*no), nr);
-        // printf("dsum %f %f %f %f\n", dsum[0], dsum[1], dsum[2], dsum[3]);
-
-        // float3 tsum = make_vec3(0.f,0.f,0.f);
-        // for(int nr: range(p1.n_res)) for(int no: range(1)) 
-        //     tsum += cross(load_vec<3>(p1.pos[0].shifted(4*no),nr), load_vec<3>(p1.pos_deriv[0].shifted(4*no),nr));
-        // for(int nr: range(p3.n_res)) for(int no: range(3))
-        //     tsum += cross(load_vec<3>(p3.pos[0].shifted(4*no),nr), load_vec<3>(p3.pos_deriv[0].shifted(4*no),nr));
-        // printf("tsum %f %f %f\n", tsum[0], tsum[1], tsum[2]);
-
-
-        p1.push_derivatives(alignment.coords().value, alignment.coords().deriv, rama.coords().deriv);
-        p3.push_derivatives(alignment.coords().value, alignment.coords().deriv, rama.coords().deriv);
-        timer_deriv.stop();
     }
 
     virtual double test_value_deriv_agreement() {
