@@ -10,6 +10,7 @@
 #include "deriv_engine.h"
 #include "timing.h"
 #include <memory>
+#include "state_logger.h"
 
 using namespace std;
 using namespace h5;
@@ -415,7 +416,7 @@ void convert_potential_graph_to_probability_graph(
 
 
 void propagate_derivatives(
-        float* potential,
+        float* potential, VecArray residue_energy1, VecArray residue_energy3,
         SysArray s_pos,
         SysArray s_deriv1, SysArray s_deriv3,
         int n_res1, int n_res3,
@@ -436,8 +437,11 @@ void propagate_derivatives(
     // start with zero derivative
     fill(deriv1, 1*4, n_res1, 0.f);
     fill(deriv3, 3*4, n_res3, 0.f);
+    if(potential) fill(residue_energy1, 1, n_res1, 0.f);
+    if(potential) fill(residue_energy3, 2, n_res3, 0.f);
 
     double free_energy = 0.f;
+
 
     // node beliefs couple directly to the 1-body potentials
     for(int nr: range(n_res3)) {
@@ -447,7 +451,13 @@ void propagate_derivatives(
         for(int no: range(3)) {
             deriv3(no*4+3,nr) = b[no];
             // potential is given by the 3th element of position (note that -S is p*log p with no minus)
-            if(potential) free_energy += b[no]*(pos(no*4+3,nr) + logf(1e-10f+b[no])); // 1-body entropies
+            if(potential) {
+                float v =  b[no]*pos(no*4+3,nr);
+                float s = -b[no]*logf(1e-10f+b[no]); // 1-body entropies
+                free_energy += v-s;
+                residue_energy3(0,nr) += v;
+                residue_energy3(1,nr) += s;
+            }
         }
     }
 
@@ -457,7 +467,12 @@ void propagate_derivatives(
         float3 z = e.deriv[0][0];
         update_vec(deriv1, e.nr1,  z);
         update_vec(deriv1, e.nr2, -z);
-        if(potential) free_energy += e.potential[0][0]; // no entropy since only 1 state for each
+        if(potential) {
+            float v = e.potential[0][0];
+            free_energy += v; // no entropy since only 1 state for each
+            residue_energy1(0,e.nr1) += 0.5f*v;
+            residue_energy1(0,e.nr2) += 0.5f*v;
+        }
     }
 
     for(int ne13: range(n_edge13[ns])) {
@@ -465,7 +480,12 @@ void propagate_derivatives(
         Vec<3> b = load_vec<3>(node_belief, e.nr2);
         b *= rcp(sum(b)); // normalize probability
 
-        if(potential) free_energy += b[0]*e.potential[0][0]+b[1]*e.potential[0][1]+b[2]*e.potential[0][2];
+        if(potential) {
+            float v = b[0]*e.potential[0][0]+b[1]*e.potential[0][1]+b[2]*e.potential[0][2];
+            free_energy += v;  // no mutual information since one of the residues has only a single state
+            residue_energy1(0,e.nr1) += 0.5f*v;
+            residue_energy3(0,e.nr2) += 0.5f*v;
+        }
 
         float3 d[3] = {b[0]*e.deriv[0][0], b[1]*e.deriv[0][1], b[2]*e.deriv[0][2]};
 
@@ -496,14 +516,20 @@ void propagate_derivatives(
         b2 *= rcp(sum(b2));
 
         if(potential) {
-            float local_free_energy = 0.f;
+            float v = 0.f;
+            float s = 0.f;  // mutual information
             for(int no1: range(3)) {
                 for(int no2: range(3)) {
                     auto p = pair_distrib[no1*3+no2];
-                    local_free_energy += p*(e.potential[no1][no2] + logf(1e-10f + p*rcp(b1[no1]*b2[no2])));
+                    v += p*e.potential[no1][no2];
+                    s -= p*logf(1e-10f + p*rcp(b1[no1]*b2[no2]));
                 }
             }
-            free_energy += local_free_energy;
+            free_energy += v-s;
+            residue_energy3(0,e.nr1) += 0.5f*v;
+            residue_energy3(0,e.nr2) += 0.5f*v;
+            residue_energy3(1,e.nr1) += 0.5f*s;
+            residue_energy3(1,e.nr2) += 0.5f*s;
         }
 
         float3 d[3][3];
@@ -549,10 +575,13 @@ struct RotamerSidechain: public PotentialNode {
     vector<int> edge_indices;
     SysArrayStorage node_prob, edge_prob;
     SysArrayStorage node_belief, edge_belief, temp_node_belief, temp_edge_belief;
+    SysArrayStorage residue_energy1, residue_energy3;
 
     float damping;
     int   max_iter;
     float tol;
+    int n_res_all;
+    map<int, vector<ResidueLoc>> local_loc;
 
     RotamerSidechain(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
         PotentialNode(alignment_.n_system),
@@ -654,7 +683,6 @@ struct RotamerSidechain: public PotentialNode {
 
         if(alignment.n_system != rama.n_system) throw string("Internal error");
 
-        map<int, vector<ResidueLoc>> local_loc;
         map<int, vector<int>>        global_restype;
         for(auto &kv: local_to_global) {
             int n_rot = kv.first;
@@ -700,6 +728,24 @@ struct RotamerSidechain: public PotentialNode {
         edge_prob       .reset(n_system, 3*3, max_edges33);
         edge_belief     .reset(n_system, 2*3, max_edges33);  // there are two edge beliefs for each edge, each being beliefs about a node
         temp_edge_belief.reset(n_system, 2*3, max_edges33);
+
+        residue_energy1.reset(n_system, 1, placement1->n_res); // dimensions are (potential_energy, )
+        residue_energy3.reset(n_system, 2, placement3->n_res); // dimensions are (potential_energy, entropy)
+
+        n_res_all = placement1->n_res + placement3->n_res;
+
+        if(default_logger) default_logger->add_logger<float>("rotamer_energy_entropy", {n_system,n_res_all,2}, [&](float* buffer) {
+                std::fill_n(buffer, n_system*n_res_all*2, -1e10f); // sentinel value to detect mistake in filling
+                for(int ns: range(n_system)) {
+                    for(int nr1: range(placement1->n_res)) {
+                        buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 0] = residue_energy1[ns](0,nr1);
+                        buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 1] = 0.f; // no 1-state entropy
+                    }
+                    for(int nr3: range(placement3->n_res)) {
+                        buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 0] = residue_energy3[ns](0,nr3);
+                        buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 1] = residue_energy3[ns](1,nr3);
+                    }
+                }});
     }
 
 
@@ -708,7 +754,7 @@ struct RotamerSidechain: public PotentialNode {
         auto &p1 = *placement1;
         auto &p3 = *placement3;
 
-#pragma omp parallel for schedule(dynamic)
+        #pragma omp parallel for schedule(dynamic)
         for(int ns=0; ns<n_system; ++ns) {
             p1.place_rotamers(alignment.coords().value, rama.coords().value, ns);
             p3.place_rotamers(alignment.coords().value, rama.coords().value, ns);
@@ -744,7 +790,7 @@ struct RotamerSidechain: public PotentialNode {
                 printf("%2i solved in %i iterations with error of %f\n", ns, result.first, result.second);
 
             propagate_derivatives(
-                    (mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                    (mode==PotentialAndDerivMode ? potential.data() : nullptr), residue_energy1[ns], residue_energy3[ns],
                     p3.pos.array(),
                     p1.pos_deriv.array(), p3.pos_deriv.array(),
                     p1.n_res,             p3.n_res,

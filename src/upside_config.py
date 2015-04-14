@@ -878,9 +878,9 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
 def write_rotamer(fasta, library):
     g = t.create_group(t.root.input.potential, 'rotamer')
     g._v_attrs.arguments = np.array(['rama_coord', 'affine_alignment'])
-    g._v_attrs.max_iter = 200
-    g._v_attrs.tol      = 1e-3
-    g._v_attrs.damping  = 0.3
+    g._v_attrs.max_iter = 10000
+    g._v_attrs.tol      = 1e-4
+    g._v_attrs.damping  = 0.6
 
     create_array(g, 'restype', obj=map(str,fasta))
 

@@ -312,7 +312,7 @@ struct HBondSidechainParams {
 
 void count_hbond(
         float* potential,
-        SysArray virtual_scores,
+        SysArray virtual_score,
         const CoordArray virtual_pos,
         int n_donor,    int n_acceptor,
         const CoordPair* virtual_pair,
@@ -325,7 +325,7 @@ void count_hbond(
     #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         int n_virtual = n_donor + n_acceptor;
-        VecArray vs = virtual_scores[ns];
+        VecArray vs = virtual_score[ns];
         for(int nv=0; nv<n_virtual; ++nv) for(int d=0; d<2; ++d) vs(d,nv) = 0.f;
         if(potential) potential[ns] = 0.f;
 
@@ -502,12 +502,10 @@ struct HBondEnergy : public HBondCounter
             infer.slot_machine.add_request(1, virtual_pair[i]);
         }
 
-        /*
         if(default_logger) {
             default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
                     copy_n(virtual_score.data(), n_system*2*(n_donor+n_acceptor), buffer);});
         }
-        */
     }
 
     virtual void compute_value(ComputeMode mode) {

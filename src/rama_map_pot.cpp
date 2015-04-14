@@ -2,6 +2,7 @@
 #include "timing.h"
 #include "coord.h"
 #include "spline.h"
+#include "state_logger.h"
 
 using namespace h5;
 using namespace std;
@@ -16,6 +17,7 @@ namespace {
 
 void rama_map_pot(
         float* restrict potential,
+        SysArray s_residue_potential,
         const CoordArray rama,
         const RamaMapParams* restrict params,
         const LayeredPeriodicSpline2D<1>& rama_map_data,
@@ -26,6 +28,7 @@ void rama_map_pot(
     const float shift = M_PI_F;
 
     for(int ns=0; ns<n_system; ++ns) {
+        VecArray residue_potential = s_residue_potential[ns];
         if(potential) potential[ns] = 0.f;
 
         for(int nr=0; nr<n_residue; ++nr) {
@@ -34,15 +37,10 @@ void rama_map_pot(
             float map_value[3];
             rama_map_data.evaluate_value_and_deriv(map_value, params[nr].rama_map_id, 
                     (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
-            // printf("res %i bin %.1f %.1f pot %.2f deriv %.2f %.2f\n", nr,
-            //         (r.v[0]+shift)*scale, (r.v[1]+shift)*scale,
-            //         map_value[0], map_value[1]*scale, map_value[2]*scale);
 
-            if(potential) potential[ns] += map_value[2];
+            if(potential) {potential[ns] += map_value[2]; residue_potential(0,nr) = map_value[2];}
             r.d[0][0] = map_value[0] * scale;
             r.d[0][1] = map_value[1] * scale;
-            // printf("%2i %2i writing deriv %f %f\n", params[nr].residue.index, params[nr].residue.slot, 
-            //         map_value[0]*scale, map_value[1]*scale);
             r.flush();
         }
     }
@@ -56,6 +54,7 @@ struct RamaMapPot : public PotentialNode
     CoordNode& rama;
     vector<RamaMapParams> params;
     LayeredPeriodicSpline2D<1> rama_map_data;
+    SysArrayStorage residue_potential;
 
     RamaMapPot(hid_t grp, CoordNode& rama_):
         PotentialNode(rama_.n_system),
@@ -65,7 +64,8 @@ struct RamaMapPot : public PotentialNode
         rama_map_data(
                 get_dset_size(3, grp, "rama_pot")[0], 
                 get_dset_size(3, grp, "rama_pot")[1], 
-                get_dset_size(3, grp, "rama_pot")[2])
+                get_dset_size(3, grp, "rama_pot")[2]),
+        residue_potential(n_system, 1, n_residue)
     {
         auto& r = rama_map_data;
         check_size(grp, "residue_id",     n_residue);
@@ -80,14 +80,19 @@ struct RamaMapPot : public PotentialNode
         traverse_dset<3,double>(grp, "rama_pot",    [&](size_t il, size_t ix, size_t iy, double x) {
                 raw_data[(il*r.nx + ix)*r.ny + iy] = x;});
         r.fit_spline(raw_data.data());
-        // dump_matrix(r.n_layer, r.nx*r.ny*16, "rmap", r.
 
         for(size_t i=0; i<params.size(); ++i) rama.slot_machine.add_request(1, params[i].residue);
+
+        if(default_logger) default_logger->add_logger<float>("rama_map_potential", {n_system,n_residue}, [&](float* buffer) {
+                for(int ns: range(n_system)) 
+                    for(int nr: range(n_residue)) 
+                        buffer[ns*n_residue+nr] = residue_potential[ns](0,nr);
+                        });
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_map_pot"));
-        rama_map_pot((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+        rama_map_pot((mode==PotentialAndDerivMode ? potential.data() : nullptr), residue_potential.array(),
                 rama.coords(), params.data(), rama_map_data, n_residue, n_system);
     }
 
