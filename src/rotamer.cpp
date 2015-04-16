@@ -587,10 +587,12 @@ struct RotamerSidechain: public PotentialNode {
     SysArrayStorage node_belief, edge_belief, temp_node_belief, temp_edge_belief;
 
     SysArrayStorage node_marginal_prob, edge_marginal_prob;
+    vector<int>     fixed_rotamers3;
 
     float damping;
     int   max_iter;
     float tol;
+
     bool energy_fresh_relative_to_derivative;
     int n_res_all;
     map<int, vector<ResidueLoc>> local_loc;
@@ -646,6 +648,15 @@ struct RotamerSidechain: public PotentialNode {
                 sequence.push_back(resname);
                 restype .push_back(index_from_restype[resname]);
                 });
+
+        if(h5_exists(grp, "fixed_rotamers")) {
+            check_size(grp, "fixed_rotamers", sequence.size());
+            traverse_dset<1,int>(grp, "fixed_rotamers", [&](size_t nr, int no) {
+                    int rt = restype[nr];
+                    int n_rot = rotamer_indices[rt].stop - rotamer_indices[rt].start;
+                    if(!(0<=no && no<n_rot)) throw string("Invalid fixed_rotamers");
+                    if(n_rot==3) fixed_rotamers3.push_back(no);});
+        }
 
         // Parse the rotamer data and place it in an array specialized for the number of rotamers in this array
         // This code is a mess.
@@ -936,15 +947,31 @@ struct RotamerSidechain: public PotentialNode {
                     n_edge33.data(), max_edges33, edges33.data(),
                     ns);
 
-            auto result = solve_for_beliefs<3>(
-                    node_belief[ns], edge_belief[ns], 
-                    temp_node_belief[ns], temp_edge_belief[ns],
-                    p3.n_res, node_prob[ns],
-                    n_edge33[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
-                    damping, max_iter, tol, true); // do re-initialize beliefs
+            if(!fixed_rotamers3.size()) {
+                auto result = solve_for_beliefs<3>(
+                        node_belief[ns], edge_belief[ns], 
+                        temp_node_belief[ns], temp_edge_belief[ns],
+                        p3.n_res, node_prob[ns],
+                        n_edge33[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
+                        damping, max_iter, tol, true); // do re-initialize beliefs
 
-            if(result.first >= max_iter-1) 
-                printf("%2i solved in %i iterations with error of %f\n", ns, result.first, result.second);
+                if(result.first >= max_iter-1) 
+                    printf("%2i solved in %i iterations with error of %f\n", ns, result.first, result.second);
+            } else {
+                // 0,1 beliefs are equivalent to fixed rotamers
+                // just populate the beliefs with certainties
+                fill(node_belief[ns], 3, p3.n_res, 0.f);
+                for(int nn: range(p3.n_res))
+                    node_belief[ns](fixed_rotamers3[nn], nn) = 1.f;
+
+                fill(edge_belief[ns], 2*3, n_edge33[ns], 0.f);
+                for(int ne: range(n_edge33[ns])) {
+                    int nr1 = edge_indices[ns*2*max_edges33+ne*2+0];
+                    int nr2 = edge_indices[ns*2*max_edges33+ne*2+1];
+                    edge_belief[ns](fixed_rotamers3[nr1]  ,ne) = 1.f;
+                    edge_belief[ns](fixed_rotamers3[nr2]+3,ne) = 1.f;
+                }
+            }
 
             propagate_derivatives(
                     (mode==PotentialAndDerivMode ? potential.data() : nullptr), 
