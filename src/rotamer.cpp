@@ -54,12 +54,12 @@ inline Vec<6> interaction_function_parameter_deriv(float dist, const SidechainIn
     float2 sig_outer_s = compact_sigmoid((dist-p.radius_outer) * p.scale_outer, 1.f);
     float2 sig_inner_s = compact_sigmoid((dist-p.radius_inner) * p.scale_inner, 1.f);
 
-    result[0] = -sig_outer  .y();  // radius_outer
-    result[1] =  sig_outer_s.y();  // scale_outer
+    result[0] = -sig_outer  .y() * p.energy_outer;  // radius_outer
+    result[1] =  sig_outer_s.y() * (dist-p.radius_outer) * p.energy_outer;  // scale_outer
     result[2] =  sig_outer  .x();  // energy_outer
 
-    result[3] = -sig_inner  .y();  // radius_inner
-    result[4] =  sig_inner_s.y();  // scale_inner
+    result[3] = -sig_inner  .y() * p.energy_inner;  // radius_inner
+    result[4] =  sig_inner_s.y() * (dist-p.radius_inner) * p.energy_inner;  // scale_inner
     result[5] =  sig_inner  .x();  // energy_inner
 
     return result;
@@ -812,14 +812,16 @@ struct RotamerSidechain: public PotentialNode {
                     }});
 
         if(logging(LOG_EXTENSIVE)) {
-            auto inter_deriv = [&](VecArray pos1, VecArray pos2, int rt1, int nr1, int no1, int rt2, int nr2, int no2) {
-                float dist = mag(load_vec<3>(pos1.shifted(4*no1),nr1)-load_vec<3>(pos2.shifted(4*no2),nr2));
-                return interaction_function_parameter_deriv(dist, interactions[rt1*n_restype + rt2]);
-            };
 
             // let's log the derivative of the free energy with respect to the interaction parameters
             default_logger->add_logger<float>("rotamer_interaction_parameter_gradient", {n_system, n_restype, n_restype, 6}, [&](float* buffer) {
                     this->ensure_fresh_energy();
+
+                    auto inter_deriv = [&](VecArray pos1, VecArray pos2, int rt1, int nr1, int no1, int rt2, int nr2, int no2) {
+                        float dist = mag(load_vec<3>(pos1.shifted(4*no1),nr1)-load_vec<3>(pos2.shifted(4*no2),nr2));
+                        return interaction_function_parameter_deriv(dist, this->interactions[rt1*this->n_restype + rt2]);
+                    };
+
                     SysArrayStorage s_deriv(n_system, 6, n_restype*n_restype);
                     for(int ns: range(n_system)) {
                         VecArray deriv = s_deriv[ns];
@@ -832,7 +834,7 @@ struct RotamerSidechain: public PotentialNode {
                             update_vec(deriv, rt1*n_restype+rt2, inter_deriv(p1.pos[ns],p1.pos[ns], rt1,e.nr1,0, rt2,e.nr2,0));
                         }
 
-                        for(int ne13: range(n_edge11[ns])) {
+                        for(int ne13: range(n_edge13[ns])) {
                             auto &e = edges13[ns*max_edges13+ne13];
                             Vec<3> b = load_vec<3>(node_marginal_prob[ns], e.nr2);
                             
@@ -850,7 +852,7 @@ struct RotamerSidechain: public PotentialNode {
                             auto &e = edges33[ns*max_edges33+ne33];
                             Vec<9> bp = load_vec<9>(edge_marginal_prob[ns], ne33);
 
-                            int rt1 = p1.global_restype[e.nr1];
+                            int rt1 = p3.global_restype[e.nr1];
                             int rt2 = p3.global_restype[e.nr2];
 
                             Vec<6> dval; for(int i: range(6)) dval[i] = 0.f;
@@ -863,17 +865,19 @@ struct RotamerSidechain: public PotentialNode {
                         for(int rt1: range(n_restype)) {
                             for(int rt2: range(n_restype)) {
                                 auto d = load_vec<6>(deriv, rt1*n_restype+rt2);
-                                if(rt1!=rt2) d += load_vec<6>(deriv, rt1*n_restype+rt2);  // symmetry
+                                if(rt1!=rt2) d += load_vec<6>(deriv, rt2*n_restype+rt1);  // symmetry
 
                                 float* base_loc = buffer + ((ns*n_restype + rt1)*n_restype+rt2)*6;
-                                // width = 1/scale, so d_width = -d_scale/scale**2
+                                // width = 1/scale, so dV/d_width = dV/d_scale*d_scale/d_width
+                                //                                = dV/d_scale*(-1/width**2)
+                                //                                = dV/d_scale*(-scale**2)
                                 base_loc[0] = d[5]; // energy_inner
                                 base_loc[1] = d[3]; // radius_inner
-                                base_loc[2] =-d[4] * sqr(rcp(interactions[rt1*n_restype+rt2].scale_inner)); // width_inner
+                                base_loc[2] =-d[4] * sqr(interactions[rt1*n_restype+rt2].scale_inner); // width_inner
 
                                 base_loc[3] = d[2]; // energy_inner
                                 base_loc[4] = d[0]; // radius_inner
-                                base_loc[5] =-d[1] * sqr(rcp(interactions[rt1*n_restype+rt2].scale_outer)); // width_outer
+                                base_loc[5] =-d[1] * sqr(interactions[rt1*n_restype+rt2].scale_outer); // width_outer
                             }
                         }
                     }});

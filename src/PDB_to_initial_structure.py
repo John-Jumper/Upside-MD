@@ -118,8 +118,12 @@ def main():
     parser.add_argument('output', help='output .pkl file')
     parser.add_argument('--additional-selector', default='', help='Find the backbone with the name and an additional selector (such as "chain A" or "protein").')
     parser.add_argument('--model', default=None, help='Choose only a specific model in the .pdb')
+    parser.add_argument('--remove-nonstandard-residues', default=False, action='store_true', 
+            help='Remove non-standard residues.  Useful for stripping capping, but be careful because this might break chains.')
+    parser.add_argument('--allow-chain-breaks', default=False, action='store_true', help='Do not fail on chain breaks')
     parser.add_argument('--output-fasta', default=None, help='Output a fasta file as well')
     parser.add_argument('--output-rama', default='', help='Output rama angles')
+    parser.add_argument('--output-chi1', default='', help='Output chi1 angles')
     parser.add_argument('--output-sidechain-com', default=None, 
             help='Output a file containing the sidechain center-of-mass positions ' +
             '(based on alignment of backbone atoms) as well.  Requires --sidechain-com-reference')
@@ -134,28 +138,34 @@ def main():
     if args.static_sidechain_com_reference and args.dynamic_sidechain_com_reference:
         parser.error('--static-sidechain-com-reference is incompatible with --dynamic-sidechain-com-reference')
 
-    
+    additional_selector = ''
+    if args.additional_selector: additional_selector += ' and (%s)'%args.additional_selector
+    if args.remove_nonstandard_residues: additional_selector += ' and resname %s' % (' '.join(sorted(three_letter_aa.values())))
+
     structure = prody.parsePDB(args.pdb, model=args.model)
-    sel_str = 'name N CA C'
-    if args.additional_selector: sel_str += ' and (%s)' % args.additional_selector
+
+    sel_str = 'name CA' + additional_selector
+    coords_CA = structure.select(sel_str)
+    seq = ''.join([one_letter_aa[s] for s in coords_CA.getResnames()])
+    
+    sel_str = 'name N CA C' + additional_selector
     coords = structure.select(sel_str).getCoords()
     print len(coords)/3., 'residues found.'
     bond_lengths = np.sqrt(np.sum(np.diff(coords,axis=0)**2,axis=-1))
     
     if bond_lengths.max() > 2.:
         breaks = bond_lengths>2.
-        print "WARNING: %i separate chains found with breaks at residue(s) %s" % (1+breaks.sum(), list(breaks.nonzero()[0]/3))
+        msg = "%i separate chains found with breaks at residue(s) %s" % (1+breaks.sum(), list(breaks.nonzero()[0]/3))
+        if args.allow_chain_breaks:
+            print "WARNING:", msg
+        else:
+            print >>sys.stderr, "ERROR: " + msg + " (see --allow-chain-breaks if you expected this)"
+            sys.exit(1)
     
     f=open(args.output,'wb')
     cPickle.dump(coords[...,None], f, -1)
     f.close()
     
-    sel_str = 'name CA'
-    if args.additional_selector: sel_str += ' and (%s)' % args.additional_selector
-    coords_CA = structure.select(sel_str)
-    seq = ''.join([one_letter_aa[s] for s in coords_CA.getResnames()])
-
-        
     if args.output_fasta is not None:
         print coords.shape
         f=open(args.output_fasta,'w')
@@ -176,6 +186,40 @@ def main():
         for nr in range(n_res):
             print >>f, '% 3i %3s % 8.3f % 8.3f' % (nr, three_letter_aa[seq[nr]], rama[nr,0]/deg, rama[nr,1]/deg)
         f.close()
+
+    if args.output_chi1:
+        deg = np.pi/180.
+        sel_str = 'name CB "^.G1?$"' + additional_selector
+        sel = structure.select(sel_str)
+        chi_coords = sel.getCoords()
+        seq_array = np.array([three_letter_aa[s] for s in seq])
+        res_names_chi1 = sel.getResnames()
+        expected_number_of_atoms = 2*len(seq_array) - 1*(seq_array=='ALA').sum() - 2*(seq_array=='GLY').sum()
+        assert len(chi_coords) == expected_number_of_atoms  # chi for the right number of atoms to compute chi1
+
+        loc = 0
+        f = open(args.output_chi1,'w')
+        for nr in range(len(seq_array)):
+            resname = seq_array[nr]
+            if   resname == 'GLY': 
+                chi1 = 0.
+                chi1_state = 0
+                loc += 0
+            elif resname == 'ALA':
+                assert res_names_chi1[loc] == 'ALA'
+                chi1 = 0.
+                chi1_state = 0
+                loc += 1  # advance position of CB
+            else:
+                assert res_names_chi1[loc] == resname
+                chi1 = dihedral(coords[3*nr+0], coords[3*nr+1], chi_coords[loc], chi_coords[loc+1])
+                chi1_state = 1
+                if    0.*deg <= chi1 < 120.*deg: chi1_state = 0
+                if -120.*deg <= chi1 <   0.*deg: chi1_state = 2
+                loc += 2
+            print >>f, '% 3i %3s % 8.3f %i' % (nr, resname, chi1/deg, chi1_state)
+        f.close()
+        assert loc == len(chi_coords)
 
     np.set_printoptions(precision=2,suppress=True)
     if args.output_sidechain_com:

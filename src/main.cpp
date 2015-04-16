@@ -150,7 +150,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
 int main(int argc, const char* const * argv)
 try {
     using namespace TCLAP;  // Templatized C++ Command Line Parser (tclap.sourceforge.net)
-    CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (UPSIDE)\n Author: John Jumper", 
+    CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (Upside)\n Author: John Jumper", 
             ' ', "0.1");
 
     ValueArg<string> config_arg("", "config", 
