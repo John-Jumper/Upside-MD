@@ -4,6 +4,7 @@
 #include "timing.h"
 #include <map>
 #include <algorithm>
+#include <memory>
 
 using namespace h5;
 

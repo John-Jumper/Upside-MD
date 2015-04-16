@@ -151,8 +151,7 @@ struct Infer_H_O : public CoordNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(6, params[i].atom[j]);
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
 
-        /*
-        if(default_logger) {
+        if(logging(LOG_EXTENSIVE)) {
             default_logger->add_logger<float>("virtual", {n_system, n_elem, 3}, [&](float* buffer) {
                     for(int ns=0; ns<n_system; ++ns) {
                         for(int nv=0; nv<n_virtual; ++nv) {
@@ -162,7 +161,6 @@ struct Infer_H_O : public CoordNode
                     }
                 });
         }
-        */
     }
 
     virtual void compute_value(ComputeMode mode) {
@@ -502,7 +500,7 @@ struct HBondEnergy : public HBondCounter
             infer.slot_machine.add_request(1, virtual_pair[i]);
         }
 
-        if(default_logger) {
+        if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
                     copy_n(virtual_score.data(), n_system*2*(n_donor+n_acceptor), buffer);});
         }

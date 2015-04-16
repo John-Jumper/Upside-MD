@@ -198,6 +198,10 @@ try {
             "path to .h5 file with a trajectory under /output/pos for which the energy will be recalculated "
             "using the energy in --config.  Must have the same number of systems as --config and must be a "
             "different file than --config.", false, "", "file path", cmd);
+    ValueArg<string> log_level_arg("", "log-level", 
+            "Use this option to control which arrays are stored in /output.  Availabe levels are basic, detailed, "
+            "or extensive.  Default is basic.",
+            false, "", "basic, detailed, extensive", cmd);
     SwitchArg potential_deriv_agreement_arg("", "potential-deriv-agreement",
             "(developer use only) check the agreement of the derivative with finite differences "
             "of the potential for the initial structure.  This may give strange answers for native structures "
@@ -225,9 +229,17 @@ try {
             if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(config.get(), "/output", H5P_DEFAULT));
             else throw string("/output already exists and --overwrite-output was not specified");
         }
-        H5Logger state_logger(config, "output");
-        default_logger = &state_logger;
 
+        {
+            LogLevel log_level;
+            if     (log_level_arg.getValue() == "")          log_level = LOG_BASIC;
+            else if(log_level_arg.getValue() == "basic")     log_level = LOG_BASIC;
+            else if(log_level_arg.getValue() == "detailed")  log_level = LOG_DETAILED;
+            else if(log_level_arg.getValue() == "extensive") log_level = LOG_EXTENSIVE;
+            else throw string("Illegal value for --log-level");
+
+            default_logger = move(unique_ptr<H5Logger>(new H5Logger(config, "output", log_level)));
+        }
         write_string_attribute(config.get(), "output", "invocation", invocation);
 
         auto pos_shape = get_dset_size(3, config.get(), "/input/pos");
@@ -285,7 +297,7 @@ try {
         PivotSampler pivot_sampler;
         if(pivot_interval) {
             pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get(), n_system};
-            state_logger.add_logger<int>("pivot_stats", {n_system,2}, [&](int* stats_buffer) {
+            default_logger->add_logger<int>("pivot_stats", {n_system,2}, [&](int* stats_buffer) {
                     for(int ns=0; ns<n_system; ++ns) {
                         stats_buffer[2*ns+0] = pivot_sampler.pivot_stats[ns].n_success;
                         stats_buffer[2*ns+1] = pivot_sampler.pivot_stats[ns].n_attempt;
@@ -312,7 +324,7 @@ try {
         for(auto t: temperature) printf(" %f", t);
         printf("\n");
 
-        state_logger.log_once<double>("temperature", {n_system}, [&](double* temperature_buffer) {
+        default_logger->log_once<double>("temperature", {n_system}, [&](double* temperature_buffer) {
                 for(int ns=0; ns<n_system; ++ns) temperature_buffer[ns] = temperature[ns];});
 
         float equil_duration = equilibration_duration_arg.getValue();
@@ -334,20 +346,20 @@ try {
         thermostat.apply(mom_sys, n_atom); // initial thermalization
         thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
 
-        state_logger.add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
+        default_logger->add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
                 SysArray pos_array = engine.pos->coords().value;
                 for(int ns=0; ns<n_system; ++ns)
                     for(int na=0; na<n_atom; ++na) 
                         for(int d=0; d<3; ++d) 
                             pos_buffer[ns*n_atom*3 + na*3 + d] = pos_array[ns](d,na);
             });
-        state_logger.add_logger<double>("kinetic", {n_system}, [&](double* kin_buffer) {
+        default_logger->add_logger<double>("kinetic", {n_system}, [&](double* kin_buffer) {
             for(int ns=0; ns<n_system; ++ns) {
                 double sum_kin = 0.f;
                 for(int na=0; na<n_atom; ++na) sum_kin += mag2(StaticCoord<3>(mom_sys, ns, na).f3());
                 kin_buffer[ns] = (0.5/n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
             }});
-        state_logger.add_logger<double>("potential", {n_system}, [&](double* pot_buffer) {
+        default_logger->add_logger<double>("potential", {n_system}, [&](double* pot_buffer) {
                 engine.compute(PotentialAndDerivMode);
                 for(int ns=0; ns<n_system; ++ns) pot_buffer[ns] = engine.potential[ns];});
 
@@ -359,7 +371,7 @@ try {
 
         vector<int> coord_indices; 
         for(int ns=0; ns<n_system; ++ns) coord_indices.push_back(ns);
-        state_logger.add_logger<int>("coord_indices", {n_system}, [&](int* indices_buffer) {
+        default_logger->add_logger<int>("coord_indices", {n_system}, [&](int* indices_buffer) {
                 copy_n(begin(coord_indices), n_system, indices_buffer);});
 
         bool do_recenter = !disable_recenter_arg.getValue();
@@ -384,7 +396,7 @@ try {
         }
 
         double physical_time = 0.;
-        state_logger.add_logger<double>("time", {}, [&](double* time_buffer) {*time_buffer=physical_time;});
+        default_logger->add_logger<double>("time", {}, [&](double* time_buffer) {*time_buffer=physical_time;});
 
         if(re_energize_arg.getValue() != "") {
             H5Obj coord_config;
@@ -413,7 +425,7 @@ try {
                     if(int(na)==n_atom-1 && int(d)==2) { 
                          // we are done loading a frame, so process it
                          physical_time = all_times[nf];
-                         state_logger.collect_samples();
+                         default_logger->collect_samples();
                     }});
 
             if(h5_exists(coord_config.get(), "/output/potential")) {
@@ -422,7 +434,7 @@ try {
                 traverse_dset<2,double>(coord_config.get(), "/output/potential", [&](int nf, int ns, double x){
                         old_potential[nf*n_system + ns] = x;});
 
-                state_logger.log_once<double>("old_potential", {n_frame, n_system}, 
+                default_logger->log_once<double>("old_potential", {n_frame, n_system}, 
                         [&](double* buffer) {for(int i=0; i<n_frame*n_system; ++i) buffer[i] = old_potential[i];});
             }
 
@@ -441,7 +453,7 @@ try {
 
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, xy_recenter_only, n_atom, n_system);
-                state_logger.collect_samples();
+                default_logger->collect_samples();
 
                 double Rg = 0.f;
                 for(int ns=0; ns<n_system; ++ns) {
@@ -469,7 +481,7 @@ try {
                 thermostat.apply(mom_sys, n_atom);
             engine.integration_cycle(mom_sys, dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
         }
-        state_logger.flush();
+        default_logger->flush();
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
         printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.4f seconds/simulation_time_unit)\n",

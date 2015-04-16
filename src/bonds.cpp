@@ -245,7 +245,7 @@ struct RamaCoord : public CoordNode
         for(auto &p: params) autodiff_params.push_back(
                 AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
 
-        if(default_logger) {
+        if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("rama", {n_system,n_elem,2}, [&](float* buffer) {
                     copy_sys_array_to_buffer(coords().value, n_system, n_elem,2, buffer);});
         }

@@ -11,6 +11,7 @@
 #include "timing.h"
 #include <memory>
 #include "state_logger.h"
+#include <tuple>
 
 using namespace std;
 using namespace h5;
@@ -37,6 +38,32 @@ struct SidechainInteractionParams {
     bool operator!=(const SidechainInteractionParams& other) {return !(*this==other);}
 };
 
+inline float2 interaction_function(float dist, const SidechainInteractionParams &p) {
+    return p.energy_outer*compact_sigmoid(dist-p.radius_outer, p.scale_outer)
+        +p.energy_inner*compact_sigmoid(dist-p.radius_inner, p.scale_inner);
+}
+
+inline Vec<6> interaction_function_parameter_deriv(float dist, const SidechainInteractionParams &p) {
+    // order of derivatives is radius_outer, scale_outer, energy_outer, radius_inner, scale_inner, energy_inner;
+    Vec<6> result;
+    float2 sig_outer = compact_sigmoid(dist-p.radius_outer, p.scale_outer);
+    float2 sig_inner = compact_sigmoid(dist-p.radius_inner, p.scale_inner);
+
+    // I need the derivative with respect to the scale, but
+    // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+    float2 sig_outer_s = compact_sigmoid((dist-p.radius_outer) * p.scale_outer, 1.f);
+    float2 sig_inner_s = compact_sigmoid((dist-p.radius_inner) * p.scale_inner, 1.f);
+
+    result[0] = -sig_outer  .y();  // radius_outer
+    result[1] =  sig_outer_s.y();  // scale_outer
+    result[2] =  sig_outer  .x();  // energy_outer
+
+    result[3] = -sig_inner  .y();  // radius_inner
+    result[4] =  sig_inner_s.y();  // scale_inner
+    result[5] =  sig_inner  .x();  // energy_inner
+
+    return result;
+}
 
 struct ResidueLoc {
     int restype;
@@ -151,11 +178,6 @@ struct RotamerPlacement {
                 pos_s(4*no+1,nr) =  x[1];
                 pos_s(4*no+2,nr) =  x[2];
                 pos_s(4*no+3,nr) =  v;
-
-                // printf("placed %2i %1i", nr, no);
-                // for(auto &s: {phi_d, psi_d, pos_s}) printf(" (% 7.3f,% 7.3f,% 7.3f,%7.3f)",
-                //         s(4*no+0,nr), s(4*no+1,nr), s(4*no+2,nr), s(4*no+3,nr));
-                // printf("\n");
             }
         }
     }
@@ -248,8 +270,7 @@ void compute_graph_elements(
                         float inv_dist  = rsqrt(dist2);
                         float dist      = dist2*inv_dist;
 
-                        float2 en = p.energy_outer*compact_sigmoid(dist-p.radius_outer, p.scale_outer)
-                            +p.energy_inner*compact_sigmoid(dist-p.radius_inner, p.scale_inner);
+                        float2 en = interaction_function(dist, p);
                         edge.potential[no1][no2] = en.x();
                         edge.deriv    [no1][no2] = en.y() * (disp*inv_dist);
                     }
@@ -416,7 +437,7 @@ void convert_potential_graph_to_probability_graph(
 
 
 void propagate_derivatives(
-        float* potential, VecArray residue_energy1, VecArray residue_energy3,
+        float* potential, VecArray node_marginal_prob, VecArray edge_marginal_prob,
         SysArray s_pos,
         SysArray s_deriv1, SysArray s_deriv3,
         int n_res1, int n_res3,
@@ -437,11 +458,8 @@ void propagate_derivatives(
     // start with zero derivative
     fill(deriv1, 1*4, n_res1, 0.f);
     fill(deriv3, 3*4, n_res3, 0.f);
-    if(potential) fill(residue_energy1, 1, n_res1, 0.f);
-    if(potential) fill(residue_energy3, 2, n_res3, 0.f);
 
     double free_energy = 0.f;
-
 
     // node beliefs couple directly to the 1-body potentials
     for(int nr: range(n_res3)) {
@@ -455,8 +473,7 @@ void propagate_derivatives(
                 float v =  b[no]*pos(no*4+3,nr);
                 float s = -b[no]*logf(1e-10f+b[no]); // 1-body entropies
                 free_energy += v-s;
-                residue_energy3(0,nr) += v;
-                residue_energy3(1,nr) += s;
+                node_marginal_prob(no,nr) = b[no];
             }
         }
     }
@@ -470,8 +487,6 @@ void propagate_derivatives(
         if(potential) {
             float v = e.potential[0][0];
             free_energy += v; // no entropy since only 1 state for each
-            residue_energy1(0,e.nr1) += 0.5f*v;
-            residue_energy1(0,e.nr2) += 0.5f*v;
         }
     }
 
@@ -483,8 +498,6 @@ void propagate_derivatives(
         if(potential) {
             float v = b[0]*e.potential[0][0]+b[1]*e.potential[0][1]+b[2]*e.potential[0][2];
             free_energy += v;  // no mutual information since one of the residues has only a single state
-            residue_energy1(0,e.nr1) += 0.5f*v;
-            residue_energy3(0,e.nr2) += 0.5f*v;
         }
 
         float3 d[3] = {b[0]*e.deriv[0][0], b[1]*e.deriv[0][1], b[2]*e.deriv[0][2]};
@@ -522,14 +535,11 @@ void propagate_derivatives(
                 for(int no2: range(3)) {
                     auto p = pair_distrib[no1*3+no2];
                     v += p*e.potential[no1][no2];
-                    s -= p*logf(1e-10f + p*rcp(b1[no1]*b2[no2]));
+                    s -= p*logf((1e-10f+p)*rcp((1e-10f+b1[no1]*b2[no2])));
                 }
             }
             free_energy += v-s;
-            residue_energy3(0,e.nr1) += 0.5f*v;
-            residue_energy3(0,e.nr2) += 0.5f*v;
-            residue_energy3(1,e.nr1) += 0.5f*s;
-            residue_energy3(1,e.nr2) += 0.5f*s;
+            store_vec(edge_marginal_prob, ne33, pair_distrib);
         }
 
         float3 d[3][3];
@@ -575,11 +585,13 @@ struct RotamerSidechain: public PotentialNode {
     vector<int> edge_indices;
     SysArrayStorage node_prob, edge_prob;
     SysArrayStorage node_belief, edge_belief, temp_node_belief, temp_edge_belief;
-    SysArrayStorage residue_energy1, residue_energy3;
+
+    SysArrayStorage node_marginal_prob, edge_marginal_prob;
 
     float damping;
     int   max_iter;
     float tol;
+    bool energy_fresh_relative_to_derivative;
     int n_res_all;
     map<int, vector<ResidueLoc>> local_loc;
 
@@ -595,7 +607,9 @@ struct RotamerSidechain: public PotentialNode {
 
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
-        tol     (read_attribute<float>(grp, ".", "tol"))
+        tol     (read_attribute<float>(grp, ".", "tol")),
+
+        energy_fresh_relative_to_derivative(false)
 
     {
         check_size(grp, "energy", n_restype, n_restype, 2);  // 2 is for inner or outer energy
@@ -729,28 +743,167 @@ struct RotamerSidechain: public PotentialNode {
         edge_belief     .reset(n_system, 2*3, max_edges33);  // there are two edge beliefs for each edge, each being beliefs about a node
         temp_edge_belief.reset(n_system, 2*3, max_edges33);
 
-        residue_energy1.reset(n_system, 1, placement1->n_res); // dimensions are (potential_energy, )
-        residue_energy3.reset(n_system, 2, placement3->n_res); // dimensions are (potential_energy, entropy)
+        node_marginal_prob.reset(n_system, 3,   placement3->n_res);
+        edge_marginal_prob.reset(n_system, 3*3, max_edges33);
 
         n_res_all = placement1->n_res + placement3->n_res;
 
-        if(default_logger) default_logger->add_logger<float>("rotamer_energy_entropy", {n_system,n_res_all,2}, [&](float* buffer) {
-                std::fill_n(buffer, n_system*n_res_all*2, -1e10f); // sentinel value to detect mistake in filling
-                for(int ns: range(n_system)) {
-                    for(int nr1: range(placement1->n_res)) {
-                        buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 0] = residue_energy1[ns](0,nr1);
-                        buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 1] = 0.f; // no 1-state entropy
-                    }
-                    for(int nr3: range(placement3->n_res)) {
-                        buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 0] = residue_energy3[ns](0,nr3);
-                        buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 1] = residue_energy3[ns](1,nr3);
-                    }
-                }});
+        auto &p1 = *placement1;
+        auto &p3 = *placement3;
+
+        if(logging(LOG_DETAILED))
+            default_logger->add_logger<float>("rotamer_potential_entropy", {n_system, n_res_all, 2}, [&](float* buffer) {
+                    this->ensure_fresh_energy();
+
+                    SysArrayStorage s_residue_energy1(n_system, 1, p1.n_res);
+                    SysArrayStorage s_residue_energy3(n_system, 2, p3.n_res);
+
+                    for(int ns: range(n_system)) {
+                        VecArray residue_energy1 = s_residue_energy1[ns];
+                        VecArray residue_energy3 = s_residue_energy3[ns];
+                        fill(residue_energy1, 1, p1.n_res, 0.f);
+
+                        for(int nr: range(p3.n_res)) {
+                            auto b = load_vec<3>(node_marginal_prob[ns], nr);
+                            auto vs = make_vec2(0.f,0.f);
+                            for(int no: range(3)) {vs[0] += b[no]*p3.pos[ns](no*4+3,nr); vs[1] += -b[no]*logf(1e-10f+b[no]);}
+                            store_vec(residue_energy3, nr, vs);
+                       }
+
+                        for(int ne11: range(n_edge11[ns])) {
+                            auto &e = edges11[ns*max_edges11+ne11];
+                            update_vec(residue_energy1, e.nr1, 0.5f*make_vec1(e.potential[0][0]));
+                            update_vec(residue_energy1, e.nr2, 0.5f*make_vec1(e.potential[0][0]));
+                        }
+
+                        for(int ne13: range(n_edge13[ns])) {
+                            auto &e = edges13[ns*max_edges13+ne13];
+                            Vec<3> b = load_vec<3>(node_marginal_prob[ns], e.nr2);
+                            auto v = make_vec1(0.f);  // 1-body entropies were already handled
+                            for(int no2: range(3)) v[0] += b[no2]*e.potential[0][no2];
+                            update_vec(residue_energy1, e.nr1, 0.5f*v);
+                            update_vec(residue_energy3, e.nr2, 0.5f*v);
+                        }
+
+                        for(int ne33: range(n_edge33[ns])) {
+                            auto &e = edges33[ns*max_edges33+ne33];
+                            Vec<9> bp = load_vec<9>(edge_marginal_prob[ns], ne33);
+                            Vec<3> b1 = load_vec<3>(node_marginal_prob[ns], e.nr1);
+                            Vec<3> b2 = load_vec<3>(node_marginal_prob[ns], e.nr2);
+                            auto vs = make_vec2(0.f,0.f);
+                            for(int no1: range(3)) for(int no2: range(3)) {
+                                int i = no1*3+no2;
+                                vs[0] += bp[i]*e.potential[no1][no2];
+                                vs[1] +=-bp[i]*(logf((1e-10f+bp[i])*rcp((1e-10f+b1[no1]*b2[no2]))));
+                            }
+                            update_vec(residue_energy3, e.nr1, 0.5f*vs);
+                            update_vec(residue_energy3, e.nr2, 0.5f*vs);
+                        }
+                        
+                        // copy into buffer
+                        for(int nr1: range(p1.n_res)) {
+                            buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 0] = residue_energy1(0,nr1);
+                            buffer[ns*n_res_all*2 + local_loc[1][nr1].affine_idx.index*2 + 1] = 0.f; // no 1-state entropy
+                        }
+                        for(int nr3: range(p3.n_res)) {
+                            buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 0] = residue_energy3(0,nr3);
+                            buffer[ns*n_res_all*2 + local_loc[3][nr3].affine_idx.index*2 + 1] = residue_energy3(1,nr3);
+                        }
+                    }});
+
+        if(logging(LOG_EXTENSIVE)) {
+            auto inter_deriv = [&](VecArray pos1, VecArray pos2, int rt1, int nr1, int no1, int rt2, int nr2, int no2) {
+                float dist = mag(load_vec<3>(pos1.shifted(4*no1),nr1)-load_vec<3>(pos2.shifted(4*no2),nr2));
+                return interaction_function_parameter_deriv(dist, interactions[rt1*n_restype + rt2]);
+            };
+
+            // let's log the derivative of the free energy with respect to the interaction parameters
+            default_logger->add_logger<float>("rotamer_interaction_parameter_gradient", {n_system, n_restype, n_restype, 6}, [&](float* buffer) {
+                    this->ensure_fresh_energy();
+                    SysArrayStorage s_deriv(n_system, 6, n_restype*n_restype);
+                    for(int ns: range(n_system)) {
+                        VecArray deriv = s_deriv[ns];
+                        fill(deriv, 6, n_restype*n_restype, 0.f);
+
+                        for(int ne11: range(n_edge11[ns])) {
+                            auto &e = edges11[ns*max_edges11+ne11];
+                            int rt1 = p1.global_restype[e.nr1];
+                            int rt2 = p1.global_restype[e.nr2];
+                            update_vec(deriv, rt1*n_restype+rt2, inter_deriv(p1.pos[ns],p1.pos[ns], rt1,e.nr1,0, rt2,e.nr2,0));
+                        }
+
+                        for(int ne13: range(n_edge11[ns])) {
+                            auto &e = edges13[ns*max_edges13+ne13];
+                            Vec<3> b = load_vec<3>(node_marginal_prob[ns], e.nr2);
+                            
+                            int rt1 = p1.global_restype[e.nr1];
+                            int rt2 = p3.global_restype[e.nr2];
+
+                            Vec<6> dval; for(int i: range(6)) dval[i] = 0.f;
+                            for(int no2: range(3))
+                                dval += b[no2]*inter_deriv(p1.pos[ns],p3.pos[ns], rt1,e.nr1,0, rt2,e.nr2,no2); 
+
+                            update_vec(deriv, rt1*n_restype+rt2, dval);
+                        }
+
+                        for(int ne33: range(n_edge33[ns])) {
+                            auto &e = edges33[ns*max_edges33+ne33];
+                            Vec<9> bp = load_vec<9>(edge_marginal_prob[ns], ne33);
+
+                            int rt1 = p1.global_restype[e.nr1];
+                            int rt2 = p3.global_restype[e.nr2];
+
+                            Vec<6> dval; for(int i: range(6)) dval[i] = 0.f;
+                            for(int no1: range(3)) for(int no2: range(3))
+                                dval += bp[no1*3+no2]*inter_deriv(p3.pos[ns],p3.pos[ns], rt1,e.nr1,no1, rt2,e.nr2,no2); 
+                            update_vec(deriv, rt1*n_restype+rt2, dval);
+                        }
+
+                        // now re-order, handle symmetry, and handle scale = 1/width
+                        for(int rt1: range(n_restype)) {
+                            for(int rt2: range(n_restype)) {
+                                auto d = load_vec<6>(deriv, rt1*n_restype+rt2);
+                                if(rt1!=rt2) d += load_vec<6>(deriv, rt1*n_restype+rt2);  // symmetry
+
+                                float* base_loc = buffer + ((ns*n_restype + rt1)*n_restype+rt2)*6;
+                                // width = 1/scale, so d_width = -d_scale/scale**2
+                                base_loc[0] = d[5]; // energy_inner
+                                base_loc[1] = d[3]; // radius_inner
+                                base_loc[2] =-d[4] * sqr(rcp(interactions[rt1*n_restype+rt2].scale_inner)); // width_inner
+
+                                base_loc[3] = d[2]; // energy_inner
+                                base_loc[4] = d[0]; // radius_inner
+                                base_loc[5] =-d[1] * sqr(rcp(interactions[rt1*n_restype+rt2].scale_outer)); // width_outer
+                            }
+                        }
+                    }});
+
+                        
+            default_logger->add_logger<float>("node_marginal_prob", {n_system,p3.n_res,3}, [&](float* buffer) {
+                    for(int ns:range(n_system))
+                        for(int nn: range(p3.n_res)) 
+                            for(int no: range(3))
+                                buffer[(ns*p3.n_res + nn)*3 + no] = node_marginal_prob[ns](no,nn);});
+
+            default_logger->add_logger<float>("edge_marginal_prob", {n_system,max_edges33,3,3}, [&](float* buffer) {
+                    for(int ns:range(n_system))
+                        for(int ne: range(max_edges33))
+                            for(int no1: range(3))
+                                for(int no2: range(3))
+                                    buffer[((ns*max_edges33 + ne)*3 + no1)*3 + no2] = (ne<n_edge33[ns])
+                                        ? edge_marginal_prob[ns](no1*3+no2,ne)
+                                        : 0.f;});
+        }
     }
 
+    void ensure_fresh_energy() {
+        if(!energy_fresh_relative_to_derivative) compute_value(PotentialAndDerivMode);
+    }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer("rotamer");
+        energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
+
         auto &p1 = *placement1;
         auto &p3 = *placement3;
 
@@ -790,7 +943,8 @@ struct RotamerSidechain: public PotentialNode {
                 printf("%2i solved in %i iterations with error of %f\n", ns, result.first, result.second);
 
             propagate_derivatives(
-                    (mode==PotentialAndDerivMode ? potential.data() : nullptr), residue_energy1[ns], residue_energy3[ns],
+                    (mode==PotentialAndDerivMode ? potential.data() : nullptr), 
+                    node_marginal_prob[ns], edge_marginal_prob[ns],
                     p3.pos.array(),
                     p1.pos_deriv.array(), p3.pos_deriv.array(),
                     p1.n_res,             p3.n_res,

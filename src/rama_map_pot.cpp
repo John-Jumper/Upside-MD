@@ -83,7 +83,8 @@ struct RamaMapPot : public PotentialNode
 
         for(size_t i=0; i<params.size(); ++i) rama.slot_machine.add_request(1, params[i].residue);
 
-        if(default_logger) default_logger->add_logger<float>("rama_map_potential", {n_system,n_residue}, [&](float* buffer) {
+        if(logging(LOG_DETAILED)) 
+            default_logger->add_logger<float>("rama_map_potential", {n_system,n_residue}, [&](float* buffer) {
                 for(int ns: range(n_system)) 
                     for(int nr: range(n_residue)) 
                         buffer[ns*n_residue+nr] = residue_potential[ns](0,nr);

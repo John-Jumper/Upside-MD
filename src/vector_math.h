@@ -194,10 +194,12 @@ inline Vec<D,float> blendv(bool which, const Vec<D,float>& a, const Vec<D,float>
 
 
 
-inline float2 make_vec2(float x, float y                  ) {float2 a; a[0]=x; a[1]=y;                 return a;} //!< make float2 from scalars
-inline float3 make_vec3(float x, float y, float z         ) {float3 a; a[0]=x; a[1]=y; a[2]=z;         return a;} //!< make float3 from scalars
-inline float4 make_vec4(float x, float y, float z, float w) {float4 a; a[0]=x; a[1]=y; a[2]=z; a[3]=w; return a;} //!< make float4 from scalars
-inline float4 make_vec4(float3 v, float w) { return make_vec4(v.x(),v.y(),v.z(),w); } //!< make float4 from float3 (as x,y,z) and scalar (as w)
+inline Vec<1> make_vec1(float x                           ) {Vec<1> a; a[0]=x;                         return a;}
+inline float2 make_vec2(float x, float y                  ) {float2 a; a[0]=x; a[1]=y;                 return a;}
+inline float3 make_vec3(float x, float y, float z         ) {float3 a; a[0]=x; a[1]=y; a[2]=z;         return a;}
+inline float4 make_vec4(float x, float y, float z, float w) {float4 a; a[0]=x; a[1]=y; a[2]=z; a[3]=w; return a;}
+//! make float4 from float3 (as x,y,z) and scalar (as w)
+inline float4 make_vec4(float3 v, float w) { return make_vec4(v.x(),v.y(),v.z(),w); } 
 
 inline float3 xyz(const float4& x) { return make_vec3(x.x(),x.y(),x.z()); } //!< return x,y,z as float3 from a float4
 

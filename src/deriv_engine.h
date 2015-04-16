@@ -3,7 +3,6 @@
 
 #include "h5_support.h"
 #include <vector>
-#include <memory>
 #include <string>
 #include "coord.h"
 #include <functional>

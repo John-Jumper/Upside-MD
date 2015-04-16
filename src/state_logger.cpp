@@ -1,2 +1,3 @@
 #include "state_logger.h"
-H5Logger* default_logger = nullptr;
+
+std::unique_ptr<H5Logger> default_logger;

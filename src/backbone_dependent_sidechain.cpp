@@ -101,12 +101,10 @@ struct BackboneDependentPoint : public CoordNode
                 backbone_point_map_data.at(((rt*bbm.nx + nb1)*bbm.ny + nb2)*3 + d) = x;});
         bbm.fit_spline(backbone_point_map_data.data());
 
-        /*
-        if(default_logger) {
+        if(logging(LOG_EXTENSIVE)) {
             default_logger->add_logger<float>("com", {n_system, n_elem, 3}, [&](float* buffer) {
                     copy_sys_array_to_buffer(coords().value, n_system, n_elem, 3, buffer);});
         }
-        */
 
         for(size_t i=0; i<params.size(); ++i) rama     .slot_machine.add_request(3, params[i].rama_residue);
         for(size_t i=0; i<params.size(); ++i) alignment.slot_machine.add_request(3, params[i].alignment_residue);

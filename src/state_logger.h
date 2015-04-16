@@ -53,16 +53,29 @@ struct SpecializedSingleLogger: public SingleLogger {
     }
 };
 
-        
+enum LogLevel : int {
+    // LOG_BASIC just logs regular simulation output, like position, time, and kinetic energy
+    LOG_BASIC     = 0,
+    // LOG_DETAILED logs detailed configuration data to answer questions like "why is the simulation doing this?"
+    //   Appropriate information to log at this level would be per residue energies, hydrogen bond states, etc.
+    LOG_DETAILED  = 1,
+    // LOG_EXTENSIVE logs a large amount of detailed information to either diagnose strange problems or to 
+    //   understand whether an algorithm is working correctly.  Anything useful is appropriate to log at this 
+    //   level, though do try to keep the file size under control
+    LOG_EXTENSIVE = 2
+};
+
 struct H5Logger {
+    LogLevel  level;
     h5::H5Obj config;
     h5::H5Obj logging_group;
     std::vector<std::unique_ptr<SingleLogger>> state_loggers;
     size_t n_samples_collected;
 
-    H5Logger(): config(0u), logging_group(0u), n_samples_collected(0u) {}
+    // H5Logger(): level(LOG_BASIC), config(0u), logging_group(0u), n_samples_collected(0u) {}
 
-    H5Logger(h5::H5Obj& config_, const char* loc): 
+    H5Logger(h5::H5Obj& config_, const char* loc, LogLevel level_): 
+        level(level_),
         config(h5::duplicate_obj(config_)),
         logging_group(h5::ensure_group(config.get(), loc)),
         n_samples_collected(0u)
@@ -120,26 +133,11 @@ struct H5Logger {
     }
 };
 
-extern H5Logger* default_logger;
+extern std::unique_ptr<H5Logger> default_logger;
 
-/*
-template <typename T>
-void log_once(
-        const char* relative_path,
-        T* data, const std::initializer_list<int>& data_shape);
-
-template <typename T>
-void log_append(
-        const char* relative_path,
-        T* data, 
-        const std::initializer_list<int>& data_shape,
-        int data_offset = -1);
-
-template <typename T>
-void log_automatically(
-        const char* relative_path,
-        std::function<void(T*)> data_fill_callback, 
-        const std::initializer_list<int>& data_shape);
-        */
+static bool logging(LogLevel level) {
+    if(!default_logger) return false; // cannot log without a defined logger
+    return static_cast<int>(default_logger->level) >= static_cast<int>(level);
+}
 
 #endif
