@@ -515,8 +515,8 @@ void propagate_derivatives(
         float3 b2 = load_vec<3>(node_belief, e.nr2);
 
         // correct for self interaction
-        float3 bc1 = b1 * vec_rcp(load_vec<3>(edge_belief,            ne33));
-        float3 bc2 = b2 * vec_rcp(load_vec<3>(edge_belief.shifted(3), ne33));
+        float3 bc1 = b1 * vec_rcp(1e-10f + load_vec<3>(edge_belief,            ne33));
+        float3 bc2 = b2 * vec_rcp(1e-10f + load_vec<3>(edge_belief.shifted(3), ne33));
 
         Vec<9> pair_distrib = load_vec<9>(edge_prob, ne33);
         for(int no1: range(3))

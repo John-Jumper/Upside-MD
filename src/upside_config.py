@@ -1020,7 +1020,7 @@ def main():
             help='[required] FASTA sequence file')
     parser.add_argument('--n-system', type=int, default=1, required=False, 
             help='[required] number of systems to prepare')
-    parser.add_argument('--output', default='system.h5',
+    parser.add_argument('--output', default='system.h5', required=True,
             help='path to output the created .h5 file (default system.h5)')
     # parser.add_argument('--residue-radius', type=float, default=0.,
     #         help='radius of residue for repulsive interaction (1 kT value)')
@@ -1125,6 +1125,8 @@ def main():
     parser.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
+    parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
+            help='Disable basic springs (like bond distance and angle).  Do not use this.')
 
 
     args = parser.parse_args()
@@ -1167,9 +1169,10 @@ def main():
     
     potential = t.create_group(input,  'potential')
 
-    write_dist_spring(args)
-    write_angle_spring(args)
-    write_dihedral_spring()
+    if not args.debugging_only_disable_basic_springs:
+        write_dist_spring(args)
+        write_angle_spring(args)
+        write_dihedral_spring()
 
     if any(x!=0. for x in args.hbond_energy): 
         require_backbone_point = True

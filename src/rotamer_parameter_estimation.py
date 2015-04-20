@@ -4,12 +4,13 @@ import tempfile
 import subprocess as sp
 import os
 
+upside_path = '../obj'
+
 class RotamerEnergy(object):
-    def __init__(self, config_file, upside_path = '../obj', tmp_dir = None):
+    def __init__(self, config_file, tmp_dir = None):
         self.config_file = config_file
         with tb.open_file(self.config_file) as t:
             self.n_restype = t.root.input.potential.rotamer.energy.shape[0]
-        self.upside_path = upside_path
         self.tmp_dir = tmp_dir
         return
 
@@ -43,7 +44,7 @@ class RotamerEnergy(object):
                 g.width [:,:,1] = parameter_matrices[5]
 
             # evaluate the energy and derivative
-            sp.check_output([os.path.join(self.upside_path,"upside"), 
+            sp.check_output([os.path.join(upside_path,"upside"), 
                 '--config', new_config.name,
                 '--duration', '3e-2',
                 '--frame-interval', '1',
@@ -56,9 +57,10 @@ class RotamerEnergy(object):
                 d         = t.root.output.rotamer_interaction_parameter_gradient[0,0]
 
             triu = lambda m: m[np.triu_indices_from(m)]
-            deriv_flat = tuple(x[np.triu_indices_from(x)] for x in d.transpose((2,0,1)))
+            deriv_flat = np.row_stack(x[np.triu_indices_from(x)] for x in d.transpose((2,0,1)))
 
         return potential, deriv_flat
+
 
     def spot_check_derivative(self, parameters, rt1, rt2, eps=(0.03,0.03,0.03,  0.03,0.03,0.03)):
         a,b = np.triu_indices(self.n_restype)
@@ -86,7 +88,157 @@ class RotamerEnergy(object):
         return [x[idx] for x in der], der_est
 
 
+def configure_rotamer_potentials(
+        file_obj_free, file_obj_fixed, 
+        fasta_path, init_structure_path, rotamer_lib, fixed_rotamers = None, tmp_dir = '/dev/shm'):
+
+    # we need a unique temporary path, not temporary file
+    tmp_path = os.tempnam(tmp_dir)
+
+    try:
+        open(tmp_path,'w').close()  # ensure some file at that path
+        sp.check_call([
+            os.path.join(upside_path,'upside_config'), 
+            '--fasta', fasta_path,
+            '--initial-structures', init_structure_path,
+            '--output', tmp_path,
+            '--rotamer', rotamer_lib,
+            '--debugging-only-disable-basic-springs'])
+
+        # we can now copy the tmp_path into the file object
+        with open(tmp_path) as tmp_file:
+            file_obj_free.write(tmp_file.read())
+            file_obj_free.flush()
+    finally:
+        os.remove(tmp_path)
+
+    if fixed_rotamers is not None:
+        assert fixed_rotamers.dtype in (np.int, np.int64, np.int32)
+
+        file_obj_free.seek(0)
+        file_obj_fixed.write(file_obj_free.read())
+        file_obj_fixed.flush()
+
+        with tb.open_file(file_obj_fixed.name, 'a') as t:
+            t.create_array(t.root.input.potential.rotamer, 'fixed_rotamers', obj=fixed_rotamers)
+
+last_value_point = [None]
+last_deriv_point = [None]
+
+import theano
+import theano.tensor as T
+class RotamerEnergyGapGrad(theano.Op):
+    def __init__(self, energy_obj_free, energy_obj_fixed):
+        self.energy_obj_free  = energy_obj_free
+        self.energy_obj_fixed = energy_obj_fixed
+
+    def make_node(self, param):
+        return theano.Apply(self, [T.as_tensor_variable(param)], [T.dmatrix()])
+
+    def perform(self, node, inputs_storage, output_storage):
+        last_deriv_point[0] = inputs_storage[0].copy()
+        energy_free,  deriv_free  = self.energy_obj_free .germ(inputs_storage[0])
+        energy_fixed, deriv_fixed = self.energy_obj_fixed.germ(inputs_storage[0])
+        output_storage[0][0] = (deriv_fixed - deriv_free).astype('f8')
+
+
+class RotamerEnergyGap(theano.Op):
+    def __init__(self, fasta_path, init_structure_path, rotamer_lib, fixed_rotamers, tmp_dir=None):
+        self.config_free  = tempfile.NamedTemporaryFile(suffix='.h5', dir=tmp_dir)
+        self.config_fixed = tempfile.NamedTemporaryFile(suffix='.h5', dir=tmp_dir)
+
+        configure_rotamer_potentials(self.config_free, self.config_fixed,
+                fasta_path, init_structure_path, rotamer_lib, fixed_rotamers, tmp_dir)
+
+        self.energy_obj_free  = RotamerEnergy(self.config_free.name)
+        self.energy_obj_fixed = RotamerEnergy(self.config_fixed.name)
+
+    def make_node(self, param):
+        # FIXME I need more type checking and size checking here
+        return theano.Apply(self, [T.as_tensor_variable(param)], [T.dscalar()])
+
+    def perform(self, node, inputs_storage, output_storage):
+        last_deriv_point[0] = inputs_storage[0].copy()
+        energy_free,  deriv_free  = self.energy_obj_free .germ(inputs_storage[0])
+        energy_fixed, deriv_fixed = self.energy_obj_fixed.germ(inputs_storage[0])
+        output_storage[0][0] = float(energy_fixed - energy_free)
+
+    def grad(self, inputs, output_gradients):
+        grad_func = RotamerEnergyGapGrad(self.energy_obj_free, self.energy_obj_fixed)
+        return [output_gradients[0] * grad_func(inputs[0])]
 
 
 
+def interaction_matrix_from_param_vector_expr(param_vector):
+    inner_energy = T.exp(param_vector[0,:])  # inner_energy is repulsive, so positive
+    inner_radius = T.exp(param_vector[1,:])  # positive
+    inner_width  = T.exp(param_vector[2,:])  # positive
+        
+    outer_energy =       param_vector[3,:]  # outer_energy is probably attractive
+    outer_radius = T.exp(param_vector[4,:])+inner_radius  # > inner_radius
+    outer_width  = T.exp(param_vector[5,:])  # positive
+    # FIXME I should penalize heavily cases where width > radius since derivative is non-smooth at origin
+    
+    return T.stack(inner_energy, inner_radius, inner_width, outer_energy, outer_radius, outer_width)
+
+lparam = T.dmatrix('lparam')
+to_matrix = theano.function([lparam],interaction_matrix_from_param_vector_expr(lparam))
+
+from mpi4py import MPI
+world = MPI.COMM_WORLD
+rank  = world.Get_rank()
+size  = world.Get_size()
+
+class MultiProteinEnergyGap(object):
+    def __init__(self, fasta, init_structure, rotamer_lib, fixed_rotamer, tmp_dir=None, n_res_limits = None):
+        n_res = []
+        if not rank:
+            for fr in fixed_rotamer:
+                with open(fr) as f:
+                    n_res.append(len(f.readlines()))
+            n_res = np.array(n_res)
+            residue_order = np.argsort(n_res)
+            
+            if n_res_limits is not None:
+                mask = (n_res_limits[0]<=n_res) & (n_res<n_res_limits[1])
+                n_res = n_res[mask]
+                residue_order = residue_order[mask]
+
+            n_res, residue_order = world.bcast((n_res,residue_order),root=0)
+        else:
+            n_res, residue_order = world.bcast(None,root=0)
+
+        self.total_n_res = n_res.sum()
+
+        self.indices = residue_order[rank::size]
+        self.n_res   = n_res[self.indices]
+        self.energy_deriv_functions = []
+
+        for i in self.indices:
+            expr = RotamerEnergyGap(fasta[i],init_structure[i],rotamer_lib,fixed_rotamer[i], tmp_dir)(
+                    interaction_matrix_from_param_vector_expr(lparam))
+            self.energy_deriv_functions.append((
+                theano.function([lparam], expr),
+                theano.function([lparam], T.grad(expr,lparam))))
+
+        return
+
+    def full_value(self, p):
+        my_value = np.zeros(1)
+        for val,der in self.energy_deriv_functions:
+            my_value[0] += val(p)
+        value = np.zeros_like(my_value)
+        world.Allreduce(my_value, value)
+        return value*(1./self.total_n_res)
+
+    def full_deriv(self, p):
+        my_deriv = np.zeros(p.shape, dtype='f8')
+        for val,der in self.energy_deriv_functions:
+            my_deriv += der(p)
+        deriv = np.zeros_like(my_deriv)
+        world.Allreduce(my_deriv, deriv)
+        return deriv*(1./self.total_n_res)
+
+    def nesterov_sgd_pass(self, init_p, init_momentum, momentum_persistence, step_size, mini_batch_size):
+        pass  # FIXME should I use size-matching here?
 
