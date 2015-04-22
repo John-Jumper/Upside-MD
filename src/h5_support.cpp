@@ -129,14 +129,16 @@ void ensure_not_exist(hid_t loc, const char* nm) {
 
 
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
-        const std::initializer_list<int> &dims, // any direction that is extendable must have dims == 0
+        const std::initializer_list<int> &dims, // any direction that is extendable must have dims == -1
         const std::initializer_list<int> &chunk_dims,
         bool compression_level){ // 1 is often recommended
     hsize_t ndims = dims.size();
     std::vector<hsize_t> dims_v(ndims);
     std::vector<hsize_t> chunk_dims_v(ndims);
+
     for(size_t d=0; d<ndims; ++d) {
-        dims_v[d]       = *(begin(dims      )+d);
+        int x = *(begin(dims)+d);
+        dims_v[d]       = (x==-1) ? H5S_UNLIMITED : x;
         chunk_dims_v[d] = *(begin(chunk_dims)+d);
     }
     return create_earray(group, name, dtype, dims_v, chunk_dims_v, compression_level);
@@ -144,23 +146,32 @@ H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
 
 
 H5Obj create_earray(hid_t group, const char* name, hid_t dtype,
-        const std::vector<hsize_t>& dims_v, // any direction that is extendable must have dims == 0
+        const std::vector<hsize_t>& dims_v, // any direction that is extendable must have dims == H5S_UNLIMITED
         const std::vector<hsize_t>& chunk_dims_v,
         bool compression_level)  // 1 is often recommended
 {
     if(dims_v.size() != chunk_dims_v.size()) throw std::string("invalid chunk dims");
+    std::vector<hsize_t> dims = dims_v;
+    std::vector<hsize_t> chunk_dims = chunk_dims_v;
 
     hsize_t ndims = dims_v.size();
     std::vector<hsize_t> max_dims_v(ndims);
 
-    for(size_t d=0; d<ndims; ++d)
-        max_dims_v[d] = dims_v[d] ? dims_v[d] : H5S_UNLIMITED;
+    for(size_t d=0; d<ndims; ++d) {
+        if(dims[d]==H5S_UNLIMITED) {
+            dims[d] = 0;
+            max_dims_v[d] = H5S_UNLIMITED;
+        } else {
+            max_dims_v[d] = dims[d];
+        }
+        if(chunk_dims[d]==0u) chunk_dims[d]=1;
+    }
 
-    auto space_id = h5_obj(H5Sclose, H5Screate_simple(ndims, dims_v.data(), max_dims_v.data()));
+    auto space_id = h5_obj(H5Sclose, H5Screate_simple(ndims, dims.data(), max_dims_v.data()));
 
     // setup chunked, possibly compressed storage
     auto dcpl_id = h5_obj(H5Pclose, H5Pcreate(H5P_DATASET_CREATE));
-    h5_noerr(H5Pset_chunk(dcpl_id.get(), ndims, chunk_dims_v.data()));
+    h5_noerr(H5Pset_chunk(dcpl_id.get(), ndims, chunk_dims.data()));
     h5_noerr(H5Pset_shuffle(dcpl_id.get()));     // improves data compression
     h5_noerr(H5Pset_fletcher32(dcpl_id.get()));  // for verifying data integrity
     if(compression_level) h5_noerr(H5Pset_deflate(dcpl_id.get(), compression_level));

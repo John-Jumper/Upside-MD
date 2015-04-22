@@ -455,12 +455,12 @@ int main(int argc, char** argv) try {
 
     {
         auto out = open_file(output_fname, H5F_ACC_TRUNC);
-        auto hist_array = create_earray(out.get(), "pair_histogram", H5T_NATIVE_DOUBLE, {0, hist.n_type, hist.n_bin}, {1,1,hist.n_bin});
+        auto hist_array = create_earray(out.get(), "pair_histogram", H5T_NATIVE_DOUBLE, {-1, hist.n_type, hist.n_bin}, {1,1,hist.n_bin});
         append_to_dset(hist_array.get(), hist.count, 0);
 
         auto bin_edges = vector<double>(hist.n_bin+1);
         for(int i: range(hist.n_bin+1)) bin_edges[i] = i*hist.dx;
-        auto bin_edges_array = create_earray(out.get(), "bin_edges", H5T_NATIVE_DOUBLE, {0}, {hist.n_bin+1});
+        auto bin_edges_array = create_earray(out.get(), "bin_edges", H5T_NATIVE_DOUBLE, {-1}, {hist.n_bin+1});
         append_to_dset(bin_edges_array.get(), bin_edges, 0);
     }
 

@@ -284,13 +284,13 @@ Affine3f rigid_alignment(
 //         }
 // 
 //         auto center_array = create_earray(out_grp.get(), "center", H5T_NATIVE_FLOAT,
-//                 {0,n_bin,3}, {1,n_bin,3});
+//                 {-1,n_bin,3}, {1,n_bin,3});
 //         append_to_dset(center_array.get(), centers, 0);
 // 
 //         vector<float> bin_vals(n_bin);
 //         for(int nb=0; nb<n_bin; ++nb) bin_vals[nb] = nb*bin_size - M_PI_F;
 //         auto bin_array = create_earray(out_grp.get(), "bin_values", H5T_NATIVE_FLOAT,
-//                 {0}, {n_bin});
+//                 {-1}, {n_bin});
 //         append_to_dset(bin_array.get(), bin_vals, 0);
 //     }
 // 
@@ -319,7 +319,7 @@ int main(int argc, char** argv) try {
 
         if(rname == "ALA" || rname == "GLY") {
             auto rir_array = create_earray(grp.get(), "rama_index_range", H5T_NATIVE_INT,
-                    {0,n_bin,2}, {n_bin,n_bin,2});
+                    {-1,n_bin,2}, {n_bin,n_bin,2});
             std::vector<float> rir;
             for(int i=0; i<n_bin*n_bin; ++i) {
                 rir.push_back(i);
@@ -327,7 +327,7 @@ int main(int argc, char** argv) try {
             }
             append_to_dset(rir_array.get(), rir, 0);
 
-            auto prob_array = create_earray(grp.get(), "prob", H5T_NATIVE_INT, {0}, {n_bin*n_bin});
+            auto prob_array = create_earray(grp.get(), "prob", H5T_NATIVE_INT, {-1}, {n_bin*n_bin});
             std::vector<float> prob(n_bin*n_bin,1.f);
             append_to_dset(prob_array.get(), prob, 0);
 
@@ -378,12 +378,12 @@ int main(int argc, char** argv) try {
             }
         }
 
-        auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {0,3}, {1,3});
+        auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {-1,3}, {1,3});
         append_to_dset(center_array.get(), centers, 0);
 
         vector<float> bin_vals(n_bin);
         for(int nb=0; nb<n_bin; ++nb) bin_vals[nb] = nb*bin_size - M_PI_F;
-        auto bin_array = create_earray(grp.get(), "bin_values", H5T_NATIVE_FLOAT, {0}, {n_bin});
+        auto bin_array = create_earray(grp.get(), "bin_values", H5T_NATIVE_FLOAT, {-1}, {n_bin});
         append_to_dset(bin_array.get(), bin_vals, 0);
     }
 
@@ -448,7 +448,7 @@ int main(int argc, char** argv) try {
 //     {
 //         auto output = h5_obj(H5Fclose, H5Fcreate("/rust/work/imats.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
 //         auto imat_tbl = create_earray(output.get(), "interaction_matrices", H5T_NATIVE_FLOAT,
-//                 {0,n_res,3,3}, {1,n_res,3,3});
+//                 {-1,n_res,3,3}, {1,n_res,3,3});
 //         auto imat_buffer = vector<float>(n_res*n_res*3*3);
 //         int loc=0;
 //         for(int nr1=0; nr1<n_res; ++nr1)

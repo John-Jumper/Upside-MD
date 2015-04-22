@@ -51,6 +51,17 @@ target_link_libraries(upside stdc++ ${HDF5_LIBRARIES})
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
+add_library(upside_calculation SHARED EXCLUDE_FROM_ALL
+    rotamer.cpp
+    spline.cpp
+    deriv_engine.cpp 
+    md.cpp 
+    timing.cpp 
+    thermostat.cpp
+    h5_support.cpp 
+    state_logger.cpp)
+target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES})
+
 add_custom_target(support ALL COMMENT "Creating supporting executables")
 
 macro(python_executable TARGET FILENAME)

@@ -26,7 +26,7 @@ struct SpecializedSingleLogger: public SingleLogger {
             F sample_function_, const std::initializer_list<int>& dims_):
         sample_function(sample_function_), row_size(1u)
     {
-        dims.push_back(0);
+        dims.push_back(H5S_UNLIMITED);
         std::vector<hsize_t> chunk_shape;
         chunk_shape.push_back(100);
         for(auto i: dims_) {
@@ -118,7 +118,7 @@ struct H5Logger {
             data_size *= i;
         }
         std::vector<hsize_t> fake_dims = dims;
-        fake_dims[0] = 0u;  // extensible dimension
+        fake_dims[0] = H5S_UNLIMITED;  // extensible dimension
 
         std::vector<T> data_buffer(data_size);
         sample_function(data_buffer.data());

@@ -81,7 +81,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         auto group = ensure_group(config, "/testing");
         ensure_not_exist(group.get(), "expected_deriv");
         auto tbl = create_earray(group.get(), "expected_deriv", H5T_NATIVE_FLOAT, 
-                {pos.n_atom, 3, 0}, {pos.n_atom, 3, 1});
+                {pos.n_atom, 3, -1}, {pos.n_atom, 3, 1});
         vector<float> deriv_value(pos.n_system*pos.n_atom*3);
         for(int ns=0; ns<pos.n_system; ++ns) 
             for(int na=0; na<pos.n_atom; ++na)
