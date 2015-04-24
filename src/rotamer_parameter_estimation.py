@@ -159,7 +159,8 @@ class UpsideRotamerEnergyGap(theano.Op):
         energy, flat_deriv = energy_and_deriv_for_rotamer_objects(
                 self.rotamer_objects, inputs_storage[0])
 
-        output_storage[0][0] = float(energy)*1./self.total_n_res
+        result = np.array(float(energy)*1./self.total_n_res)
+        output_storage[0][0] = result
 
     def grad(self, inputs, output_gradients):
         grad_func = UpsideRotamerEnergyGapGrad(self.total_n_res,self.rotamer_objects)

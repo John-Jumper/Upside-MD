@@ -213,9 +213,11 @@ def main():
             else:
                 assert res_names_chi1[loc] == resname
                 chi1 = dihedral(coords[3*nr+0], coords[3*nr+1], chi_coords[loc], chi_coords[loc+1])
+                # PRO is a special case since it only has two states
+                # the PRO state 1 is the state from -120 to 0
                 chi1_state = 1
                 if    0.*deg <= chi1 < 120.*deg: chi1_state = 0
-                if -120.*deg <= chi1 <   0.*deg: chi1_state = 2
+                if -120.*deg <= chi1 <   0.*deg and resname != 'PRO': chi1_state = 2
                 loc += 2
             print >>f, '% 3i %3s % 8.3f %i' % (nr, resname, chi1/deg, chi1_state)
         f.close()

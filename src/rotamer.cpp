@@ -370,9 +370,19 @@ pair<int,float> solve_for_beliefs(
     const int n_rot = 3;
 
     if(re_initialize_beliefs) {
-        for(int d: range(  n_rot)) for(int nn: range(n_node)) node_belief(d,nn) = 1.f;
-        for(int d: range(2*n_rot)) for(int ne: range(n_edge)) edge_belief(d,ne) = 1.f;
+        for(int d: range(  n_rot)) for(int nn: range(n_node)) node_belief(d,nn) = node_prob(d,nn);
+        for(int d: range(2*n_rot)) for(int ne: range(n_edge)) temp_edge_belief(d,ne) = 1.f;
     }
+
+    // now let's construct the edge beliefs that are correctly related to the node beliefs
+    // since old_node_belief sets new_edge_belief and old_edge_belief sets new_node_belief, 
+    //   we will do a weird mix to get node_belief sets edge_belief
+    calculate_new_beliefs(
+            temp_node_belief, edge_belief,
+            node_belief,      temp_edge_belief,
+            n_node, node_prob,
+            n_edge, edge_prob, edge_indices_this_system,
+            0.2f);
 
     float max_deviation = 1e10f;
     int iter = 0;
@@ -1166,6 +1176,10 @@ struct RotamerConstructAndSolve {
                 n_res1, restype1.data(), pos1[0],  // dimensionality 1*4
                 n_res3, restype3.data(), pos3[0],  // dimensionality 3*4
                 n_restype, interactions.data());
+
+        // printf("number of edges %i %i %i %s %f\n", n_edge11, n_edge13, n_edge33, 
+        //         (fixed_rotamers3.size() ? "fixed" : "free"), free_energy
+        //         );
 
         return free_energy;
     }
