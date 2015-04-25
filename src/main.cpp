@@ -320,8 +320,10 @@ try {
             for(int ns=0; ns<n_system; ++ns) 
                 temperature[ns] = sqr((sqrt(min_temp)*(n_system-1-ns) + sqrt(max_temp)*ns)/(n_system-1));
         }
-        printf("temperature:");
-        for(auto t: temperature) printf(" %f", t);
+
+        printf("\n");
+        for(int ns: range(n_system))
+            printf("temperature %2i: %.3f\n", ns, temperature[ns]);
         printf("\n");
 
         default_logger->log_once<double>("temperature", {n_system}, [&](double* temperature_buffer) {
