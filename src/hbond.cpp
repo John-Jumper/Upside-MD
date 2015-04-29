@@ -459,7 +459,7 @@ struct HBondEnergy : public HBondCounter
     int n_donor;
     int n_acceptor;
     int n_sidechain;
-    vector<float> virtual_score;
+    SysArrayStorage virtual_score;
     vector<CoordPair> virtual_pair;
     vector<HBondSidechainParams> sidechain_params;
 
@@ -473,7 +473,7 @@ struct HBondEnergy : public HBondCounter
         n_donor    (infer.n_donor),
         n_acceptor (infer.n_acceptor),
         n_sidechain(sidechains.n_elem),
-        virtual_score(2*(n_donor+n_acceptor)*n_system),
+        virtual_score(n_system, 2, n_donor+n_acceptor),
         virtual_pair (n_donor+n_acceptor),
         sidechain_params(sidechains.n_elem),
 
@@ -502,7 +502,10 @@ struct HBondEnergy : public HBondCounter
 
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
-                    copy_n(virtual_score.data(), n_system*2*(n_donor+n_acceptor), buffer);});
+                    for(int ns: range(n_system))
+                       for(int nv: range(n_donor+n_acceptor))
+                           for(int d: range(2))
+                               buffer[(ns*(n_donor+n_acceptor) + nv)*2 + d] = virtual_score[ns](d,nv);});
         }
     }
 
@@ -511,7 +514,7 @@ struct HBondEnergy : public HBondCounter
 
         count_hbond(
                 potential.data(),
-                SysArray(virtual_score.data(), (n_donor+n_acceptor)*2, n_donor+n_acceptor),
+                virtual_score.array(),
                 infer.coords(),
                 n_donor,    n_acceptor,
                 virtual_pair.data(),
