@@ -66,7 +66,7 @@ inline Vec<6> interaction_function_parameter_deriv(float dist, const SidechainIn
     return result;
 }
 
-namespace{
+namespace {
     constexpr const int ndim      = 3;
     constexpr const int ndim_posv = 4;
 }
@@ -111,15 +111,13 @@ struct RotamerPlacement {
     }
 
 
-    void push_derivatives(SysArray s_affine_pos, SysArray s_affine_deriv, SysArray s_rama_deriv, int ns) {
-        VecArray affine_pos   = s_affine_pos[ns];
-        VecArray affine_deriv = s_affine_deriv[ns];
-        VecArray rama_deriv   = s_rama_deriv[ns];
+    void push_derivatives(VecArray affine_pos, VecArray affine_deriv, VecArray rama_deriv, 
+            int ns, float scale_final_energy) {
         VecArray v_pos = pos[ns];
         VecArray v_pos_deriv = pos_deriv[ns];
 
         for(int nr: range(n_res)) {
-            auto d = load_vec<n_rot*ndim_posv>(v_pos_deriv, nr);
+            auto d = scale_final_energy*load_vec<n_rot*ndim_posv>(v_pos_deriv, nr);
             store_vec(rama_deriv,loc[nr].rama_idx.slot, make_vec2(
                         dot(d,load_vec<n_rot*ndim_posv>(phi_deriv[ns],nr)),
                         dot(d,load_vec<n_rot*ndim_posv>(psi_deriv[ns],nr))));
@@ -695,6 +693,8 @@ struct RotamerSidechain: public PotentialNode {
     int   max_iter;
     float tol;
 
+    float scale_final_energy;
+
     bool energy_fresh_relative_to_derivative;
     int n_res_all;
     map<int, vector<ResidueLoc>> local_loc;
@@ -712,6 +712,7 @@ struct RotamerSidechain: public PotentialNode {
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
         tol     (read_attribute<float>(grp, ".", "tol")),
+        scale_final_energy(read_attribute<float>(grp, ".", "scale_final_energy")),
 
         energy_fresh_relative_to_derivative(false)
 
@@ -1050,8 +1051,10 @@ struct RotamerSidechain: public PotentialNode {
                     n_edge13[ns], edges13.data() + ns*max_edges13,
                     n_edge33[ns], edges33.data() + ns*max_edges33);
 
-            p1.push_derivatives(alignment.coords().value,alignment.coords().deriv, rama.coords().deriv, ns);
-            p3.push_derivatives(alignment.coords().value,alignment.coords().deriv, rama.coords().deriv, ns);
+            if(mode==PotentialAndDerivMode) potential[ns] *= scale_final_energy;
+
+            p1.push_derivatives(alignment.coords().value[ns],alignment.coords().deriv[ns],rama.coords().deriv[ns],ns,scale_final_energy);
+            p3.push_derivatives(alignment.coords().value[ns],alignment.coords().deriv[ns],rama.coords().deriv[ns],ns,scale_final_energy);
         }
     }
 
@@ -1236,7 +1239,6 @@ RotamerConstructAndSolve* new_rotamer_construct_and_solve(
             }
         }
     }
-
 
 //     for(int nr: range(z.n_res1)) printf("%3i % .1f % .1f % .1f % .1f\n",
 //             z.restype1[nr], z.pos1[0](0,nr), z.pos1[0]
