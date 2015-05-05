@@ -31,8 +31,8 @@ struct CoordArray {
         value(value_), deriv(deriv_) {}
 };
 
-typedef unsigned short index_t;  //!< type of coordinate indices
-typedef unsigned short slot_t;   //!< type of derivative slot indices
+typedef unsigned int index_t;  //!< type of coordinate indices
+typedef unsigned int slot_t;   //!< type of derivative slot indices
 
 //! Pair of coordinate index and slot index for its derivative
 
@@ -45,7 +45,7 @@ struct CoordPair {
     slot_t slot;    //!< Index into the derivative array to find the slot
 
     //! Initialize from existing data
-    CoordPair(unsigned short index_, unsigned short slot_):
+    CoordPair(index_t index_, slot_t slot_):
         index(index_), slot(slot_) {}
 
     //! Initialize with -1 for each member

@@ -11,8 +11,9 @@
 #include <map>
 
 struct DerivRecord {
-    unsigned short atom, loc, output_width, unused;
-    DerivRecord(unsigned short atom_, unsigned short loc_, unsigned short output_width_):
+    index_t atom;
+    slot_t  loc, output_width;
+    DerivRecord(index_t atom_, slot_t loc_, slot_t output_width_):
         atom(atom_), loc(loc_), output_width(output_width_) {}
 };
 
@@ -44,33 +45,33 @@ struct SlotMachine
 
 struct AutoDiffParams {
     unsigned char  n_slots1, n_slots2;
-    unsigned short slots1[6];      
-    unsigned short slots2[5];        
+    slot_t slots1[6];      
+    slot_t slots2[5];        
 
     AutoDiffParams(
-            const std::initializer_list<unsigned short> &slots1_,
-            const std::initializer_list<unsigned short> &slots2_)
+            const std::initializer_list<slot_t> &slots1_,
+            const std::initializer_list<slot_t> &slots2_)
     {
         unsigned loc1=0;
-        for(auto i: slots1_) if(i!=(unsigned short)(-1)) slots1[loc1++] = i;
+        for(auto i: slots1_) if(i!=(slot_t)(-1)) slots1[loc1++] = i;
         n_slots1 = loc1;
         while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
 
         unsigned loc2=0;
-        for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots2[loc2++] = i;
+        for(auto i: slots2_) if(i!=(slot_t)(-1)) slots2[loc2++] = i;
         n_slots2 = loc2;
         while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
     }
 
-    explicit AutoDiffParams(const std::initializer_list<unsigned short> &slots1_)
+    explicit AutoDiffParams(const std::initializer_list<slot_t> &slots1_)
     { 
         unsigned loc1=0;
-        for(auto i: slots1_) if(i!=(unsigned short)(-1)) slots1[loc1++] = i;
+        for(auto i: slots1_) if(i!=(slot_t)(-1)) slots1[loc1++] = i;
         n_slots1 = loc1;
         while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
 
         unsigned loc2=0;
-        // for(auto i: slots2_) if(i!=(unsigned short)(-1)) slots1[loc2++] = i;
+        // for(auto i: slots2_) if(i!=(slot_t)(-1)) slots1[loc2++] = i;
         n_slots2 = loc2;
         while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
     }
@@ -251,7 +252,7 @@ void reverse_autodiff(
         std::vector<TempCoord<my_width>> sens(n_atom);
         for(int nt=0; nt<n_tape; ++nt) {
             auto tape_elem = tape[nt];
-            for(int rec=0; rec<tape_elem.output_width; ++rec) {
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
                 auto val = StaticCoord<my_width>(accum, ns, tape_elem.loc + rec);
                 for(int d=0; d<my_width; ++d)
                     sens[tape_elem.atom].v[d] += val.v[d];
@@ -298,7 +299,7 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
     using namespace std;
     // First validate coord_pairs consistency with ad_params
     if(ad_params) {
-        vector<unsigned short> slots;
+        vector<slot_t> slots;
         if(ad_params->size() != coord_pairs.size()) throw string("internal error");
         for(unsigned no=0; no<ad_params->size(); ++no) {
             slots.resize(0);

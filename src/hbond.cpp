@@ -16,15 +16,15 @@ struct VirtualParams {
 
 struct VirtualHBondParams {
     CoordPair id;
-    unsigned short residue_id;
+    unsigned int residue_id;
     float  helix_energy_bonus;
 };
 
 struct NH_CO_Params {
     float H_bond_length, N_bond_length;
-    unsigned short Cprev, N, CA, C, Nnext;
-    unsigned short H_slots[9];
-    unsigned short O_slots[9];
+    unsigned int Cprev, N, CA, C, Nnext;
+    unsigned int H_slots[9];
+    unsigned int O_slots[9];
 };
 
 
