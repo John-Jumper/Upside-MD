@@ -188,7 +188,7 @@ static RegisterNodeType<Infer_H_O,1>  infer_node("infer_H_O");
 
 struct VirtualHBondParams {
     CoordPair id;
-    unsigned short residue_id;
+    unsigned residue_id;
 };
 
 

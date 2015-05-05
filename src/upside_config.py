@@ -522,10 +522,11 @@ def make_trans_matrices(seq, monomer_basin_prob, dimer_counts):
     return trans_matrices, prob_matrices, count_matrices
 
 
-def populate_rama_maps(seq, rama_library_h5):
+def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference_energy=0.):
     rama_maps = np.zeros((len(seq), 72,72))
     t=tables.open_file(rama_library_h5)
     rama = t.root.rama[:]
+
     restype = t.root.rama._v_attrs.restype
     dirtype = t.root.rama._v_attrs.dir
     ridx = dict([(x,i) for i,x in enumerate(restype)])
@@ -540,14 +541,45 @@ def populate_rama_maps(seq, rama_library_h5):
     rama_maps -= -np.log(np.exp(-1.0*rama_maps).sum(axis=-1).sum(axis=-1))[...,None,None]
     t.close()
 
+    if sheet_library is not None:
+        ts = tb.open_file(sheet_library)
+        srama = ts.root.rama[:]
+        sfrac = ts.root.sheet_fraction[:]
+
+        srestype = t.root.rama._v_attrs.restype
+        sdirtype = t.root.rama._v_attrs.dir
+        sridx = dict([(x,i) for i,x in enumerate(restype)])
+        sdidx = dict([(x,i) for i,x in enumerate(dirtype)])
+
+        g = lambda arr,r,d,n: arr[sridx[r], sdidx[d], sridx[n]]
+
+        for i in range(len(seq)):
+            N_term = i==0
+            C_term = i==len(seq)-1
+
+            map1  = g(srama, seq[i], 'left',  seq[i-1]) if not N_term else np.zeros(srama.shape[-2:],'f4')
+            frac1 = g(sfrac, seq[i], 'left',  seq[i-1]) if not N_term else 0.
+            map1 -= -np.log(np.exp(-1.*map1).sum(axis=-1,keepdims=True).sum(axis=-1,keepdims=True))
+
+            map2  = g(srama, seq[i], 'right', seq[i+1]) if not C_term else np.zeros(srama.shape[-2:],'f4')
+            frac2 = g(sfrac, seq[i], 'right', seq[i+1]) if not C_term else 0.
+            map2 -= -np.log(np.exp(-1.*map2).sum(axis=-1,keepdims=True).sum(axis=-1,keepdims=True))
+
+            # correct for reference energy and the presence of 2 neighbors
+            frac1 = (1. if C_term else 0.5)*frac1 * np.exp(sheet_reference_energy)
+            frac2 = (1. if N_term else 0.5)*frac2 * np.exp(sheet_reference_energy)
+            frac_coil = 1. - (frac1 + frac2)
+
+            rama_maps[i] = frac_coil*rama_maps[i] + frac1*map1 + frac2*map2
+
     return dict(rama_maps = rama_maps, phi=np.arange(-180,180,5), psi=np.arange(-180,180,5))
 
 
-def write_rama_map_pot(seq, rama_library_h5):
+def write_rama_map_pot(seq, rama_library_h5, sheet_library=None, sheet_reference_energy=0.):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
 
-    rama_pot = populate_rama_maps(seq, rama_library_h5)['rama_maps']
+    rama_pot = populate_rama_maps(seq, rama_library_h5, sheet_library, sheet_reference_energy)['rama_maps']
     assert rama_pot.shape[0] == len(seq)
 
     # let's remove the average energy from each Rama map 
@@ -1051,6 +1083,11 @@ def main():
             help='Angle spring constant in units of 1/dot_product (default 175)')
     parser.add_argument('--rama-library', default='',
             help='smooth Rama probability library')
+    parser.add_argument('--rama-sheet-library', default=None,
+            help='smooth Rama probability library for sheet structures')
+    parser.add_argument('--rama-sheet-reference-energy', default=0.,
+            help='reference energy for sheets when mixing with coil library.  More negative numbers mean less '+
+            'sheet content in the final structure.  Default is 0.')
     parser.add_argument('--dimer-basin-library', default='',
             help='dimer basin probability library')
     parser.add_argument('--hbond-energy', default=(0.,0.), type=parse_float_pair,
@@ -1188,7 +1225,7 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq, args.rama_library)
+        write_rama_map_pot(fasta_seq, args.rama_library, args.rama_sheet_library, args.rama_sheet_reference_energy)
 
         if args.dimer_basin_library:
             write_basin_correlation_pot(fasta_seq,
