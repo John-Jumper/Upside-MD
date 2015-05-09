@@ -18,58 +18,154 @@ using namespace std;
 using namespace h5;
 
 
-struct SidechainInteractionParams {
-    float cutoff2;
-    float radius_outer, scale_outer, energy_outer;
-    float radius_inner, scale_inner, energy_inner;
+struct PosBead {
+    constexpr static const int n_pos_point  = 1;
+    constexpr static const int n_pos_vector = 0;
+    constexpr static const int n_pos_scalar = 1; // rotamer energy
+    constexpr static const int n_pos_dim    = 3*n_pos_point + 3*n_pos_vector + n_pos_scalar;
+    constexpr static const int n_param = 6;
 
-    void update_cutoff2() {
-        float cutoff2_inner = sqr(radius_inner + 1.f/scale_inner);
-        float cutoff2_outer = sqr(radius_outer + 1.f/scale_outer);
-        cutoff2 = cutoff2_inner<cutoff2_outer ? cutoff2_outer : cutoff2_inner;
-    }
+    struct InteractionDeriv {
+        Vec<3> bead1_deriv;
 
-    bool operator==(const SidechainInteractionParams& other) const {
-        return cutoff2      == other.cutoff2      && 
-               radius_inner == other.radius_inner && radius_outer == other.radius_outer &&
-               energy_inner == other.energy_inner && energy_outer == other.energy_outer &&
-               scale_inner  == other.scale_inner  && scale_outer  == other.scale_outer;
-    }
+        Vec<n_pos_dim-1> d1() const {return  bead1_deriv;}
+        Vec<n_pos_dim-1> d2() const {return -bead1_deriv;}
+    };
 
-    bool operator!=(const SidechainInteractionParams& other) {return !(*this==other);}
+    struct SidechainInteraction {
+        float cutoff2;
+        Vec<n_param> params;  // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
+
+        void update_cutoff2() {
+            float radius_i=params[1], scale_i=params[2]; float cutoff2_i = sqr(radius_i + 1.f/scale_i);
+            float radius_o=params[4], scale_o=params[5]; float cutoff2_o = sqr(radius_o + 1.f/scale_o);
+            cutoff2 = cutoff2_i<cutoff2_o? cutoff2_o: cutoff2_i;
+        }
+    
+        bool operator==(const SidechainInteraction& other) const {
+            bool equal = cutoff2 == other.cutoff2;
+            for(int i: range(n_param)) equal &= params[i] == other.params[i];
+            return equal;
+        }
+    
+        bool operator!=(const SidechainInteraction& other) {return !(*this==other);}
+    
+        float evaluate(InteractionDeriv& deriv, const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto disp      = x1-x2;
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+
+            auto en = params[0]*compact_sigmoid(dist-params[1], params[2])
+                    + params[3]*compact_sigmoid(dist-params[4], params[5]);
+
+            deriv.bead1_deriv = en.y() * (disp*inv_dist);
+            return en.x();
+        }
+    
+        Vec<n_param> parameter_deriv(const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto dist = mag(x1-x2);
+            Vec<n_param> result;
+            for(int i: range(2)) {
+                int off = 3*i;
+                auto sig = compact_sigmoid(dist-params[off+1], params[off+2]);
+
+                // I need the derivative with respect to the scale, but
+                // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+                float2 sig_s = compact_sigmoid((dist-params[off+1]) * params[off+2], 1.f);
+
+                result[off+0] =  sig  .x();  // energy
+                result[off+1] = -sig  .y() * params[off+0];  // radius
+                result[off+2] =  sig_s.y() * (dist-params[off+1]) * params[off+0];  // scale
+            }
+            return result;
+        }
+    };
 };
 
-inline float2 interaction_function(float dist, const SidechainInteractionParams &p) {
-    return p.energy_outer*compact_sigmoid(dist-p.radius_outer, p.scale_outer)
-        +p.energy_inner*compact_sigmoid(dist-p.radius_inner, p.scale_inner);
-}
 
-inline Vec<6> interaction_function_parameter_deriv(float dist, const SidechainInteractionParams &p) {
-    // order of derivatives is radius_outer, scale_outer, energy_outer, radius_inner, scale_inner, energy_inner;
-    Vec<6> result;
-    float2 sig_outer = compact_sigmoid(dist-p.radius_outer, p.scale_outer);
-    float2 sig_inner = compact_sigmoid(dist-p.radius_inner, p.scale_inner);
+struct PosDirBead {
+    constexpr static const int n_pos_point  = 1;
+    constexpr static const int n_pos_vector = 1; // CB->CG bond direction
+    constexpr static const int n_pos_scalar = 1; // rotamer energy
+    constexpr static const int n_pos_dim    = 3*n_pos_point + 3*n_pos_vector + n_pos_scalar;
+    constexpr static const int n_param = 6;
 
-    // I need the derivative with respect to the scale, but
-    // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
-    float2 sig_outer_s = compact_sigmoid((dist-p.radius_outer) * p.scale_outer, 1.f);
-    float2 sig_inner_s = compact_sigmoid((dist-p.radius_inner) * p.scale_inner, 1.f);
+    struct InteractionDeriv {
+        Vec<n_pos_dim-1> d1() const {return make_zero<6>();}  // FIXME dummy until real calculation
+        Vec<n_pos_dim-1> d2() const {return make_zero<6>();}
+    };
 
-    result[0] = -sig_outer  .y() * p.energy_outer;  // radius_outer
-    result[1] =  sig_outer_s.y() * (dist-p.radius_outer) * p.energy_outer;  // scale_outer
-    result[2] =  sig_outer  .x();  // energy_outer
+    struct SidechainInteraction {
+        float cutoff2;
+        Vec<n_param> params;  // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
+                              // res1_dist_perturb, res2_dist_perturb
 
-    result[3] = -sig_inner  .y() * p.energy_inner;  // radius_inner
-    result[4] =  sig_inner_s.y() * (dist-p.radius_inner) * p.energy_inner;  // scale_inner
-    result[5] =  sig_inner  .x();  // energy_inner
+        void update_cutoff2() {
+            float radius_i=params[1], scale_i=params[2]; float cutoff_i = radius_i + 1.f/scale_i;
+            float radius_o=params[4], scale_o=params[5]; float cutoff_o = radius_o + 1.f/scale_o;
 
-    return result;
-}
+            float max_perturb = max(0.f,params[6]) + max(0.f,params[7]);
+            cutoff2 = sqr(max(cutoff_i,cutoff_o) + max_perturb);
+        }
+    
+        bool operator==(const SidechainInteraction& other) const {
+            bool equal = cutoff2 == other.cutoff2;
+            for(int i: range(n_param)) equal &= params[i] == other.params[i];
+            return equal;
+        }
+    
+        bool operator!=(const SidechainInteraction& other) {return !(*this==other);}
+    
+        float evaluate(InteractionDeriv& deriv, const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+            auto disp_dir  = disp*inv_dist;
 
-namespace {
-    constexpr const int ndim      = 3;
-    constexpr const int ndim_posv = 4;
-}
+            auto dp1 = sqr(dot(extract<3,6>(x1), disp_dir));
+            auto dp2 = sqr(dot(extract<3,6>(x2), disp_dir)); // requires negative except that I square it
+
+            auto eff_dist = dist + dp1*params[6] + dp2*params[7]; // effective interaction distance
+
+            auto en = params[0]*compact_sigmoid(eff_dist-params[1], params[2])
+                    + params[3]*compact_sigmoid(eff_dist-params[4], params[5]);
+
+            // deriv.bead1_deriv = en.y() * disp_dir;
+            return en.x();
+        }
+    
+        Vec<n_param> parameter_deriv(const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto disp = extract<0,3>(x1) - extract<0,3>(x2);
+            auto dp1 = sqr(dot(extract<3,6>(x1), normalized(disp)));
+            auto dp2 = sqr(dot(extract<3,6>(x2), normalized(disp)));
+            auto eff_dist = mag(disp) + params[6]*dp1 + params[7]*dp2;
+
+            Vec<n_param> result;
+            for(int i: range(2)) {
+                int off = 3*i;
+                auto sig = compact_sigmoid(eff_dist-params[off+1], params[off+2]);
+
+                // I need the derivative with respect to the scale, but
+                // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+                float2 sig_s = compact_sigmoid((eff_dist-params[off+1]) * params[off+2], 1.f);
+
+                result[off+0] =  sig  .x();  // energy
+                result[off+1] = -sig  .y() * params[off+0];  // radius
+                result[off+2] =  sig_s.y() * (eff_dist-params[off+1]) * params[off+0];  // scale
+            }
+
+            auto eff_dist_deriv = -(result[1]+result[4]);  // radius derivative is opposite of eff_dist deriv
+            result[6] = eff_dist_deriv*dp1;
+            result[7] = eff_dist_deriv*dp2;
+            return result;
+        }
+    };
+};
+
+typedef PosBead preferred_bead_type;
+
 
 struct ResidueLoc {
     int restype;
@@ -77,14 +173,14 @@ struct ResidueLoc {
     CoordPair rama_idx;
 };
 
-template <int n_rot>
+template <int n_rot, typename BT>  // BT is a bead-type
 struct RotamerPlacement {
     int n_res;
 
     vector<ResidueLoc> loc;
     vector<int> global_restype;
 
-    LayeredPeriodicSpline2D<n_rot*ndim_posv> spline; // include both location and potential
+    LayeredPeriodicSpline2D<n_rot*BT::n_pos_dim> spline; // include both location and potential
     SysArrayStorage pos;
     SysArrayStorage pos_deriv;
     SysArrayStorage phi_deriv;  // d_pos/d_phi vector
@@ -100,39 +196,14 @@ struct RotamerPlacement {
         n_res(loc_.size()),
         loc(loc_), global_restype(global_restype_),
         spline(n_restype_, nx_, ny_),
-        pos      (n_system_, n_rot*ndim_posv, loc.size()), // order xyzv xyzv ...
-        pos_deriv(n_system_, n_rot*ndim_posv, loc.size()), // to be filled later by compute_free_energy_and_derivative
-        phi_deriv(n_system_, n_rot*ndim_posv, loc.size()),
-        psi_deriv(n_system_, n_rot*ndim_posv, loc.size()),
+        pos      (n_system_, n_rot*BT::n_pos_dim, loc.size()), // order points, vectors, scalars
+        pos_deriv(n_system_, n_rot*BT::n_pos_dim, loc.size()), // to be filled by compute_free_energy_and_derivative
+        phi_deriv(n_system_, n_rot*BT::n_pos_dim, loc.size()),
+        psi_deriv(n_system_, n_rot*BT::n_pos_dim, loc.size()),
         n_system(n_system_)
     {
         if(int(loc.size()) != n_res || int(global_restype.size()) != n_res) throw string("Internal error");
         spline.fit_spline(spline_data);
-    }
-
-
-    void push_derivatives(VecArray affine_pos, VecArray affine_deriv, VecArray rama_deriv, 
-            int ns, float scale_final_energy) {
-        VecArray v_pos = pos[ns];
-        VecArray v_pos_deriv = pos_deriv[ns];
-
-        for(int nr: range(n_res)) {
-            auto d = scale_final_energy*load_vec<n_rot*ndim_posv>(v_pos_deriv, nr);
-            store_vec(rama_deriv,loc[nr].rama_idx.slot, make_vec2(
-                        dot(d,load_vec<n_rot*ndim_posv>(phi_deriv[ns],nr)),
-                        dot(d,load_vec<n_rot*ndim_posv>(psi_deriv[ns],nr))));
-
-            Vec<6> z; z[0]=z[1]=z[2]=z[3]=z[4]=z[5]=0.f;
-            for(int no: range(n_rot)) {
-                auto dx = make_vec3(d[no*ndim_posv+0], d[no*ndim_posv+1], d[no*ndim_posv+2]);
-                auto t  = load_vec<3>(affine_pos,loc[nr].affine_idx.index);
-                auto x  = load_vec<3>(v_pos.shifted(no*ndim_posv),nr);
-                auto tq = cross(x-t,dx);  // torque relative to the residue center
-                z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2];
-                z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
-            }
-            store_vec(affine_deriv,loc[nr].affine_idx.slot, z);
-        }
     }
 
 
@@ -153,89 +224,85 @@ struct RotamerPlacement {
             auto t   = make_vec3(aff[0], aff[1], aff[2]);
             float U[9]; quat_to_rot(U, aff.v+3);
 
-            float germ[n_rot*ndim_posv*3]; 
+            float germ[n_rot*BT::n_pos_dim*3];  // 3 here is deriv_x, deriv_y, value
             spline.evaluate_value_and_deriv(germ, loc[nr].restype, 
                     (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
 
             for(int no: range(n_rot)) {
-                float* val = germ+no*ndim_posv*3; // 3 here is deriv_x, deriv_y, value
+                float* val = germ+no*BT::n_pos_dim*3; // 3 here is deriv_x, deriv_y, value
 
-                // FIXME does not easily generalize to different than 3 dimensions
-                float3 dx_dphi = apply_rotation(U, make_vec3(val[0*3+0], val[1*3+0], val[2*3+0])) * scale_x;
-                float3 dx_dpsi = apply_rotation(U, make_vec3(val[0*3+1], val[1*3+1], val[2*3+1])) * scale_y;
-                float3  x      = apply_affine(U,t, make_vec3(val[0*3+2], val[1*3+2], val[2*3+2]));
+                int j = 0; // index of dimension that we are on
 
-                float  dv_dphi = val[ndim*3+0] * scale_x;
-                float  dv_dpsi = val[ndim*3+1] * scale_y;
-                float   v      = val[ndim*3+2];
+                for(int nvec: range(BT::n_pos_point + BT::n_pos_vector)) {
+                    store_vec(phi_d.shifted(no*BT::n_pos_dim+j), nr, 
+                            apply_rotation(U,   make_vec3(val[(j+0)*3+0], val[(j+1)*3+0], val[(j+2)*3+0])) * scale_x);
+                    store_vec(psi_d.shifted(no*BT::n_pos_dim+j), nr, 
+                            apply_rotation(U,   make_vec3(val[(j+0)*3+1], val[(j+1)*3+1], val[(j+2)*3+1])) * scale_y);
+                    store_vec(pos_s.shifted(no*BT::n_pos_dim+j), nr, (nvec<BT::n_pos_point 
+                                ? apply_affine  (U,t, make_vec3(val[(j+0)*3+2], val[(j+1)*3+2], val[(j+2)*3+2]))
+                                : apply_rotation(U,   make_vec3(val[(j+0)*3+2], val[(j+1)*3+2], val[(j+2)*3+2]))));
+                    j += 3;
+                }
 
-                phi_d(ndim_posv*no+0,nr) = dx_dphi[0];
-                phi_d(ndim_posv*no+1,nr) = dx_dphi[1];
-                phi_d(ndim_posv*no+2,nr) = dx_dphi[2];
-                phi_d(ndim_posv*no+ndim,nr) = dv_dphi;
-
-                psi_d(ndim_posv*no+0,nr) = dx_dpsi[0];
-                psi_d(ndim_posv*no+1,nr) = dx_dpsi[1];
-                psi_d(ndim_posv*no+2,nr) = dx_dpsi[2];
-                psi_d(ndim_posv*no+ndim,nr) = dv_dpsi;
-
-                pos_s(ndim_posv*no+0,nr) =  x[0];
-                pos_s(ndim_posv*no+1,nr) =  x[1];
-                pos_s(ndim_posv*no+2,nr) =  x[2];
-                pos_s(ndim_posv*no+ndim,nr) =  v;
+                for(int i=0; i<BT::n_pos_scalar; ++i) {
+                    phi_d(no*BT::n_pos_dim+j,nr) = val[j*3+0] * scale_x;
+                    psi_d(no*BT::n_pos_dim+j,nr) = val[j*3+1] * scale_y;
+                    pos_s(no*BT::n_pos_dim+j,nr) = val[j*3+2];
+                    j += 1;
+                }
             }
+        }
+    }
+
+
+    void push_derivatives(VecArray affine_pos, VecArray affine_deriv, VecArray rama_deriv, 
+            int ns, float scale_final_energy) {
+        VecArray v_pos = pos[ns];
+        VecArray v_pos_deriv = pos_deriv[ns];
+
+        for(int nr: range(n_res)) {
+            auto d = scale_final_energy*load_vec<n_rot*BT::n_pos_dim>(v_pos_deriv, nr);
+            store_vec(rama_deriv,loc[nr].rama_idx.slot, make_vec2(
+                        dot(d,load_vec<n_rot*BT::n_pos_dim>(phi_deriv[ns],nr)),
+                        dot(d,load_vec<n_rot*BT::n_pos_dim>(psi_deriv[ns],nr))));
+
+            Vec<6> z; z[0]=z[1]=z[2]=z[3]=z[4]=z[5]=0.f;
+            for(int no: range(n_rot)) {
+                // only difference between points and vectors is whether to subtract off the translation
+                int j=0;
+                for(int nvec: range(BT::n_pos_point + BT::n_pos_vector)) {
+                    auto dx = make_vec3(d[no*BT::n_pos_dim+3*j+0], d[no*BT::n_pos_dim+3*j+1], d[no*BT::n_pos_dim+3*j+2]);
+                    auto t  = load_vec<3>(affine_pos,loc[nr].affine_idx.index);
+                    auto x  = load_vec<3>(v_pos.shifted(no*BT::n_pos_dim+3*j),nr);
+                    auto tq = cross((nvec<BT::n_pos_point?x-t:x),dx);  // torque relative to the residue center
+                    // only points, not vectors, contribute to the CoM derivative
+                    if(nvec<BT::n_pos_point) {z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2];}
+                    z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
+                    j += 3;
+                }
+            }
+            store_vec(affine_deriv,loc[nr].affine_idx.slot, z);
         }
     }
 };
 
 
-template <int n_rot1, int n_rot2>
+template <int n_rot1, int n_rot2, typename BT>
 struct PairInteraction {
     int nr1,nr2;
-    float  potential[n_rot1][n_rot2];
-    Vec<ndim> deriv    [n_rot1][n_rot2];  // deriv is deriv with respect to the first residue
+    float potential[n_rot1][n_rot2];
+    typename BT::InteractionDeriv deriv[n_rot1][n_rot2];
 };
 
 
-void dump_factor_graph(const char* fname, 
-        int n_node, VecArray node_prob,
-        int n_edge, VecArray edge_prob, int* edge_indices) {
-    auto f = fopen(fname, "w");
-    fprintf(f, "%i\n", n_node+n_edge);  // number of factors
 
-    for(int nn: range(n_node)) {
-        fprintf(f,"\n");
-        fprintf(f,"1\n"); // number of variables
-        fprintf(f,"%i\n", nn); // label of variable
-        fprintf(f,"3\n"); // number of states
-        fprintf(f,"3\n"); // number of factor values
-        for(int no: range(3))
-            fprintf(f,"%i %f\n", no, node_prob(no,nn)); // factor graph entry
-    }
-
-    for(int ne: range(n_edge)) {
-        fprintf(f,"\n");
-        fprintf(f,"2\n"); // number of variables
-        fprintf(f,"%i %i\n", edge_indices[2*ne+0], edge_indices[2*ne+1]); // label of variables
-        fprintf(f,"3 3\n"); // number of states
-        fprintf(f,"9\n"); // number of factor values
-        // libdai works in column major ordering, but we work in row major ordering
-        for(int no2: range(3))
-            for(int no1: range(3))
-                fprintf(f,"%i %f\n", no1 + no2*3, edge_prob(no1*3+no2,ne)); // factor graph entry
-    }
-    fclose(f);
-}
-
-
-
-template <int n_rot1, int n_rot2>  // must have n_dim1 <= n_dim2
+template <int n_rot1, int n_rot2, typename BT>  // must have n_dim1 <= n_dim2
 void compute_graph_elements(
         int &n_edge,  
-        PairInteraction<n_rot1,n_rot2>* edges,  // must be large enough to fit all generated edges
-        int n_res1, const int* restype1, VecArray pos1,  // dimensionality n_rot1*ndim_posv
-        int n_res2, const int* restype2, VecArray pos2,  // dimensionality n_rot2*ndim_posv
-        int n_restype, const SidechainInteractionParams* interactions,
+        PairInteraction<n_rot1,n_rot2,BT>* edges,  // must be large enough to fit all generated edges
+        int n_res1, const int* restype1, VecArray pos1,  // dimensionality n_rot1*BT::n_pos_dim
+        int n_res2, const int* restype2, VecArray pos2,  // dimensionality n_rot2*BT::n_pos_dim
+        int n_restype, const typename BT::SidechainInteraction* interactions,
         bool is_self_interaction) {
     n_edge = 0;
 
@@ -243,7 +310,7 @@ void compute_graph_elements(
         int nt1 = restype1[nr1];
         float3 rot1[n_rot1]; 
         for(int no1: range(n_rot1)) 
-            rot1[no1] = load_vec<3>(pos1.shifted(ndim_posv*no1), nr1);
+            rot1[no1] = load_vec<3>(pos1.shifted(BT::n_pos_dim*no1), nr1);
 
         for(int nr2: range((is_self_interaction ? nr1+1 : 0), n_res2)) {
             int nt2 = restype2[nr2];
@@ -255,7 +322,7 @@ void compute_graph_elements(
             //   checking every rotamer when there cannot be a hit.
             bool within_cutoff = 0;
             for(int no2: range(n_rot2)) {
-                float3 rot2 = load_vec<3>(pos2.shifted(ndim_posv*no2), nr2);
+                float3 rot2 = load_vec<3>(pos2.shifted(BT::n_pos_dim*no2), nr2);
                 for(int no1: range(n_rot1))
                     within_cutoff |= mag2(rot1[no1]-rot2) < cutoff2;
             }
@@ -267,16 +334,13 @@ void compute_graph_elements(
                 edge.nr2 = nr2;
 
                 for(int no2: range(n_rot2)) {
-                    float3 rot2 = load_vec<3>(pos2.shifted(ndim_posv*no2), nr2);
+                    auto rot2 = load_vec<BT::n_pos_dim-1>(pos2.shifted(BT::n_pos_dim*no2), nr2);
                     for(int no1: range(n_rot1)) {
-                        float3 disp = rot1[no1]-rot2;
-                        float dist2     = mag2(disp);
-                        float inv_dist  = rsqrt(dist2);
-                        float dist      = dist2*inv_dist;
-
-                        float2 en = interaction_function(dist, p);
-                        edge.potential[no1][no2] = en.x();
-                        edge.deriv    [no1][no2] = en.y() * (disp*inv_dist);
+                        // printf("evaluate %i %i\n", nr1,nr2);
+                        edge.potential[no1][no2] = p.evaluate(
+                                edge.deriv[no1][no2], 
+                                load_vec<BT::n_pos_dim-1>(pos1.shifted(no1*BT::n_pos_dim), nr1),
+                                rot2);
                     }
                 }
             }
@@ -285,25 +349,26 @@ void compute_graph_elements(
 }
 
 
+template <typename BT>
 void compute_all_graph_elements(
-        int &n_edge11, PairInteraction<1,1>* edges11,  // must be large enough to fit all generated edges
-        int &n_edge13, PairInteraction<1,3>* edges13,  // must be large enough to fit all generated edges
-        int &n_edge33, PairInteraction<3,3>* edges33,  // must be large enough to fit all generated edges
-        int n_res1, const int* restype1, VecArray pos1,  // dimensionality 1*ndim_posv
-        int n_res3, const int* restype3, VecArray pos3,  // dimensionality 3*ndim_posv
-        int n_restype, const SidechainInteractionParams* interactions) {
+        int &n_edge11, PairInteraction<1,1,BT>* edges11,  // must be large enough to fit all generated edges
+        int &n_edge13, PairInteraction<1,3,BT>* edges13,  // must be large enough to fit all generated edges
+        int &n_edge33, PairInteraction<3,3,BT>* edges33,  // must be large enough to fit all generated edges
+        int n_res1, const int* restype1, VecArray pos1,  // dimensionality 1*BT::n_pos_dim
+        int n_res3, const int* restype3, VecArray pos3,  // dimensionality 3*BT::n_pos_dim
+        int n_restype, const typename BT::SidechainInteraction* interactions) {
 
-            compute_graph_elements<1,1>(
+            compute_graph_elements<1,1,BT>(
                     n_edge11, edges11,
                     n_res1, restype1, pos1,
                     n_res1, restype1, pos1,
                     n_restype, interactions, true);
-            compute_graph_elements<1,3>(
+            compute_graph_elements<1,3,BT>(
                     n_edge13, edges13,
                     n_res1, restype1, pos1,
                     n_res3, restype3, pos3,
                     n_restype, interactions, false);
-            compute_graph_elements<3,3>(
+            compute_graph_elements<3,3,BT>(
                     n_edge33, edges33,
                     n_res3, restype3, pos3,
                     n_res3, restype3, pos3,
@@ -370,13 +435,13 @@ pair<int,float> solve_for_beliefs(
         int n_node, VecArray node_prob,
         int n_edge, VecArray edge_prob, int* edge_indices_this_system,
         float damping, // 0.f indicates no damping
-        int max_iter, float tol, bool re_initialize_beliefs) {
+        int max_iter, float tol, bool re_initialize_node_beliefs) {
     const int n_rot = 3;
 
-    if(re_initialize_beliefs) {
+    if(re_initialize_node_beliefs) {
         for(int d: range(  n_rot)) for(int nn: range(n_node)) node_belief(d,nn) = node_prob(d,nn);
-        for(int d: range(2*n_rot)) for(int ne: range(n_edge)) temp_edge_belief(d,ne) = 1.f;
     }
+    for(int d: range(2*n_rot)) for(int ne: range(n_edge)) temp_edge_belief(d,ne) = 1.f;
 
     // now let's construct the edge beliefs that are correctly related to the node beliefs
     // since old_node_belief sets new_edge_belief and old_edge_belief sets new_node_belief, 
@@ -386,7 +451,7 @@ pair<int,float> solve_for_beliefs(
             node_belief,      temp_edge_belief,
             n_node, node_prob,
             n_edge, edge_prob, edge_indices_this_system,
-            0.2f);
+            min(damping,0.1f));
 
     float max_deviation = 1e10f;
     int iter = 0;
@@ -423,11 +488,12 @@ pair<int,float> solve_for_beliefs(
 }
 
 
+template <typename BT>
 void convert_potential_graph_to_probability_graph(
         VecArray node_prob, VecArray edge_prob, int* edge_indices,
         int n_res3, VecArray pos3, // last dimension is 1-residue potential
-        int n_edge13, PairInteraction<1,3>* edges13,
-        int n_edge33, PairInteraction<3,3>* edges33) {
+        int n_edge13, PairInteraction<1,3,BT>* edges13,
+        int n_edge33, PairInteraction<3,3,BT>* edges33) {
 
     // float potential_shift = 0.f;
     for(int ne33: range(n_edge33)) {
@@ -448,7 +514,7 @@ void convert_potential_graph_to_probability_graph(
 
     for(int no: range(3))
         for(int nr: range(n_res3)) 
-            node_prob(no,nr) = pos3(no*ndim_posv+3,nr);
+            node_prob(no,nr) = pos3(no*BT::n_pos_dim+3,nr);
 
     for(int ne13: range(n_edge13)) {
         auto &e = edges13[ne13];
@@ -470,6 +536,7 @@ void convert_potential_graph_to_probability_graph(
 }
 
 
+template <typename BT>
 void compute_free_energy_and_derivative(
         float* potential, VecArray node_marginal_prob, VecArray edge_marginal_prob,
         VecArray pos,
@@ -477,13 +544,13 @@ void compute_free_energy_and_derivative(
         int n_res1, int n_res3,
         VecArray node_belief, VecArray edge_belief,
         VecArray edge_prob,
-        int n_edge11, const PairInteraction<1,1>* edges11,
-        int n_edge13, const PairInteraction<1,3>* edges13,
-        int n_edge33, const PairInteraction<3,3>* edges33) {
+        int n_edge11, const PairInteraction<1,1,BT>* edges11,
+        int n_edge13, const PairInteraction<1,3,BT>* edges13,
+        int n_edge33, const PairInteraction<3,3,BT>* edges33) {
 
     // start with zero derivative
-    fill(deriv1, 1*ndim_posv, n_res1, 0.f);
-    fill(deriv3, 3*ndim_posv, n_res3, 0.f);
+    fill(deriv1, 1*BT::n_pos_dim, n_res1, 0.f);
+    fill(deriv3, 3*BT::n_pos_dim, n_res3, 0.f);
 
     double free_energy = 0.f;
 
@@ -493,10 +560,10 @@ void compute_free_energy_and_derivative(
         b *= rcp(sum(b)); // normalize probability
 
         for(int no: range(3)) {
-            deriv3(no*ndim_posv+3,nr) = b[no];
+            deriv3(no*BT::n_pos_dim+3,nr) = b[no];
             // potential is given by the 3th element of position (note that -S is p*log p with no minus)
             if(potential) {
-                float v =  b[no]*pos(no*ndim_posv+3,nr);
+                float v =  b[no]*pos(no*BT::n_pos_dim+3,nr);
                 float s = -b[no]*logf(1e-10f+b[no]); // 1-body entropies
                 free_energy += v-s;
                 node_marginal_prob(no,nr) = b[no];
@@ -507,9 +574,8 @@ void compute_free_energy_and_derivative(
     // edge beliefs couple to the positions
     for(int ne11: range(n_edge11)) {
         auto &e = edges11[ne11];
-        Vec<ndim> z = e.deriv[0][0];
-        update_vec(deriv1, e.nr1,  z);
-        update_vec(deriv1, e.nr2, -z);
+        update_vec(deriv1, e.nr1, e.deriv[0][0].d1());
+        update_vec(deriv1, e.nr2, e.deriv[0][0].d2());
         if(potential) {
             float v = e.potential[0][0];
             free_energy += v; // no entropy since only 1 state for each
@@ -526,10 +592,12 @@ void compute_free_energy_and_derivative(
             free_energy += v;  // no mutual information since one of the residues has only a single state
         }
 
-        Vec<ndim> d[3] = {b[0]*e.deriv[0][0], b[1]*e.deriv[0][1], b[2]*e.deriv[0][2]};
-
-        update_vec(deriv1,e.nr1,  d[0]+d[1]+d[2]);
-        for(int no2: range(3)) update_vec(deriv3.shifted(ndim_posv*no2),e.nr2, -d[no2]);
+        auto d1 = make_zero<BT::n_pos_dim-1>();
+        for(int no2: range(3)) {
+            d1 += b[no2]*e.deriv[0][no2].d1();
+            update_vec(deriv3.shifted(BT::n_pos_dim*no2),e.nr2, b[no2]*e.deriv[0][no2].d2());
+        }
+        update_vec(deriv1,e.nr1, d1);
     }
 
     // The edge marginal distributions are given by p(x1,x2) *
@@ -568,37 +636,39 @@ void compute_free_energy_and_derivative(
             store_vec(edge_marginal_prob, ne33, pair_distrib);
         }
 
-        Vec<ndim> d[3][3];
+        #define p(no1,no2) (pair_distrib[(no1)*3+(no2)])
         for(int no1: range(3)) 
-            for(int no2: range(3)) 
-                d[no1][no2] = pair_distrib[no1*3+no2]*e.deriv[no1][no2];
-
-        for(int no1: range(3)) update_vec(deriv3.shifted(ndim_posv*no1),e.nr1,  d[no1][0]+d[no1][1]+d[no1][2]);
-        for(int no2: range(3)) update_vec(deriv3.shifted(ndim_posv*no2),e.nr2, -d[0][no2]-d[1][no2]-d[2][no2]);
+            update_vec(deriv3.shifted(BT::n_pos_dim*no1),e.nr1,  
+                p(no1,0)*e.deriv[no1][0].d1()+p(no1,1)*e.deriv[no1][1].d1()+p(no1,2)*e.deriv[no1][2].d1());
+        for(int no2: range(3)) 
+            update_vec(deriv3.shifted(BT::n_pos_dim*no2),e.nr2, 
+                p(0,no2)*e.deriv[0][no2].d2()+p(1,no2)*e.deriv[1][no2].d2()+p(2,no2)*e.deriv[2][no2].d2());
+        #undef p
     }
 
     if(potential) *potential = free_energy;
-}
+} 
 
-
+template <typename BT>
 void compute_parameter_derivatives(
         float* buffer, 
         VecArray node_marginal_prob, VecArray edge_marginal_prob,
-        int n_edge11, PairInteraction<1,1>* edges11,
-        int n_edge13, PairInteraction<1,3>* edges13,
-        int n_edge33, PairInteraction<3,3>* edges33,
-        int n_res1, const int* restype1, VecArray pos1,  // dimensionality 1*ndim_posv
-        int n_res3, const int* restype3, VecArray pos3,  // dimensionality 3*ndim_posv
-        int n_restype, const SidechainInteractionParams* interactions) {
+        int n_edge11, PairInteraction<1,1,BT>* edges11,
+        int n_edge13, PairInteraction<1,3,BT>* edges13,
+        int n_edge33, PairInteraction<3,3,BT>* edges33,
+        int n_res1, const int* restype1, VecArray pos1,  // dimensionality 1*BT::n_pos_dim
+        int n_res3, const int* restype3, VecArray pos3,  // dimensionality 3*BT::n_pos_dim
+        int n_restype, const typename BT::SidechainInteraction* interactions) {
 
     auto inter_deriv = [&](VecArray pos1, VecArray pos2, int rt1, int nr1, int no1, int rt2, int nr2, int no2) {
-        float dist = mag(load_vec<3>(pos1.shifted(ndim_posv*no1),nr1)-load_vec<3>(pos2.shifted(ndim_posv*no2),nr2));
-        return interaction_function_parameter_deriv(dist, interactions[rt1*n_restype + rt2]);
+        return interactions[rt1*n_restype + rt2].parameter_deriv(
+                load_vec<BT::n_pos_dim-1>(pos1.shifted(BT::n_pos_dim*no1),nr1),
+                load_vec<BT::n_pos_dim-1>(pos2.shifted(BT::n_pos_dim*no2),nr2));
     };
 
-    SysArrayStorage s_deriv(1, 6, n_restype*n_restype);
+    SysArrayStorage s_deriv(1, BT::n_param, n_restype*n_restype);
     VecArray deriv = s_deriv[0];
-    fill(deriv, 6, n_restype*n_restype, 0.f);
+    fill(deriv, BT::n_param, n_restype*n_restype, 0.f);
 
     for(int ne11: range(n_edge11)) {
         auto &e = edges11[ne11];
@@ -614,7 +684,7 @@ void compute_parameter_derivatives(
         int rt1 = restype1[e.nr1];
         int rt2 = restype3[e.nr2];
 
-        Vec<6> dval; for(int i: range(6)) dval[i] = 0.f;
+        auto dval = make_zero<BT::n_param>();
         for(int no2: range(3))
             dval += b[no2]*inter_deriv(pos1,pos3, rt1,e.nr1,0, rt2,e.nr2,no2); 
 
@@ -628,7 +698,7 @@ void compute_parameter_derivatives(
         int rt1 = restype3[e.nr1];
         int rt2 = restype3[e.nr2];
 
-        Vec<6> dval; for(int i: range(6)) dval[i] = 0.f;
+        auto dval = make_zero<BT::n_param>();
         for(int no1: range(3)) for(int no2: range(3))
             dval += bp[no1*3+no2]*inter_deriv(pos3,pos3, rt1,e.nr1,no1, rt2,e.nr2,no2); 
         update_vec(deriv, rt1*n_restype+rt2, dval);
@@ -637,25 +707,17 @@ void compute_parameter_derivatives(
     // now re-order, handle symmetry, and handle scale = 1/width
     for(int rt1: range(n_restype)) {
         for(int rt2: range(n_restype)) {
-            auto d = load_vec<6>(deriv, rt1*n_restype+rt2);
-            if(rt1!=rt2) d += load_vec<6>(deriv, rt2*n_restype+rt1);  // symmetry
+            auto d = load_vec<BT::n_param>(deriv, rt1*n_restype+rt2);
+            if(rt1!=rt2) d += load_vec<BT::n_param>(deriv, rt2*n_restype+rt1);  // symmetry
 
-            float* base_loc = buffer + (rt1*n_restype+rt2)*6;
-            // width = 1/scale, so dV/d_width = dV/d_scale*d_scale/d_width
-            //                                = dV/d_scale*(-1/width**2)
-            //                                = dV/d_scale*(-scale**2)
-            base_loc[0] = d[5]; // energy_inner
-            base_loc[1] = d[3]; // radius_inner
-            base_loc[2] =-d[4] * sqr(interactions[rt1*n_restype+rt2].scale_inner); // width_inner
-
-            base_loc[3] = d[2]; // energy_outer
-            base_loc[4] = d[0]; // radius_outer
-            base_loc[5] =-d[1] * sqr(interactions[rt1*n_restype+rt2].scale_outer); // width_outer
+            float* base_loc = buffer + (rt1*n_restype+rt2)*BT::n_param;
+            for(int i: range(BT::n_param)) base_loc[i] = d[i];
         }
     }
 }
 
 
+template <typename BT>
 struct RotamerSidechain: public PotentialNode {
     struct RotamerIndices {
         int start;
@@ -665,7 +727,7 @@ struct RotamerSidechain: public PotentialNode {
     int n_restype;
     CoordNode& rama;
     CoordNode& alignment;
-    vector<SidechainInteractionParams> interactions;
+    vector<typename BT::SidechainInteraction> interactions;
     map<string,int> index_from_restype;
 
     vector<RotamerIndices> rotamer_indices;  // start and stop
@@ -673,14 +735,14 @@ struct RotamerSidechain: public PotentialNode {
     vector<string> sequence;
     vector<int>    restype;
 
-    unique_ptr<RotamerPlacement<1>> placement1;
-    unique_ptr<RotamerPlacement<3>> placement3;
+    unique_ptr<RotamerPlacement<1,BT>> placement1;
+    unique_ptr<RotamerPlacement<3,BT>> placement3;
 
     int             max_edges11, max_edges13, max_edges33;
     vector<int>     n_edge11, n_edge13, n_edge33;
-    vector<PairInteraction<1,1>> edges11;
-    vector<PairInteraction<1,3>> edges13;
-    vector<PairInteraction<3,3>> edges33;
+    vector<PairInteraction<1,1,BT>> edges11;
+    vector<PairInteraction<1,3,BT>> edges13;
+    vector<PairInteraction<3,3,BT>> edges33;
 
     vector<int> edge_indices;
     SysArrayStorage node_prob, edge_prob;
@@ -717,21 +779,10 @@ struct RotamerSidechain: public PotentialNode {
         energy_fresh_relative_to_derivative(false)
 
     {
-        check_size(grp, "energy", n_restype, n_restype, 2);  // 2 is for inner or outer energy
-        check_size(grp, "radius", n_restype, n_restype, 2); 
-        check_size(grp, "width",  n_restype, n_restype, 2);
+        check_size(grp, "interaction_params", n_restype, n_restype, BT::n_param);
 
-        traverse_dset<3,float>(grp, "energy", [&](size_t rt1, size_t rt2, int is_outer, float x) {
-                auto& p = interactions[rt1*n_restype+rt2];
-                (is_outer ? p.energy_outer : p.energy_inner) = x;});
-
-        traverse_dset<3,float>(grp, "radius", [&](size_t rt1, size_t rt2, int is_outer, float x) {
-                auto& p = interactions[rt1*n_restype+rt2];
-                (is_outer ? p.radius_outer : p.radius_inner) = x;});
-
-        traverse_dset<3,float>(grp, "width", [&](size_t rt1, size_t rt2, int is_outer, float x) {
-                auto& p = interactions[rt1*n_restype+rt2];
-                (is_outer ? p.scale_outer  : p.scale_inner)  = 1.f/x;});
+        traverse_dset<3,float>(grp, "interaction_params", [&](size_t rt1, size_t rt2, int par, float x) {
+                interactions[rt1*n_restype+rt2].params[par] = x;});
 
         for(auto& p: interactions) 
             p.update_cutoff2();
@@ -776,20 +827,20 @@ struct RotamerSidechain: public PotentialNode {
         int n_bin       = get_dset_size(3,grp, "rotamer_prob")[0];
         int n_total_rot = get_dset_size(3,grp, "rotamer_prob")[2];
 
-        check_size(grp, "rotamer_center", n_bin, n_bin, n_total_rot, 3);
+        check_size(grp, "rotamer_center", n_bin, n_bin, n_total_rot, BT::n_pos_dim-1);
         check_size(grp, "rotamer_prob",   n_bin, n_bin, n_total_rot);
 
-        vector<double> all_data_to_fit(n_total_rot*n_bin*n_bin*ndim_posv);
-        traverse_dset<ndim_posv,double>(grp, "rotamer_center", [&](size_t ix, size_t iy, size_t i_pt, size_t d, double x) {
-                all_data_to_fit.at(((i_pt*n_bin + ix)*n_bin + iy)*ndim_posv + d) = x;});
+        vector<double> all_data_to_fit(n_total_rot*n_bin*n_bin*BT::n_pos_dim);
+        traverse_dset<4,double>(grp, "rotamer_center", [&](size_t ix, size_t iy, size_t i_pt, size_t d, double x) {
+                all_data_to_fit.at(((i_pt*n_bin + ix)*n_bin + iy)*BT::n_pos_dim + d) = x;});
         traverse_dset<3,double>(grp, "rotamer_prob",   [&](size_t ix, size_t iy, size_t i_pt,           double x) {
-                all_data_to_fit.at(((i_pt*n_bin + ix)*n_bin + iy)*ndim_posv + 3) = -log(x);}); // last entry is potential, not prob
+                all_data_to_fit.at(((i_pt*n_bin + ix)*n_bin + iy)*BT::n_pos_dim + BT::n_pos_dim-1) = -log(x);}); // last entry is potential, not prob
 
         // Copy the data into local arrays
         map<int, vector<double>> data_to_fit;
         for(auto &kv: local_to_global) {
             int n_rot = kv.first;
-            data_to_fit[n_rot] = vector<double>(kv.second.size()*n_bin*n_bin*n_rot*ndim_posv);
+            data_to_fit[n_rot] = vector<double>(kv.second.size()*n_bin*n_bin*n_rot*BT::n_pos_dim);
             auto &v = data_to_fit[n_rot];
 
             for(int local_rt: range(kv.second.size())) {
@@ -800,9 +851,9 @@ struct RotamerSidechain: public PotentialNode {
                 for(int no: range(stop-start))
                     for(int ix: range(n_bin))
                         for(int iy: range(n_bin))
-                            for(int d: range(ndim_posv))
-                                v[(((local_rt*n_bin + ix)*n_bin + iy)*n_rot + no)*ndim_posv + d] = 
-                                    all_data_to_fit[(((start+no)*n_bin + ix)*n_bin + iy)*ndim_posv + d];
+                            for(int d: range(BT::n_pos_dim))
+                                v[(((local_rt*n_bin + ix)*n_bin + iy)*n_rot + no)*BT::n_pos_dim + d] = 
+                                    all_data_to_fit[(((start+no)*n_bin + ix)*n_bin + iy)*BT::n_pos_dim + d];
             }
         }
 
@@ -832,9 +883,9 @@ struct RotamerSidechain: public PotentialNode {
                 }
             }
         }
-        placement1 = unique_ptr<RotamerPlacement<1>>(new RotamerPlacement<1>(
+        placement1 = unique_ptr<RotamerPlacement<1,BT>>(new RotamerPlacement<1,BT>(
                     local_loc[1], global_restype[1], local_to_global[1].size(), n_bin, n_bin, data_to_fit[1].data(), n_system));
-        placement3 = unique_ptr<RotamerPlacement<3>>(new RotamerPlacement<3>(
+        placement3 = unique_ptr<RotamerPlacement<3,BT>>(new RotamerPlacement<3,BT>(
                     local_loc[3], global_restype[3], local_to_global[3].size(), n_bin, n_bin, data_to_fit[3].data(), n_system));
 
 
@@ -880,7 +931,7 @@ struct RotamerSidechain: public PotentialNode {
                         for(int nr: range(p3.n_res)) {
                             auto b = load_vec<3>(node_marginal_prob[ns], nr);
                             auto vs = make_vec2(0.f,0.f);
-                            for(int no: range(3)) {vs[0] += b[no]*p3.pos[ns](no*ndim_posv+3,nr); vs[1] += -b[no]*logf(1e-10f+b[no]);}
+                            for(int no: range(3)) {vs[0] += b[no]*p3.pos[ns](no*BT::n_pos_dim+3,nr); vs[1] += -b[no]*logf(1e-10f+b[no]);}
                             store_vec(residue_energy3, nr, vs);
                        }
 
@@ -932,36 +983,36 @@ struct RotamerSidechain: public PotentialNode {
             default_logger->log_once<int>("rotamer_restype3", {placement3->n_res}, [&](int* buffer) {
                     for(int nr: range(placement3->n_res)) buffer[nr]=placement3->global_restype[nr];});
 
-            default_logger->add_logger<float>("rotamer_pos1", {n_system, placement1->n_res,ndim_posv}, [&](float* buffer) {
+            default_logger->add_logger<float>("rotamer_pos1", {n_system, placement1->n_res,BT::n_pos_dim}, [&](float* buffer) {
                     auto &p1 = *placement1;
                     for(int ns: range(n_system))
                         for(int nr: range(p1.n_res))
-                            for(int d: range(ndim_posv))
-                                buffer[ns*p1.n_res*ndim_posv + nr*ndim_posv + d] = p1.pos[ns](d,nr);});
-            default_logger->add_logger<float>("rotamer_pos3", {n_system, placement3->n_res,3*ndim_posv}, [&](float* buffer) {
+                            for(int d: range(BT::n_pos_dim))
+                                buffer[ns*p1.n_res*BT::n_pos_dim + nr*BT::n_pos_dim + d] = p1.pos[ns](d,nr);});
+            default_logger->add_logger<float>("rotamer_pos3", {n_system, placement3->n_res,3*BT::n_pos_dim}, [&](float* buffer) {
                     auto &p3 = *placement3;
                     for(int ns: range(n_system))
                         for(int nr: range(p3.n_res))
-                            for(int d: range(3*ndim_posv))
-                                buffer[ns*p3.n_res*3*ndim_posv + nr*3*ndim_posv + d] = p3.pos[ns](d,nr);});
+                            for(int d: range(3*BT::n_pos_dim))
+                                buffer[ns*p3.n_res*3*BT::n_pos_dim + nr*3*BT::n_pos_dim + d] = p3.pos[ns](d,nr);});
 
 
 
             // let's log the derivative of the free energy with respect to the interaction parameters
-            default_logger->add_logger<float>("rotamer_interaction_parameter_gradient", {n_system, n_restype, n_restype, 6}, [&](float* buffer) {
+            default_logger->add_logger<float>("rotamer_interaction_parameter_gradient", {n_system, n_restype, n_restype, BT::n_param}, [&](float* buffer) {
                     this->ensure_fresh_energy();
                     auto &p1 = *placement1;
                     auto &p3 = *placement3;
 
                     for(int ns=0; ns<n_system; ++ns) {
                         compute_parameter_derivatives(
-                            buffer + ns*n_restype*n_restype*6, 
+                            buffer + ns*n_restype*n_restype*BT::n_param, 
                             node_marginal_prob[ns], edge_marginal_prob[ns],
                             n_edge11[ns], edges11.data() + ns*max_edges11,
                             n_edge13[ns], edges13.data() + ns*max_edges13,
                             n_edge33[ns], edges33.data() + ns*max_edges33,
-                            p1.n_res, p1.global_restype.data(), p1.pos[ns],  // dimensionality 1*ndim_posv
-                            p3.n_res, p3.global_restype.data(), p3.pos[ns],  // dimensionality 3*ndim_posv
+                            p1.n_res, p1.global_restype.data(), p1.pos[ns],  // dimensionality 1*BT::n_pos_dim
+                            p3.n_res, p3.global_restype.data(), p3.pos[ns],  // dimensionality 3*BT::n_pos_dim
                             n_restype, interactions.data());
                     }});
 
@@ -988,7 +1039,7 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     virtual void compute_value(ComputeMode mode) {
-        Timer timer("rotamer");
+        // Timer timer("rotamer");
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         auto &p1 = *placement1;
@@ -996,9 +1047,11 @@ struct RotamerSidechain: public PotentialNode {
 
         #pragma omp parallel for schedule(dynamic)
         for(int ns=0; ns<n_system; ++ns) {
+            Timer t1("rotamer_place");
             p1.place_rotamers(alignment.coords().value, rama.coords().value, ns);
             p3.place_rotamers(alignment.coords().value, rama.coords().value, ns);
 
+            t1.stop(); Timer t2("rotamer_compute");
             compute_all_graph_elements(
                     n_edge11[ns], edges11.data() + ns*max_edges11,
                     n_edge13[ns], edges13.data() + ns*max_edges13,
@@ -1007,12 +1060,14 @@ struct RotamerSidechain: public PotentialNode {
                     p3.n_res, p3.global_restype.data(), p3.pos[ns],
                     n_restype, interactions.data());
 
+            t2.stop(); Timer t3("rotamer_convert");
             convert_potential_graph_to_probability_graph(
                     node_prob[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
                     p3.n_res, p3.pos[ns],  // last dimension is 1-residue potential
                     n_edge13[ns], edges13.data()+ns*max_edges13,
                     n_edge33[ns], edges33.data()+ns*max_edges33);
 
+            t3.stop(); Timer t4("rotamer_solve");
             if(!fixed_rotamers3.size()) {
                 auto result = solve_for_beliefs(
                         node_belief[ns], edge_belief[ns], 
@@ -1039,6 +1094,7 @@ struct RotamerSidechain: public PotentialNode {
                 }
             }
 
+            t4.stop(); Timer t5("rotamer_diff");
             compute_free_energy_and_derivative(
                     (mode==PotentialAndDerivMode ? potential.data()+ns : nullptr), 
                     node_marginal_prob[ns], edge_marginal_prob[ns],
@@ -1079,12 +1135,14 @@ struct RotamerSidechain: public PotentialNode {
         return rama_dev;
     }
 };
-static RegisterNodeType<RotamerSidechain,2> rotamer_node ("rotamer");
+static RegisterNodeType<RotamerSidechain<preferred_bead_type>,2> rotamer_node ("rotamer");
 
 
 struct RotamerConstructAndSolve {
+    typedef PosBead BT;
+
     int n_restype;
-    vector<SidechainInteractionParams> interactions;
+    vector<BT::SidechainInteraction> interactions;
 
     vector<int>     restype1,   restype3;
     int             n_res1,     n_res3;
@@ -1092,9 +1150,9 @@ struct RotamerConstructAndSolve {
     SysArrayStorage pos_deriv1, pos_deriv3;
 
     int n_edge11, n_edge13, n_edge33;
-    vector<PairInteraction<1,1>> edges11;
-    vector<PairInteraction<1,3>> edges13;
-    vector<PairInteraction<3,3>> edges33;
+    vector<PairInteraction<1,1,BT>> edges11;
+    vector<PairInteraction<1,3,BT>> edges13;
+    vector<PairInteraction<3,3,BT>> edges33;
 
     vector<int> edge_indices;
 
@@ -1110,15 +1168,8 @@ struct RotamerConstructAndSolve {
 
     float free_energy_and_parameter_deriv(float* parameter_deriv, const float* interactions_) {
         for(int i: range(n_restype*n_restype)) {
-            // fprintf(stderr,"reading interaction %i\n",i);
-            interactions[i].energy_inner =     interactions_[6*i+0];
-            // if(i==0) printf("it has value %f\n", interactions[i].energy_inner);
-            interactions[i].radius_inner =     interactions_[6*i+1];
-            interactions[i].scale_inner  = 1.f/interactions_[6*i+2];
-
-            interactions[i].energy_outer =     interactions_[6*i+3];
-            interactions[i].radius_outer =     interactions_[6*i+4];
-            interactions[i].scale_outer  = 1.f/interactions_[6*i+5];
+            for(int ip: range(BT::n_param))
+                interactions[i].params[ip] = interactions_[BT::n_param*i+ip];
             interactions[i].update_cutoff2();
         }
             
@@ -1182,8 +1233,8 @@ struct RotamerConstructAndSolve {
                 n_edge11, edges11.data(),
                 n_edge13, edges13.data(),
                 n_edge33, edges33.data(),
-                n_res1, restype1.data(), pos1[0],  // dimensionality 1*ndim_posv
-                n_res3, restype3.data(), pos3[0],  // dimensionality 3*ndim_posv
+                n_res1, restype1.data(), pos1[0],  // dimensionality 1*BT::n_pos_dim
+                n_res3, restype3.data(), pos3[0],  // dimensionality 3*BT::n_pos_dim
                 n_restype, interactions.data());
 
         // printf("number of edges %i %i %i %s %f\n", n_edge11, n_edge13, n_edge33, 
@@ -1201,6 +1252,8 @@ RotamerConstructAndSolve* new_rotamer_construct_and_solve(
              int n_res3_, int* restype3_, float* pos3_,
              float damping_, int max_iter_, float tol_,
              int* fixed_rotamers3_) {
+    typedef preferred_bead_type BT;
+
     auto rcas = new RotamerConstructAndSolve;
     auto &z = *rcas;
 
@@ -1210,11 +1263,11 @@ RotamerConstructAndSolve* new_rotamer_construct_and_solve(
     z.n_res1 = n_res1_; z.restype1 = vector<int>(restype1_, restype1_+z.n_res1);
     z.n_res3 = n_res3_; z.restype3 = vector<int>(restype3_, restype3_+z.n_res3);
 
-    z.pos1.reset(1,1*ndim_posv,z.n_res1); z.pos_deriv1.reset(1,1*ndim_posv,z.n_res1);
-    z.pos3.reset(1,3*ndim_posv,z.n_res3); z.pos_deriv3.reset(1,3*ndim_posv,z.n_res3);
+    z.pos1.reset(1,1*BT::n_pos_dim,z.n_res1); z.pos_deriv1.reset(1,1*BT::n_pos_dim,z.n_res1);
+    z.pos3.reset(1,3*BT::n_pos_dim,z.n_res3); z.pos_deriv3.reset(1,3*BT::n_pos_dim,z.n_res3);
 
-    for(int nr: range(z.n_res1)) for(int d: range(  ndim_posv)) z.pos1[0](d,nr) = pos1_[nr*ndim_posv+d];
-    for(int nr: range(z.n_res3)) for(int d: range(3*ndim_posv)) z.pos3[0](d,nr) = pos3_[nr*3*ndim_posv+d];
+    for(int nr: range(z.n_res1)) for(int d: range(  BT::n_pos_dim)) z.pos1[0](d,nr) = pos1_[nr*BT::n_pos_dim+d];
+    for(int nr: range(z.n_res3)) for(int d: range(3*BT::n_pos_dim)) z.pos3[0](d,nr) = pos3_[nr*3*BT::n_pos_dim+d];
 
     int max_edges11 = z.n_res1 * (z.n_res1-1) / 2; z.edges11.resize(max_edges11);
     int max_edges13 = z.n_res1 *  z.n_res3;        z.edges13.resize(max_edges13);
@@ -1259,4 +1312,35 @@ float free_energy_and_parameter_deriv(RotamerConstructAndSolve* rcas,
 
 void delete_rotamer_construct_and_solve(RotamerConstructAndSolve* rcas) {
     delete rcas;
+}
+
+
+void dump_factor_graph(const char* fname, 
+        int n_node, VecArray node_prob,
+        int n_edge, VecArray edge_prob, int* edge_indices) {
+    auto f = fopen(fname, "w");
+    fprintf(f, "%i\n", n_node+n_edge);  // number of factors
+
+    for(int nn: range(n_node)) {
+        fprintf(f,"\n");
+        fprintf(f,"1\n"); // number of variables
+        fprintf(f,"%i\n", nn); // label of variable
+        fprintf(f,"3\n"); // number of states
+        fprintf(f,"3\n"); // number of factor values
+        for(int no: range(3))
+            fprintf(f,"%i %f\n", no, node_prob(no,nn)); // factor graph entry
+    }
+
+    for(int ne: range(n_edge)) {
+        fprintf(f,"\n");
+        fprintf(f,"2\n"); // number of variables
+        fprintf(f,"%i %i\n", edge_indices[2*ne+0], edge_indices[2*ne+1]); // label of variables
+        fprintf(f,"3 3\n"); // number of states
+        fprintf(f,"9\n"); // number of factor values
+        // libdai works in column major ordering, but we work in row major ordering
+        for(int no2: range(3))
+            for(int no1: range(3))
+                fprintf(f,"%i %f\n", no1 + no2*3, edge_prob(no1*3+no2,ne)); // factor graph entry
+    }
+    fclose(f);
 }

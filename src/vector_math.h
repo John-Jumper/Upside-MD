@@ -194,6 +194,7 @@ inline Vec<D,float> blendv(bool which, const Vec<D,float>& a, const Vec<D,float>
 
 
 
+
 inline Vec<1> make_vec1(float x                           ) {Vec<1> a; a[0]=x;                         return a;}
 inline float2 make_vec2(float x, float y                  ) {float2 a; a[0]=x; a[1]=y;                 return a;}
 inline float3 make_vec3(float x, float y, float z         ) {float3 a; a[0]=x; a[1]=y; a[2]=z;         return a;}
@@ -363,6 +364,25 @@ inline S zero() {return 0.f;} // depend on implicit conversion
 
 template <typename S>
 inline S one () {return 1.f;} // depend on implicit conversion
+
+template <int D, typename S = float>
+inline Vec<D,S> make_zero() {
+    Vec<D,S> ret;
+    for(int i=0; i<D; ++i) ret[i] = zero<S>();
+    return ret;
+}
+
+template<int start_loc, int stop_loc, int D, typename S>
+inline Vec<stop_loc-start_loc,S> extract(const Vec<D,S>& x) {
+    static_assert(0<=start_loc, "extract start must be non-negative");
+    static_assert(start_loc<=stop_loc, "extract start must be <= extract stop");
+    static_assert(stop_loc<=D, "extract stop must be <= dimension");
+
+    Vec<stop_loc-start_loc,S> ret;
+    #pragma unroll
+    for(int i=0; i<stop_loc-start_loc; ++i) ret[i] = x[i+start_loc];
+    return ret;
+}
 
 template <typename S>
 inline S a_sqrt(const S& a) {

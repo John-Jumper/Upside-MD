@@ -56,14 +56,14 @@ class RotamerObjectHolder(object):
 def interaction_matrix_from_param_vector_expr(param_vector):
     inner_energy = T.exp(param_vector[0,:])  # inner_energy is repulsive, so positive
     inner_radius = T.exp(param_vector[1,:])  # positive
-    inner_width  = T.exp(param_vector[2,:])  # positive
+    inner_scale  = T.exp(param_vector[2,:])  # positive
         
     outer_energy =       param_vector[3,:]  # outer_energy is probably attractive
     outer_radius = T.exp(param_vector[4,:])+inner_radius  # > inner_radius
-    outer_width  = T.exp(param_vector[5,:])  # positive
-    # FIXME I should penalize heavily cases where width > radius since derivative is non-smooth at origin
+    outer_scale  = T.exp(param_vector[5,:])  # positive
+    # FIXME I should penalize heavily cases where 1./scale > radius since derivative is non-smooth at origin
     
-    return T.stack(inner_energy, inner_radius, inner_width, outer_energy, outer_radius, outer_width)
+    return T.stack(inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale)
 
 lparam = T.dmatrix('lparam')
 to_matrix = theano.function([lparam],interaction_matrix_from_param_vector_expr(lparam))

@@ -918,7 +918,8 @@ def write_rotamer(fasta, library, scale):
     create_array(g, 'restype', obj=map(str,fasta))
 
     params = tables.open_file(library)
-    for nm in 'energy radius width restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
+    #for nm in 'energy radius width restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
+    for nm in 'interaction_params restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
         create_array(g, nm, obj=params.get_node('/'+nm)[:])
     params.close()
 
