@@ -6,12 +6,7 @@ import os
 import theano
 import theano.tensor as T
 import cPickle as cp
-
-
 import concurrent.futures
-
-
-
 import ctypes
 
 upside_calc = ctypes.cdll.LoadLibrary('/home/jumper/Dropbox/code/upside/obj/libupside_calculation.so')
@@ -33,6 +28,18 @@ upside_calc.delete_rotamer_construct_and_solve.argtypes = [
         ctypes.c_void_p]
 upside_calc.delete_rotamer_construct_and_solve.restype = None
 
+mode = 'PosBead'
+if mode == 'PosDirBead':
+    D = 7
+    P_symm = 6
+    P_swap = 6
+
+elif mode == 'PosBead':
+    D = 4
+    P_symm = 6
+    P_swap = 0
+
+P = P_symm + P_swap
 
 executor = concurrent.futures.ThreadPoolExecutor(4)
 
@@ -42,7 +49,7 @@ class RotamerObjectHolder(object):
         self.rotamer_object = rotamer_object
 
     def energy(self,interactions):
-        assert interactions.shape == (20,20,6)
+        assert interactions.shape == (20,20,P)
         deriv = np.zeros(interactions.shape, dtype='f4')
         interactions = interactions.astype('f4').copy()
         value = upside_calc.free_energy_and_parameter_deriv(self.rotamer_object, 
@@ -53,35 +60,105 @@ class RotamerObjectHolder(object):
         upside_calc.delete_rotamer_construct_and_solve(self.rotamer_object)
 
 
-def interaction_matrix_from_param_vector_expr(param_vector):
-    inner_energy = T.exp(param_vector[0,:])  # inner_energy is repulsive, so positive
-    inner_radius = T.exp(param_vector[1,:])  # positive
-    inner_scale  = T.exp(param_vector[2,:])  # positive
+def imat_unpack_expr(param_expr, n_restype=20):
+    n_restype = 20
+    upper_tri        = (n_restype*(n_restype+1))/2
+    strict_upper_tri = (n_restype*(n_restype-1))/2
+    diag             = n_restype
+
+    i = [0]
+    def read_param(size):
+        ret = param_expr[i[0]:i[0]+size]
+        i[0] += size
+        return ret
+
+    inner_energy = T.exp(read_param(upper_tri))  # inner_energy is repulsive
+    inner_radius = T.exp(read_param(upper_tri))  # positive
+    inner_scale  = T.exp(read_param(upper_tri))  # positive
+
+    if mode == 'PosDirBead':
+        energy_gauss =       read_param(upper_tri)
+        dist_loc     = T.exp(read_param(upper_tri))
+        dist_scale   = T.exp(read_param(upper_tri))
+
+        dp1_steric_upper = read_param(strict_upper_tri)
+        dp2_steric_upper = read_param(strict_upper_tri)
+        dp_steric_diag   = read_param(diag)
+
+        dp1_loc_gauss_upper = read_param(strict_upper_tri)
+        dp2_loc_gauss_upper = read_param(strict_upper_tri)
+        dp_loc_gauss_diag   = read_param(diag)
+
+        dp1_scale_gauss_upper = T.exp(read_param(strict_upper_tri))  # scales are positive only
+        dp2_scale_gauss_upper = T.exp(read_param(strict_upper_tri))
+        dp_scale_gauss_diag   = T.exp(read_param(diag))
+
+        symm_terms  = [inner_energy, inner_radius, inner_scale, energy_gauss, dist_loc, dist_scale]
+        upper_terms = [dp1_steric_upper,      dp2_steric_upper,
+                       dp1_loc_gauss_upper,   dp2_loc_gauss_upper, 
+                       dp1_scale_gauss_upper, dp2_scale_gauss_upper] 
+        diag_terms  = [dp_steric_diag, dp_loc_gauss_diag, dp_scale_gauss_diag]
+                 
+        return T.stack(*symm_terms), T.stack(*upper_terms), T.stack(*diag_terms)
+
+    else:
+        outer_energy =       read_param(upper_tri)  # outer_energy likely attractive
+        outer_radius = T.exp(read_param(upper_tri))+inner_radius  # > inner_radius
+        outer_scale  = T.exp(read_param(upper_tri))  # positive
+
+        terms = [inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale]
+        return T.stack(*terms),
+
+
+def imat_pack(packed_params, upper_params=None, diag_params=None, n_restype=20):
+    inner_energy = np.log(packed_params[0])
+    inner_radius = np.log(packed_params[1])
+    inner_scale  = np.log(packed_params[2])
+    params = [inner_energy, inner_radius, inner_scale]
+
+    if mode == 'PosDirBead':
+        params.extend([packed_params[3], np.log(packed_params[4]), np.log(packed_params[5]),
+                       upper_params[0],upper_params[1],diag_params[0],
+                       upper_params[2],upper_params[3],diag_params[1],
+                       np.log(upper_params[4]),np.log(upper_params[5]),np.log(diag_params[2])])
+    else:
+        outer_energy =        packed_params[3]
+        outer_radius = np.log(packed_params[4]-packed_params[1])
+        outer_scale  = np.log(packed_params[5])
         
-    outer_energy =       param_vector[3,:]  # outer_energy is probably attractive
-    outer_radius = T.exp(param_vector[4,:])+inner_radius  # > inner_radius
-    outer_scale  = T.exp(param_vector[5,:])  # positive
-    # FIXME I should penalize heavily cases where 1./scale > radius since derivative is non-smooth at origin
-    
-    return T.stack(inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale)
+        params.extend([outer_energy, outer_radius, outer_scale])
 
-lparam = T.dmatrix('lparam')
-to_matrix = theano.function([lparam],interaction_matrix_from_param_vector_expr(lparam))
+    return np.concatenate(params,axis=0)
 
-def energy_and_deriv_for_rotamer_objects(rotamer_objects, flat_interactions):
-        interactions = np.zeros((20,20,6))
-        inds = np.triu_indices(20)
-        interactions[inds] = flat_interactions.T
 
-        for i in range(6):
-            interactions[:,:,i] = (interactions[:,:,i] + interactions[:,:,i].T -
-                    np.diag(np.diagonal(interactions[:,:,i])))
+lparam = T.dvector('lparam')
+
+def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
+        interactions = np.zeros((20,20,P))
+
+        def make_symm(f):
+            ret = np.zeros((20,20))
+            ret[np.triu_indices(20)] = f
+            ret = ret + ret.T - np.diag(np.diagonal(ret))
+            return ret
+
+        def make_swap(upper,diag):
+            ret = np.zeros((20,20,2))
+            ret[np.triu_indices(20,k=1)] = upper.T
+            ret = ret + ret[:,:,::-1].transpose((1,0,2)) + np.diag(diag)[...,None]
+            return ret
+
+        for i in range(P_symm):
+            interactions[:,:,i] = make_symm(param[0][i])
+
+        for s in range(P_swap/2):
+            interactions[:,:,P_symm+2*s:P_symm++2*s+2] = make_swap(param[1][2*s:2*s+2],param[2][s])
 
         number_of_tasks = min(len(rotamer_objects),32)
 
         def accum_task(start_idx):
             energy = 0.
-            deriv = np.zeros((20,20,6))
+            deriv = np.zeros((20,20,P))
 
             for rfree,rfixed in rotamer_objects[start_idx::number_of_tasks]:
                 er,dr = rfree .energy(interactions)
@@ -92,14 +169,23 @@ def energy_and_deriv_for_rotamer_objects(rotamer_objects, flat_interactions):
             return energy,deriv
 
         energy = 0.
-        deriv = np.zeros((20,20,6))
+        deriv = np.zeros((20,20,P))
         for e,d in executor.map(accum_task, range(number_of_tasks)):
             energy += e
             deriv  += d
 
-        flat_deriv = np.zeros((6,21*20/2))
-        for i in range(6):
-            flat_deriv[i] = deriv[:,:,i][inds]
+        if mode == 'PosDirBead':
+            flat_deriv = np.zeros((P_symm,21*20/2)), np.zeros((P_swap,19*20/2)), np.zeros((P_swap/2,20))
+        elif mode == 'PosBead':
+            flat_deriv = np.zeros((P_symm,21*20/2)),
+
+        for i in range(P_symm):
+            flat_deriv[0][i] = deriv[:,:,i][np.triu_indices(20)]
+
+        for i in range(P_swap):
+            flat_deriv[1][i] = deriv[:,:,P_symm+i][np.triu_indices(20,k=1)].T
+        for i in range(P_swap/2):
+            flat_deriv[2][i] = deriv[:,:,P_symm+2*i].diagonal() + deriv[:,:,P_symm+2*i+1].diagonal()
 
         return energy, flat_deriv
 
@@ -132,6 +218,8 @@ class UpsideRotamerEnergyGap(theano.Op):
             d = cp.load(open(rotamer_data_files[i]))
 
             assert d['fixed_rotamer3'].shape == (d['restype3'].shape[0],)
+            assert d['pos1'].shape[-1] ==   D
+            assert d['pos3'].shape[-1] == 3*D
 
             rotamer_object_free = RotamerObjectHolder(upside_calc.new_rotamer_construct_and_solve(
                     20,
@@ -152,19 +240,27 @@ class UpsideRotamerEnergyGap(theano.Op):
 
         self.rotamer_objects = list(executor.map(construct_rotamer_objects, self.indices))
 
-    def make_node(self, param):
-        return theano.Apply(self, [T.as_tensor_variable(param)], [T.dscalar()])
+    def make_node(self, *param):
+        if mode == 'PosBead':
+            p, = param
+            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dscalar()])
+        elif mode == 'PosDirBead':
+            p,u,d = param
+            return theano.Apply(self, [T.as_tensor_variable(x) for x in (p,u,d)], [T.dscalar()])
 
     def perform(self, node, inputs_storage, output_storage):
         energy, flat_deriv = energy_and_deriv_for_rotamer_objects(
-                self.rotamer_objects, inputs_storage[0])
+                self.rotamer_objects, *inputs_storage)
 
         result = np.array(float(energy)*1./self.total_n_res)
         output_storage[0][0] = result
 
     def grad(self, inputs, output_gradients):
         grad_func = UpsideRotamerEnergyGapGrad(self.total_n_res,self.rotamer_objects)
-        return [output_gradients[0] * grad_func(inputs[0])]
+        if mode=='PosBead':
+            return [output_gradients[0] * grad_func(inputs[0])]
+        else:
+            return [output_gradients[0] * x for x in grad_func(*inputs)]
 
 
 class UpsideRotamerEnergyGapGrad(theano.Op):
@@ -172,21 +268,21 @@ class UpsideRotamerEnergyGapGrad(theano.Op):
         self.total_n_res = total_n_res
         self.rotamer_objects = rotamer_objects
 
-    def make_node(self, param):
-        # FIXME I need more type checking and size checking here
-        return theano.Apply(self, [T.as_tensor_variable(param)], [T.dmatrix()])
+    def make_node(self, *param):
+        if mode == 'PosBead':
+            p, = param
+            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dmatrix()])
+        elif mode == 'PosDirBead':
+            p,u,d = param
+            return theano.Apply(self, [T.as_tensor_variable(x) for x in (p,u,d)], 
+                    [T.dmatrix(),T.dmatrix(),T.dmatrix()])
 
     def perform(self, node, inputs_storage, output_storage):
         energy, flat_deriv = energy_and_deriv_for_rotamer_objects(
-                self.rotamer_objects, inputs_storage[0])
+                self.rotamer_objects, *inputs_storage)
 
-        output_storage[0][0] = flat_deriv*(1./self.total_n_res)
-
-
-
-#     def nesterov_sgd_pass(self, init_p, init_momentum, momentum_persistence, step_size, mini_batch_size):
-#         pass  # FIXME should I use size-matching here?
-
+        for i in range(len(output_storage)):
+            output_storage[i][0] = flat_deriv[i]*(1./self.total_n_res)
 
 
 def convert_structure_to_rotamer_data(fasta, init_structure, rotamer_lib):

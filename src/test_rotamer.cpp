@@ -315,6 +315,7 @@ int main(int argc, char** argv) try {
         printf("%s\n", rname.c_str());
 
         std::vector<float> centers;
+        std::vector<float> direcs;
         auto grp = ensure_group(config.get(), rname.c_str());
 
         if(rname == "ALA" || rname == "GLY") {
@@ -337,11 +338,19 @@ int main(int argc, char** argv) try {
                     MatrixX3f pos;
                     array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
                     res_func(pos, psi, chi);
-                    RowVector3f curr_center = pos.row((rname == "GLY") ?  1 : 4);
-                    Vector3d center = curr_center.transpose().cast<double>();
+
+                    Vector3f center = pos.row((rname == "GLY") ?  1 : 4);
                     centers.push_back(center[0]);
                     centers.push_back(center[1]);
                     centers.push_back(center[2]);
+
+
+                    Vector3f direc = pos.row((rname == "GLY") ?  1 : 4) - pos.row(1);
+                    if(rname != "GLY") direc.normalize();
+
+                    direcs.push_back(direc[0]);
+                    direcs.push_back(direc[1]);
+                    direcs.push_back(direc[2]);
                 }
             }
         } else {
@@ -369,10 +378,14 @@ int main(int argc, char** argv) try {
                         res_func(pos, psi, chi);
 
                         RowVector3f curr_center = pos.bottomRows(pos.rows()-5).colwise().mean();
-
                         centers.push_back(curr_center[0]);
                         centers.push_back(curr_center[1]);
                         centers.push_back(curr_center[2]);
+
+                        RowVector3f direc = (pos.row(5)-pos.row(4)).normalized(); // CB->CG bond vector
+                        direcs.push_back(direc[0]);
+                        direcs.push_back(direc[1]);
+                        direcs.push_back(direc[2]);
                     }
                 }
             }
@@ -380,6 +393,9 @@ int main(int argc, char** argv) try {
 
         auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {-1,3}, {1,3});
         append_to_dset(center_array.get(), centers, 0);
+
+        auto direc_array = create_earray(grp.get(), "direc", H5T_NATIVE_FLOAT, {-1,3}, {1,3});
+        append_to_dset(direc_array.get(), direcs, 0);
 
         vector<float> bin_vals(n_bin);
         for(int nb=0; nb<n_bin; ++nb) bin_vals[nb] = nb*bin_size - M_PI_F;

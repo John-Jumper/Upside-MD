@@ -42,13 +42,11 @@ struct PosBead {
             cutoff2 = cutoff2_i<cutoff2_o? cutoff2_o: cutoff2_i;
         }
     
-        bool operator==(const SidechainInteraction& other) const {
-            bool equal = cutoff2 == other.cutoff2;
-            for(int i: range(n_param)) equal &= params[i] == other.params[i];
-            return equal;
+        bool compatible(const SidechainInteraction& other) const {
+            bool comp = cutoff2 == other.cutoff2;
+            for(int i: range(6)) comp &= params[i] == other.params[i];
+            return comp;
         }
-    
-        bool operator!=(const SidechainInteraction& other) {return !(*this==other);}
     
         float evaluate(InteractionDeriv& deriv, const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
             auto disp      = x1-x2;
@@ -58,6 +56,7 @@ struct PosBead {
 
             auto en = params[0]*compact_sigmoid(dist-params[1], params[2])
                     + params[3]*compact_sigmoid(dist-params[4], params[5]);
+            // fprintf(stderr, "dist %6.2f % .3f\n", dist, en.x());
 
             deriv.bead1_deriv = en.y() * (disp*inv_dist);
             return en.x();
@@ -81,6 +80,8 @@ struct PosBead {
             return result;
         }
     };
+
+    static Vec<n_param> parameter_deriv_swap_restype(const Vec<n_param>& deriv) {return deriv;}
 };
 
 
@@ -89,7 +90,7 @@ struct PosDirBead {
     constexpr static const int n_pos_vector = 1; // CB->CG bond direction
     constexpr static const int n_pos_scalar = 1; // rotamer energy
     constexpr static const int n_pos_dim    = 3*n_pos_point + 3*n_pos_vector + n_pos_scalar;
-    constexpr static const int n_param = 6;
+    constexpr static const int n_param = 6+6;
 
     struct InteractionDeriv {
         Vec<n_pos_dim-1> d1() const {return make_zero<6>();}  // FIXME dummy until real calculation
@@ -98,24 +99,42 @@ struct PosDirBead {
 
     struct SidechainInteraction {
         float cutoff2;
-        Vec<n_param> params;  // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
-                              // res1_dist_perturb, res2_dist_perturb
+        Vec<n_param> params;
 
+        struct ParamInterpret {
+            float energy_steric, dist_loc_steric, dist_scale_steric,
+                  energy_gauss,  dist_loc_gauss,  dist_scale_gauss,
+                  dp1_shift_steric, dp2_shift_steric,
+                  dp1_loc_gauss,    dp2_loc_gauss,
+                  dp1_scale_gauss,  dp2_scale_gauss;
+            ParamInterpret(const Vec<n_param> &p):
+                energy_steric(p[0]), dist_loc_steric(p[1]), dist_scale_steric(p[2]),
+                energy_gauss(p[3]),  dist_loc_gauss(p[4]),  dist_scale_gauss(p[5]),
+                dp1_shift_steric(p[6]),  dp2_shift_steric(p[7]),
+                dp1_loc_gauss(p[8]),     dp2_loc_gauss(p[9]),
+                dp1_scale_gauss(p[10]),  dp2_scale_gauss(p[11]) {}
+        };
+        
         void update_cutoff2() {
-            float radius_i=params[1], scale_i=params[2]; float cutoff_i = radius_i + 1.f/scale_i;
-            float radius_o=params[4], scale_o=params[5]; float cutoff_o = radius_o + 1.f/scale_o;
+            auto p = ParamInterpret(params);
 
-            float max_perturb = max(0.f,params[6]) + max(0.f,params[7]);
-            cutoff2 = sqr(max(cutoff_i,cutoff_o) + max_perturb);
+            float steric_cutoff = p.dist_loc_steric + 1.f/p.dist_scale_steric +
+                                  max(0.f,p.dp1_shift_steric) + max(0.f,p.dp2_shift_steric);
+
+            float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);  // 3 sigma cutoff
+
+            cutoff2 = sqr(max(steric_cutoff, gauss_cutoff));
         }
     
-        bool operator==(const SidechainInteraction& other) const {
-            bool equal = cutoff2 == other.cutoff2;
-            for(int i: range(n_param)) equal &= params[i] == other.params[i];
-            return equal;
+        bool compatible(const SidechainInteraction& other) const {
+            bool comp = cutoff2 == other.cutoff2;
+            for(int i: range(6)) comp &= params[i] == other.params[i];
+            for(int i=7; i<12; i+=2) {
+                comp &= params[i]   == other.params[i+1];  // switch of restype1 and restype2
+                comp &= params[i+1] == other.params[i];    // switch of restype1 and restype2
+            }
+            return comp;
         }
-    
-        bool operator!=(const SidechainInteraction& other) {return !(*this==other);}
     
         float evaluate(InteractionDeriv& deriv, const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
             auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
@@ -124,44 +143,84 @@ struct PosDirBead {
             auto dist      = dist2*inv_dist;
             auto disp_dir  = disp*inv_dist;
 
-            auto dp1 = sqr(dot(extract<3,6>(x1), disp_dir));
-            auto dp2 = sqr(dot(extract<3,6>(x2), disp_dir)); // requires negative except that I square it
+            auto dp1 = (dot(extract<3,6>(x1),  disp_dir));
+            auto dp2 = (dot(extract<3,6>(x2), -disp_dir));
 
-            auto eff_dist = dist + dp1*params[6] + dp2*params[7]; // effective interaction distance
+            auto p = ParamInterpret(params);
+            // fprintf(stderr, "interacting with");
+            // for(int i:range(12)) fprintf(stderr, " %.4f", params[i]);
+            // fprintf(stderr,"\n");
 
-            auto en = params[0]*compact_sigmoid(eff_dist-params[1], params[2])
-                    + params[3]*compact_sigmoid(eff_dist-params[4], params[5]);
+            auto eff_dist_loc_steric = p.dist_loc_steric + dp1*p.dp1_shift_steric + dp2*p.dp2_shift_steric;
+
+            auto steric_en = p.energy_steric*compact_sigmoid(dist-eff_dist_loc_steric, p.dist_scale_steric);
+
+            auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss) + 
+                                     p. dp1_scale_gauss * sqr( dp1 - p. dp1_loc_gauss) + 
+                                     p. dp2_scale_gauss * sqr( dp2 - p. dp2_loc_gauss)));
+
+            auto gauss_en = p.energy_gauss * gauss_base;
 
             // deriv.bead1_deriv = en.y() * disp_dir;
-            return en.x();
+            return steric_en.x() + gauss_en;
         }
     
         Vec<n_param> parameter_deriv(const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
-            auto disp = extract<0,3>(x1) - extract<0,3>(x2);
-            auto dp1 = sqr(dot(extract<3,6>(x1), normalized(disp)));
-            auto dp2 = sqr(dot(extract<3,6>(x2), normalized(disp)));
-            auto eff_dist = mag(disp) + params[6]*dp1 + params[7]*dp2;
+            auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+            auto disp_dir  = disp*inv_dist;
+
+            auto dp1 = (dot(extract<3,6>(x1),  disp_dir));
+            auto dp2 = (dot(extract<3,6>(x2), -disp_dir));
+
+            auto p = ParamInterpret(params);
+
+            // fprintf(stderr, "interacting with");
+            // for(int i:range(12)) fprintf(stderr, " %.2f", params[i]);
+            // fprintf(stderr,"\n");
+
+            auto eff_dist_loc_steric = p.dist_loc_steric + dp1*p.dp1_shift_steric + dp2*p.dp2_shift_steric;
+
+            // I need the derivative with respect to the scale, but
+            // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+            auto steric_sig   = compact_sigmoid( dist-eff_dist_loc_steric, p.dist_scale_steric);
+            auto steric_sig_s = compact_sigmoid((dist-eff_dist_loc_steric)*p.dist_scale_steric, 1.f);
 
             Vec<n_param> result;
-            for(int i: range(2)) {
-                int off = 3*i;
-                auto sig = compact_sigmoid(eff_dist-params[off+1], params[off+2]);
+            result[0] =  steric_sig  .x();  // energy
+            result[1] = -steric_sig  .y() * p.energy_steric; // radius
+            result[2] =  steric_sig_s.y() * (dist-eff_dist_loc_steric) * p.energy_steric;  // scale
 
-                // I need the derivative with respect to the scale, but
-                // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
-                float2 sig_s = compact_sigmoid((eff_dist-params[off+1]) * params[off+2], 1.f);
+            result[6] = dp1*result[1];  // dp1_shift_steric
+            result[7] = dp2*result[1];  // dp2_shift_steric
 
-                result[off+0] =  sig  .x();  // energy
-                result[off+1] = -sig  .y() * params[off+0];  // radius
-                result[off+2] =  sig_s.y() * (eff_dist-params[off+1]) * params[off+0];  // scale
-            }
+            auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss) + 
+                                     p. dp1_scale_gauss * sqr( dp1 - p. dp1_loc_gauss) + 
+                                     p. dp2_scale_gauss * sqr( dp2 - p. dp2_loc_gauss)));
 
-            auto eff_dist_deriv = -(result[1]+result[4]);  // radius derivative is opposite of eff_dist deriv
-            result[6] = eff_dist_deriv*dp1;
-            result[7] = eff_dist_deriv*dp2;
+            auto c = p.energy_gauss * gauss_base;
+
+            result[ 3] =  gauss_base;  // energy_gauss
+            result[ 4] =  c * 2.f*p.dist_scale_gauss*(dist - p.dist_loc_gauss); // dist_loc_gauss
+            result[ 5] = -c * sqr(dist - p.dist_loc_gauss); // dist_scale_gauss
+            result[ 8] =  c * 2.f*p.dp1_scale_gauss* ( dp1 - p. dp1_loc_gauss); //  dp1_loc_gauss
+            result[ 9] =  c * 2.f*p.dp2_scale_gauss* ( dp2 - p. dp2_loc_gauss); //  dp2_loc_gauss
+            result[10] = -c * sqr( dp1 - p. dp1_loc_gauss); //  dp1_scale_gauss
+            result[11] = -c * sqr( dp2 - p. dp2_loc_gauss); //  dp2_scale_gauss
+
             return result;
         }
     };
+
+    static Vec<n_param> parameter_deriv_swap_restype(const Vec<n_param>& deriv) {
+        auto ret = deriv;
+        swap(ret[ 6],ret[ 7]);
+        swap(ret[ 8],ret[ 9]);
+        swap(ret[10],ret[11]);
+        return ret;
+    }
 };
 
 typedef PosBead preferred_bead_type;
@@ -514,7 +573,7 @@ void convert_potential_graph_to_probability_graph(
 
     for(int no: range(3))
         for(int nr: range(n_res3)) 
-            node_prob(no,nr) = pos3(no*BT::n_pos_dim+3,nr);
+            node_prob(no,nr) = pos3(no*BT::n_pos_dim+BT::n_pos_dim-1,nr);
 
     for(int ne13: range(n_edge13)) {
         auto &e = edges13[ne13];
@@ -563,7 +622,7 @@ void compute_free_energy_and_derivative(
             deriv3(no*BT::n_pos_dim+3,nr) = b[no];
             // potential is given by the 3th element of position (note that -S is p*log p with no minus)
             if(potential) {
-                float v =  b[no]*pos(no*BT::n_pos_dim+3,nr);
+                float v =  b[no]*pos(no*BT::n_pos_dim+BT::n_pos_dim-1,nr);
                 float s = -b[no]*logf(1e-10f+b[no]); // 1-body entropies
                 free_energy += v-s;
                 node_marginal_prob(no,nr) = b[no];
@@ -707,8 +766,11 @@ void compute_parameter_derivatives(
     // now re-order, handle symmetry, and handle scale = 1/width
     for(int rt1: range(n_restype)) {
         for(int rt2: range(n_restype)) {
-            auto d = load_vec<BT::n_param>(deriv, rt1*n_restype+rt2);
-            if(rt1!=rt2) d += load_vec<BT::n_param>(deriv, rt2*n_restype+rt1);  // symmetry
+            auto d1 =                                  load_vec<BT::n_param>(deriv, rt1*n_restype+rt2);
+            auto d2 = BT::parameter_deriv_swap_restype(load_vec<BT::n_param>(deriv, rt2*n_restype+rt1));
+
+            // impose symmetry
+            auto d = (rt1==rt2 ? 0.5f : 1.0f) * (d1+d2);
 
             float* base_loc = buffer + (rt1*n_restype+rt2)*BT::n_param;
             for(int i: range(BT::n_param)) base_loc[i] = d[i];
@@ -789,7 +851,7 @@ struct RotamerSidechain: public PotentialNode {
 
         for(int rt1: range(n_restype))
             for(int rt2: range(n_restype))
-                if(interactions[rt1*n_restype + rt2] != interactions[rt2*n_restype + rt1]) 
+                if(!interactions[rt1*n_restype + rt2].compatible(interactions[rt2*n_restype + rt1]))
                     throw string("interaction matrix must be symmetric");
 
         traverse_string_dset<1>(grp, "restype_order", [&](size_t idx, string nm) {index_from_restype[nm] = idx;});
@@ -1139,7 +1201,7 @@ static RegisterNodeType<RotamerSidechain<preferred_bead_type>,2> rotamer_node ("
 
 
 struct RotamerConstructAndSolve {
-    typedef PosBead BT;
+    typedef preferred_bead_type BT;
 
     int n_restype;
     vector<BT::SidechainInteraction> interactions;
@@ -1172,6 +1234,14 @@ struct RotamerConstructAndSolve {
                 interactions[i].params[ip] = interactions_[BT::n_param*i+ip];
             interactions[i].update_cutoff2();
         }
+
+        // if(!fixed_rotamers3.size()) {
+        //     for(int nr1: range(n_res1)) fprintf(stderr, "prob1 %3i %.3f\n", nr1, expf(-pos1[0](BT::n_pos_dim-1,nr1)));
+        //     for(int nr3: range(n_res3)) fprintf(stderr, "prob3 %3i %.3f %.3f %.3f\n", nr3, 
+        //             expf(-pos3[0](0*BT::n_pos_dim + BT::n_pos_dim-1,nr3)),
+        //             expf(-pos3[0](1*BT::n_pos_dim + BT::n_pos_dim-1,nr3)),
+        //             expf(-pos3[0](2*BT::n_pos_dim + BT::n_pos_dim-1,nr3)));
+        // }
             
         compute_all_graph_elements(
                 n_edge11, edges11.data(),
@@ -1186,6 +1256,19 @@ struct RotamerConstructAndSolve {
                 n_res3, pos3[0],  // last dimension is 1-residue potential
                 n_edge13, edges13.data(),
                 n_edge33, edges33.data());
+        // if(!fixed_rotamers3.size()) {
+        //     for(int nr3: range(n_res3)) fprintf(stderr, "nprob %3i %.3f %.3f %.3f\n", nr3, 
+        //             node_prob[0](0,nr3)/sum(load_vec<3>(node_prob[0],nr3)),
+        //             node_prob[0](1,nr3)/sum(load_vec<3>(node_prob[0],nr3)),
+        //             node_prob[0](2,nr3)/sum(load_vec<3>(node_prob[0],nr3)));
+        // }
+        // if(!fixed_rotamers3.size()) {
+        //     for(int ne: range(n_edge13)) {
+        //         fprintf(stderr, "edge_pot %3i", ne);
+        //         for(int d:range(3)) fprintf(stderr, " %.3f", edges13[ne].potential[0][d]);
+        //         fprintf(stderr,"\n");
+        //     }
+        // }
 
         if(!fixed_rotamers3.size()) {
             auto result = solve_for_beliefs(
@@ -1225,6 +1308,13 @@ struct RotamerConstructAndSolve {
                 n_edge11, edges11.data(),
                 n_edge13, edges13.data(),
                 n_edge33, edges33.data());
+        // if(!fixed_rotamers3.size()) {
+        //     for(int nr3: range(n_res3)) fprintf(stderr, "marg3 %3i %.3f %.3f %.3f\n", nr3, 
+        //             node_marginal_prob[0](0,nr3),
+        //             node_marginal_prob[0](1,nr3),
+        //             node_marginal_prob[0](2,nr3));
+        // }
+        // fprintf(stderr, "free_energy %lu %f\n", fixed_rotamers3.size(), free_energy);
 
 
         compute_parameter_derivatives(
@@ -1236,10 +1326,6 @@ struct RotamerConstructAndSolve {
                 n_res1, restype1.data(), pos1[0],  // dimensionality 1*BT::n_pos_dim
                 n_res3, restype3.data(), pos3[0],  // dimensionality 3*BT::n_pos_dim
                 n_restype, interactions.data());
-
-        // printf("number of edges %i %i %i %s %f\n", n_edge11, n_edge13, n_edge33, 
-        //         (fixed_rotamers3.size() ? "fixed" : "free"), free_energy
-        //         );
 
         return free_energy;
     }
@@ -1292,9 +1378,6 @@ RotamerConstructAndSolve* new_rotamer_construct_and_solve(
             }
         }
     }
-
-//     for(int nr: range(z.n_res1)) printf("%3i % .1f % .1f % .1f % .1f\n",
-//             z.restype1[nr], z.pos1[0](0,nr), z.pos1[0]
 
     z.damping = damping_;
     z.max_iter = max_iter_;
