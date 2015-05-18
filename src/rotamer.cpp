@@ -85,6 +85,101 @@ struct PosBead {
 };
 
 
+struct PosExprBead {
+    constexpr static const int n_pos_point  = 1;
+    constexpr static const int n_pos_vector = 0;
+    constexpr static const int n_pos_scalar = 1; // rotamer energy
+    constexpr static const int n_pos_dim    = 3*n_pos_point + 3*n_pos_vector + n_pos_scalar;
+    constexpr static const int n_param = 6;
+
+    struct InteractionDeriv {
+        Vec<n_pos_dim-1> d1() const {return make_zero<3>();}  // FIXME dummy until real calculation
+        Vec<n_pos_dim-1> d2() const {return make_zero<3>();}
+    };
+
+    struct SidechainInteraction {
+        float cutoff2;
+        Vec<n_param> params;
+
+        struct ParamInterpret {
+            float energy_steric, dist_loc_steric, dist_scale_steric,
+                  energy_gauss,  dist_loc_gauss,  dist_scale_gauss;
+            ParamInterpret(const Vec<n_param> &p):
+                energy_steric(p[0]), dist_loc_steric(p[1]), dist_scale_steric(p[2]),
+                energy_gauss(p[3]),  dist_loc_gauss(p[4]),  dist_scale_gauss(p[5]) {}
+        };
+        
+        void update_cutoff2() {
+            auto p = ParamInterpret(params);
+
+            float steric_cutoff = p.dist_loc_steric + 1.f/p.dist_scale_steric;
+
+            float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);  // 3 sigma cutoff
+
+            cutoff2 = sqr(max(steric_cutoff, gauss_cutoff));
+        }
+    
+        bool compatible(const SidechainInteraction& other) const {
+            bool comp = cutoff2 == other.cutoff2;
+            for(int i: range(6)) comp &= params[i] == other.params[i];
+            return comp;
+        }
+    
+        float evaluate(InteractionDeriv& deriv, const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+
+            auto p = ParamInterpret(params);
+
+            auto steric_en = p.energy_steric*compact_sigmoid(dist-p.dist_loc_steric, p.dist_scale_steric);
+
+            auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss)));
+
+            auto gauss_en = p.energy_gauss * gauss_base;
+
+            // deriv.bead1_deriv = en.y() * disp_dir;
+            return steric_en.x() + gauss_en;
+        }
+    
+        Vec<n_param> parameter_deriv(const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
+            auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+
+            auto p = ParamInterpret(params);
+
+            auto eff_dist_loc_steric = p.dist_loc_steric;
+
+            // I need the derivative with respect to the scale, but
+            // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+            auto steric_sig   = compact_sigmoid( dist-eff_dist_loc_steric, p.dist_scale_steric);
+            auto steric_sig_s = compact_sigmoid((dist-eff_dist_loc_steric)*p.dist_scale_steric, 1.f);
+
+            Vec<n_param> result;
+            result[0] =  steric_sig  .x();  // energy
+            result[1] = -steric_sig  .y() * p.energy_steric; // radius
+            result[2] =  steric_sig_s.y() * (dist-eff_dist_loc_steric) * p.energy_steric;  // scale
+
+            auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss)));
+
+            auto c = p.energy_gauss * gauss_base;
+
+            result[ 3] =  gauss_base;  // energy_gauss
+            result[ 4] =  c * 2.f*p.dist_scale_gauss*(dist - p.dist_loc_gauss); // dist_loc_gauss
+            result[ 5] = -c * sqr(dist - p.dist_loc_gauss); // dist_scale_gauss
+
+            return result;
+        }
+    };
+
+    static Vec<n_param> parameter_deriv_swap_restype(const Vec<n_param>& deriv) {
+        auto ret = deriv;
+        return ret;
+    }
+};
 struct PosDirBead {
     constexpr static const int n_pos_point  = 1;
     constexpr static const int n_pos_vector = 1; // CB->CG bond direction
