@@ -14,19 +14,12 @@ struct VirtualParams {
     float bond_length;
 };
 
-struct VirtualHBondParams {
-    CoordPair id;
-    unsigned int residue_id;
-    float  helix_energy_bonus;
-};
-
 struct NH_CO_Params {
     float H_bond_length, N_bond_length;
     unsigned int Cprev, N, CA, C, Nnext;
     unsigned int H_slots[9];
     unsigned int O_slots[9];
 };
-
 
 namespace {
 
@@ -95,6 +88,7 @@ void infer_x_body(
     hbond_pos.v[5] = -disp.z();
 }
 
+}
 
 void infer_HN_OC_pos_and_dir(
         const SysArray   HN_OC,
