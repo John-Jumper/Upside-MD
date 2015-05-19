@@ -336,15 +336,17 @@ def write_angle_spring(args):
     create_array(grp, 'equil_dist',   obj=equil_angles)
     create_array(grp, 'spring_const', obj=args.angle_stiffness*np.ones(id.shape[0]))
 
-def write_dihedral_spring():
+def write_dihedral_spring(fasta_seq):
     # this is primarily used for omega bonds
     grp = t.create_group(potential, 'dihedral_spring')
     grp._v_attrs.arguments = np.array(['pos'])
     id = np.arange(1,n_atom-3,3)  # start at CA atom
     id = np.column_stack((id,id+1,id+2,id+3))
 
+    target_angle = np.where((fasta_seq[1:]=='CPR'), 0.*deg, 180.*deg)
+
     create_array(grp, 'id', obj=id)
-    create_array(grp, 'equil_dist',   obj=180*deg*np.ones(id.shape[0]))
+    create_array(grp, 'equil_dist',   obj=target_angle)
     create_array(grp, 'spring_const', obj=30.0*np.ones(id.shape[0]))
 
 
@@ -533,7 +535,8 @@ def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference
     didx = dict([(x,i) for i,x in enumerate(dirtype)])
     rama_maps[0] = rama[ridx[seq[0]], didx['right'], ridx[seq[1]]]
         
-    f = lambda r,d,n: rama[ridx[r], didx[d], ridx[n]]
+    # cis-proline is only CPR when it is the central residue, otherwise just use PRO
+    f = lambda r,d,n: rama[ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
     for i,l,c,r in zip(range(1,len(seq)-1), seq[:-2], seq[1:-1], seq[2:]):
         rama_maps[i] = f(c,'left',l) + f(c,'right',r) - f(c,'right','ALL')
         
@@ -762,8 +765,19 @@ def read_fasta(file_obj):
     lines = list(file_obj)
     assert lines[0][0] == '>'
     one_letter_seq = ''.join(x.strip().replace('\r','') for x in lines[1:])
-    seq = np.array([three_letter_aa[a] for a in one_letter_seq])
-    return seq
+    seq = []
+    cis_state = False
+    for a in one_letter_seq:
+        if cis_state:
+            assert a == 'P'  # proline must follow start
+            seq.append('CPR')
+            cis_state = False
+        elif a == "*":
+            cis_state = True
+        else:
+            seq.append(three_letter_aa[a])
+    return np.array(seq)
+
 
 def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     fields = [ln.split() for ln in open(dihedral_angle_table,'U')]
@@ -1177,7 +1191,8 @@ def main():
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
 
-    fasta_seq = read_fasta(open(args.fasta,'U'))
+    fasta_seq_with_cpr = read_fasta(open(args.fasta,'U'))
+    fasta_seq = np.array([(x if x != 'CPR' else 'PRO') for x in fasta_seq_with_cpr])  # most potentials don't care about CPR
     require_affine = False
     require_rama = False
     require_backbone_point = False
@@ -1189,7 +1204,7 @@ def main():
     t = tables.open_file(args.output,'w')
     
     input = t.create_group(t.root, 'input')
-    create_array(input, 'sequence', obj=fasta_seq)
+    create_array(input, 'sequence', obj=fasta_seq_with_cpr)
     
     if args.initial_structures:
         init_pos = cPickle.load(open(args.initial_structures))
@@ -1213,7 +1228,7 @@ def main():
     if not args.debugging_only_disable_basic_springs:
         write_dist_spring(args)
         write_angle_spring(args)
-        write_dihedral_spring()
+        write_dihedral_spring(fasta_seq_with_cpr)
 
     if any(x!=0. for x in args.hbond_energy): 
         require_backbone_point = True
@@ -1226,7 +1241,7 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq, args.rama_library, args.rama_sheet_library, args.rama_sheet_reference_energy)
+        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_library, args.rama_sheet_reference_energy)
 
         if args.dimer_basin_library:
             write_basin_correlation_pot(fasta_seq,

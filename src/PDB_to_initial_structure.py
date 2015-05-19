@@ -13,6 +13,8 @@ model_geom[1] = ( 0.,          0.,         0.)  # CA
 model_geom[2] = ( 1.25222632, -0.87268266, 0.)  # C
 model_geom -= model_geom.mean(axis=0)
 
+deg = np.pi/180.
+
 def vmag(x):
     assert x.shape[-1] == 3
     return np.sqrt(np.sum(x**2,axis=-1))
@@ -107,6 +109,7 @@ three_letter_aa = dict(
         K='LYS', L='LEU', M='MET', N='ASN',
         P='PRO', Q='GLN', R='ARG', S='SER',
         T='THR', V='VAL', W='TRP', Y='TYR')
+three_letter_aa["*P"] = "CPR"
 
 aa_num = dict([(k,i) for i,k in enumerate(sorted(three_letter_aa.values()))])
 
@@ -146,7 +149,6 @@ def main():
 
     sel_str = 'name CA' + additional_selector
     coords_CA = structure.select(sel_str)
-    seq = ''.join([one_letter_aa[s] for s in coords_CA.getResnames()])
     
     sel_str = 'name N CA C' + additional_selector
     coords = structure.select(sel_str).getCoords()
@@ -161,12 +163,23 @@ def main():
         else:
             print >>sys.stderr, "ERROR: " + msg + " (see --allow-chain-breaks if you expected this)"
             sys.exit(1)
+
     
     f=open(args.output,'wb')
     cPickle.dump(coords[...,None], f, -1)
     f.close()
     
     if args.output_fasta is not None:
+        omega = dihedral(
+                coords[1:-3:3],
+                coords[2:-3:3],
+                coords[3:  :3],
+                coords[4:  :3])
+        omega = np.concatenate(([np.nan],omega))
+
+        seq = ''.join([(one_letter_aa[s] if not (s=='PRO' and np.abs(omega[i])<90*deg) else one_letter_aa['CPR'])
+            for i,s in enumerate(coords_CA.getResnames())])
+
         print coords.shape
         f=open(args.output_fasta,'w')
         print >>f, '> Created from %s' % args.pdb
@@ -181,14 +194,12 @@ def main():
     n_res = len(seq)
     rama = initial_rama(coords)
     if args.output_rama:
-        deg = np.pi/180.
         f = open(args.output_rama,'w')
         for nr in range(n_res):
             print >>f, '% 3i %3s % 8.3f % 8.3f' % (nr, three_letter_aa[seq[nr]], rama[nr,0]/deg, rama[nr,1]/deg)
         f.close()
 
     if args.output_chi1:
-        deg = np.pi/180.
         sel_str = 'name CB "^.G1?$"' + additional_selector
         sel = structure.select(sel_str)
         chi_coords = sel.getCoords()
