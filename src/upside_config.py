@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 import numpy as np
-import tables 
+import tables as tb
 import sys,os
 import cPickle
+
 
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
@@ -18,7 +19,7 @@ one_letter_aa = dict([(v,k) for k,v in three_letter_aa.items()])
 
 deg=np.deg2rad(1)
 
-default_filter = tables.Filters(complib='zlib', complevel=5, fletcher32=True)
+default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 
 base_sc_ref = {
  'ALA': np.array([-0.01648328,  1.50453228,  1.20193768]),
@@ -526,7 +527,7 @@ def make_trans_matrices(seq, monomer_basin_prob, dimer_counts):
 
 def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference_energy=0.):
     rama_maps = np.zeros((len(seq), 72,72))
-    t=tables.open_file(rama_library_h5)
+    t=tb.open_file(rama_library_h5)
     rama = t.root.rama[:]
 
     restype = t.root.rama._v_attrs.restype
@@ -882,7 +883,7 @@ def write_backbone_dependent_point(fasta, library):
     grp = t.create_group(potential, 'backbone_dependent_point')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
 
-    data = tables.open_file(library)
+    data = tb.open_file(library)
 
     n_restype = len(aa_num)
     n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
@@ -910,7 +911,7 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     create_array(g, 'restype', obj=map(str,fasta[residues]))
     create_array(g, 'id',      obj=np.array(residues))
 
-    params = tables.open_file(library)
+    params = tb.open_file(library)
     data = t.create_group(g, 'data')
     data._v_attrs.cutoff = 8.
     create_array(data, 'names',      obj=params.root.params.names[:])
@@ -931,7 +932,7 @@ def write_rotamer(fasta, library, scale):
 
     create_array(g, 'restype', obj=map(str,fasta))
 
-    params = tables.open_file(library)
+    params = tb.open_file(library)
     #for nm in 'energy radius width restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
     for nm in 'interaction_params restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
         create_array(g, nm, obj=params.get_node('/'+nm)[:])
@@ -943,7 +944,7 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
     grp._v_attrs.arguments = np.array(['backbone_dependent_point'])
 
-    potential_library = tables.open_file(potential_library_path)
+    potential_library = tb.open_file(potential_library_path)
     resnames  = potential_library.root.names[:]
     z_energy  = potential_library.root.z_energy[:]
     z_lib_min = potential_library.root.z_energy._v_attrs.z_min
@@ -1201,7 +1202,7 @@ def main():
     n_system = args.n_system
     n_atom = 3*len(fasta_seq)
     
-    t = tables.open_file(args.output,'w')
+    t = tb.open_file(args.output,'w')
     
     input = t.create_group(t.root, 'input')
     create_array(input, 'sequence', obj=fasta_seq_with_cpr)
