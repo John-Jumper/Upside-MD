@@ -90,7 +90,7 @@ struct PosExprBead {
     constexpr static const int n_pos_vector = 0;
     constexpr static const int n_pos_scalar = 1; // rotamer energy
     constexpr static const int n_pos_dim    = 3*n_pos_point + 3*n_pos_vector + n_pos_scalar;
-    constexpr static const int n_param = 6;
+    constexpr static const int n_param = 9;
 
     struct InteractionDeriv {
         Vec<n_pos_dim-1> d1() const {return make_zero<3>();}  // FIXME dummy until real calculation
@@ -103,10 +103,12 @@ struct PosExprBead {
 
         struct ParamInterpret {
             float energy_steric, dist_loc_steric, dist_scale_steric,
-                  energy_gauss,  dist_loc_gauss,  dist_scale_gauss;
+                  energy_gauss,  dist_loc_gauss,  dist_scale_gauss,
+                  energy_gauss2,  dist_loc_gauss2,  dist_scale_gauss2;
             ParamInterpret(const Vec<n_param> &p):
                 energy_steric(p[0]), dist_loc_steric(p[1]), dist_scale_steric(p[2]),
-                energy_gauss(p[3]),  dist_loc_gauss(p[4]),  dist_scale_gauss(p[5]) {}
+                energy_gauss(p[3]),  dist_loc_gauss(p[4]),  dist_scale_gauss(p[5]),
+                energy_gauss2(p[6]),  dist_loc_gauss2(p[7]),  dist_scale_gauss2(p[8]) {}
         };
         
         void update_cutoff2() {
@@ -114,14 +116,15 @@ struct PosExprBead {
 
             float steric_cutoff = p.dist_loc_steric + 1.f/p.dist_scale_steric;
 
-            float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);  // 3 sigma cutoff
+            float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);   // 3 sigma cutoff
+            float gauss_cutoff2 = p.dist_loc_gauss2+ 3.f*sqrtf(0.5f/p.dist_scale_gauss2);  // 3 sigma cutoff
 
-            cutoff2 = sqr(max(steric_cutoff, gauss_cutoff));
+            cutoff2 = sqr(max(max(steric_cutoff, gauss_cutoff), gauss_cutoff2));
         }
     
         bool compatible(const SidechainInteraction& other) const {
             bool comp = cutoff2 == other.cutoff2;
-            for(int i: range(6)) comp &= params[i] == other.params[i];
+            for(int i: range(9)) comp &= params[i] == other.params[i];
             return comp;
         }
     
@@ -136,11 +139,13 @@ struct PosExprBead {
             auto steric_en = p.energy_steric*compact_sigmoid(dist-p.dist_loc_steric, p.dist_scale_steric);
 
             auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss)));
-
             auto gauss_en = p.energy_gauss * gauss_base;
 
+            auto gauss_base2 = expf(-(p.dist_scale_gauss2 * sqr(dist - p.dist_loc_gauss2)));
+            auto gauss_en2 = p.energy_gauss2 * gauss_base2;
+
             // deriv.bead1_deriv = en.y() * disp_dir;
-            return steric_en.x() + gauss_en;
+            return steric_en.x() + gauss_en + gauss_en2;
         }
     
         Vec<n_param> parameter_deriv(const Vec<n_pos_dim-1>& x1, const Vec<n_pos_dim-1>& x2) const {
@@ -159,17 +164,25 @@ struct PosExprBead {
             auto steric_sig_s = compact_sigmoid((dist-eff_dist_loc_steric)*p.dist_scale_steric, 1.f);
 
             Vec<n_param> result;
+            // fprintf(stderr,"param"); for(int i: range(n_param)) fprintf(stderr, " %.2f", param[i]);
+            // fprintf(stderr,"\n");
             result[0] =  steric_sig  .x();  // energy
             result[1] = -steric_sig  .y() * p.energy_steric; // radius
             result[2] =  steric_sig_s.y() * (dist-eff_dist_loc_steric) * p.energy_steric;  // scale
 
             auto gauss_base = expf(-(p.dist_scale_gauss * sqr(dist - p.dist_loc_gauss)));
-
             auto c = p.energy_gauss * gauss_base;
 
             result[ 3] =  gauss_base;  // energy_gauss
             result[ 4] =  c * 2.f*p.dist_scale_gauss*(dist - p.dist_loc_gauss); // dist_loc_gauss
             result[ 5] = -c * sqr(dist - p.dist_loc_gauss); // dist_scale_gauss
+
+            auto gauss_base2 = expf(-(p.dist_scale_gauss2 * sqr(dist - p.dist_loc_gauss2)));
+            auto c2 = p.energy_gauss2 * gauss_base2;
+
+            result[ 6] =  gauss_base2;  // energy_gauss
+            result[ 7] =  c2 * 2.f*p.dist_scale_gauss2*(dist - p.dist_loc_gauss2); // dist_loc_gauss
+            result[ 8] = -c2 * sqr(dist - p.dist_loc_gauss2); // dist_scale_gauss
 
             return result;
         }

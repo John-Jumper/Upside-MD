@@ -922,12 +922,12 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
     params.close()
 
 
-def write_rotamer(fasta, library, scale):
+def write_rotamer(fasta, library, scale, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
     g._v_attrs.arguments = np.array(['rama_coord', 'affine_alignment'])
     g._v_attrs.max_iter = 10000
     g._v_attrs.tol      = 1e-4
-    g._v_attrs.damping  = 0.6
+    g._v_attrs.damping  = damping
     g._v_attrs.scale_final_energy = scale
 
     create_array(g, 'restype', obj=map(str,fasta))
@@ -1079,6 +1079,8 @@ def main():
             help='use backbone-depedent sidechain location library')
     parser.add_argument('--rotamer', default=None, 
             help='use rotameric sidechain library')
+    parser.add_argument('--rotamer-solve-damping', default=0.4, type=float,
+            help='damping factor to use for solving sidechain placement problem')
     parser.add_argument('--rotamer-scale-energy', default=1., type=float,
             help='Scale the final rotamer energy (including the entropy)')
     parser.add_argument('--sidechain-radial', default=None,
@@ -1268,7 +1270,7 @@ def main():
     if args.rotamer:
         require_rama = True
         require_affine = True
-        write_rotamer(fasta_seq, args.rotamer, args.rotamer_scale_energy)
+        write_rotamer(fasta_seq, args.rotamer, args.rotamer_scale_energy, args.rotamer_solve_damping)
 
     if args.sidechain_radial:
         require_backbone_point = True

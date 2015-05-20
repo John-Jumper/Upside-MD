@@ -34,6 +34,11 @@ if mode == 'PosDirBead':
     P_symm = 6
     P_swap = 6
 
+elif mode == 'PosExprBead':
+    D = 4
+    P_symm = 9
+    P_swap = 0
+
 elif mode == 'PosBead':
     D = 4
     P_symm = 6
@@ -101,12 +106,26 @@ def imat_unpack_expr(param_expr, n_restype=20):
                  
         return T.stack(*symm_terms), T.stack(*upper_terms), T.stack(*diag_terms)
 
-    else:
+    elif mode == 'PosBead':
         outer_energy =       read_param(upper_tri)  # outer_energy likely attractive
         outer_radius = T.exp(read_param(upper_tri))+inner_radius  # > inner_radius
         outer_scale  = T.exp(read_param(upper_tri))  # positive
 
         terms = [inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale]
+        return T.stack(*terms),
+
+    elif mode == 'PosExprBead':
+        outer_energy =       read_param(upper_tri)  # outer_energy likely attractive
+        outer_radius = T.exp(read_param(upper_tri))+inner_radius  # > inner_radius
+        outer_scale  = T.exp(read_param(upper_tri))  # positive
+
+        outer_energy2 = T.exp(read_param(upper_tri))  # outer_energy2 is repulsive
+        outer_radius2 = T.exp(read_param(upper_tri))+outer_radius  # > inner_radius
+        outer_scale2  = T.exp(read_param(upper_tri))  # positive
+
+        terms = [inner_energy, inner_radius, inner_scale, 
+                outer_energy, outer_radius, outer_scale,
+                outer_energy2, outer_radius2, outer_scale2]
         return T.stack(*terms),
 
 
@@ -121,19 +140,32 @@ def imat_pack(packed_params, upper_params=None, diag_params=None, n_restype=20):
                        upper_params[0],upper_params[1],diag_params[0],
                        upper_params[2],upper_params[3],diag_params[1],
                        np.log(upper_params[4]),np.log(upper_params[5]),np.log(diag_params[2])])
-    else:
+    elif mode == 'PosBead':
         outer_energy =        packed_params[3]
         outer_radius = np.log(packed_params[4]-packed_params[1])
         outer_scale  = np.log(packed_params[5])
         
         params.extend([outer_energy, outer_radius, outer_scale])
 
+    elif mode == 'PosExprBead':
+        outer_energy =        packed_params[3]
+        outer_radius = np.log(packed_params[4]-packed_params[1])
+        outer_scale  = np.log(packed_params[5])
+
+        outer_energy2 = np.log(packed_params[6])
+        outer_radius2 = np.log(packed_params[7]-packed_params[4])
+        outer_scale2  = np.log(packed_params[8])
+        
+        params.extend([outer_energy, outer_radius, outer_scale,
+            outer_energy2, outer_radius2, outer_scale2,
+            ])
+
     return np.concatenate(params,axis=0)
 
 
 lparam = T.dvector('lparam')
 
-def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
+def param_to_matrix(*param):
         interactions = np.zeros((20,20,P))
 
         def make_symm(f):
@@ -153,6 +185,12 @@ def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
 
         for s in range(P_swap/2):
             interactions[:,:,P_symm+2*s:P_symm++2*s+2] = make_swap(param[1][2*s:2*s+2],param[2][s])
+
+        return interactions
+
+
+def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
+        interactions = param_to_matrix(*param)
 
         number_of_tasks = min(len(rotamer_objects),32)
 
@@ -176,7 +214,7 @@ def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
 
         if mode == 'PosDirBead':
             flat_deriv = np.zeros((P_symm,21*20/2)), np.zeros((P_swap,19*20/2)), np.zeros((P_swap/2,20))
-        elif mode == 'PosBead':
+        elif mode in ('PosBead','PosExprBead'):
             flat_deriv = np.zeros((P_symm,21*20/2)),
 
         for i in range(P_symm):
@@ -241,7 +279,7 @@ class UpsideRotamerEnergyGap(theano.Op):
         self.rotamer_objects = list(executor.map(construct_rotamer_objects, self.indices))
 
     def make_node(self, *param):
-        if mode == 'PosBead':
+        if mode in ('PosBead','PosExprBead'):
             p, = param
             return theano.Apply(self, [T.as_tensor_variable(p)], [T.dscalar()])
         elif mode == 'PosDirBead':
@@ -257,7 +295,7 @@ class UpsideRotamerEnergyGap(theano.Op):
 
     def grad(self, inputs, output_gradients):
         grad_func = UpsideRotamerEnergyGapGrad(self.total_n_res,self.rotamer_objects)
-        if mode=='PosBead':
+        if mode in ('PosBead','PosExprBead'):
             return [output_gradients[0] * grad_func(inputs[0])]
         else:
             return [output_gradients[0] * x for x in grad_func(*inputs)]
@@ -269,7 +307,7 @@ class UpsideRotamerEnergyGapGrad(theano.Op):
         self.rotamer_objects = rotamer_objects
 
     def make_node(self, *param):
-        if mode == 'PosBead':
+        if mode in ('PosBead','PosExprBead'):
             p, = param
             return theano.Apply(self, [T.as_tensor_variable(p)], [T.dmatrix()])
         elif mode == 'PosDirBead':
