@@ -1071,10 +1071,8 @@ def main():
             help='[required] number of systems to prepare')
     parser.add_argument('--output', default='system.h5', required=True,
             help='path to output the created .h5 file (default system.h5)')
-    # parser.add_argument('--residue-radius', type=float, default=0.,
-    #         help='radius of residue for repulsive interaction (1 kT value)')
-    parser.add_argument('--backbone', default=False, action='store_true',
-            help='use rigid nonbonded for backbone N, CA, C, and CB')
+    parser.add_argument('--no-backbone', dest='backbone', default=True, action='store_false',
+            help='do not use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--backbone-dependent-point', default=None,
             help='use backbone-depedent sidechain location library')
     parser.add_argument('--rotamer', default=None, 
@@ -1250,6 +1248,8 @@ def main():
             write_basin_correlation_pot(fasta_seq,
                     potential.rama_map_pot.rama_pot[:], potential.rama_map_pot.rama_map_id[:], 
                     args.dimer_basin_library)
+    else:
+        print>>sys.stderr, 'WARNING: running without any Rama potential !!!'
 
     if args.dihedral_range:
         write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)
