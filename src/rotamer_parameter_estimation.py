@@ -195,35 +195,36 @@ def energy_and_deriv_for_rotamer_objects(rotamer_objects, *param):
         number_of_tasks = min(len(rotamer_objects),32)
 
         def accum_task(start_idx):
-            energy = 0.
-            deriv = np.zeros((20,20,P))
+            energy = np.zeros(2)
+            deriv = np.zeros((2,20,20,P))
 
             for rfree,rfixed in rotamer_objects[start_idx::number_of_tasks]:
                 er,dr = rfree .energy(interactions)
                 ei,di = rfixed.energy(interactions)
-                energy += ei-er
-                deriv  += di-dr
+                energy[0] += ei; deriv[0] += di
+                energy[1] += er; deriv[1] += dr
 
             return energy,deriv
 
-        energy = 0.
-        deriv = np.zeros((20,20,P))
+        energy = np.zeros(2)
+        deriv = np.zeros((2,20,20,P))
         for e,d in executor.map(accum_task, range(number_of_tasks)):
             energy += e
             deriv  += d
 
         if mode == 'PosDirBead':
-            flat_deriv = np.zeros((P_symm,21*20/2)), np.zeros((P_swap,19*20/2)), np.zeros((P_swap/2,20))
+            flat_deriv = np.zeros((2,P_symm,21*20/2)), np.zeros((2,P_swap,19*20/2)), np.zeros((2,P_swap/2,20))
         elif mode in ('PosBead','PosExprBead'):
-            flat_deriv = np.zeros((P_symm,21*20/2)),
+            flat_deriv = np.zeros((2,P_symm,21*20/2)),
 
-        for i in range(P_symm):
-            flat_deriv[0][i] = deriv[:,:,i][np.triu_indices(20)]
+        for o in range(2):
+            for i in range(P_symm):
+                flat_deriv[0][o,i] = deriv[o,:,:,i][np.triu_indices(20)]
 
-        for i in range(P_swap):
-            flat_deriv[1][i] = deriv[:,:,P_symm+i][np.triu_indices(20,k=1)].T
-        for i in range(P_swap/2):
-            flat_deriv[2][i] = deriv[:,:,P_symm+2*i].diagonal() + deriv[:,:,P_symm+2*i+1].diagonal()
+            for i in range(o,P_swap):
+                flat_deriv[1][o,i] = deriv[o,:,:,P_symm+i][np.triu_indices(20,k=1)].T
+            for i in range(o,P_swap/2):
+                flat_deriv[2][o,i] = deriv[o,:,:,P_symm+2*i].diagonal() + deriv[o,:,:,P_symm+2*i+1].diagonal()
 
         return energy, flat_deriv
 
@@ -281,24 +282,24 @@ class UpsideRotamerEnergyGap(theano.Op):
     def make_node(self, *param):
         if mode in ('PosBead','PosExprBead'):
             p, = param
-            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dscalar()])
+            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dvector()])
         elif mode == 'PosDirBead':
             p,u,d = param
-            return theano.Apply(self, [T.as_tensor_variable(x) for x in (p,u,d)], [T.dscalar()])
+            return theano.Apply(self, [T.as_tensor_variable(x) for x in (p,u,d)], [T.dvector()])
 
     def perform(self, node, inputs_storage, output_storage):
         energy, flat_deriv = energy_and_deriv_for_rotamer_objects(
                 self.rotamer_objects, *inputs_storage)
 
-        result = np.array(float(energy)*1./self.total_n_res)
+        result = np.array(energy*1./self.total_n_res,dtype='f8')
         output_storage[0][0] = result
 
     def grad(self, inputs, output_gradients):
         grad_func = UpsideRotamerEnergyGapGrad(self.total_n_res,self.rotamer_objects)
         if mode in ('PosBead','PosExprBead'):
-            return [output_gradients[0] * grad_func(inputs[0])]
+            return [T.tensordot(output_gradients[0], grad_func(inputs[0]), axes=(0,0))]
         else:
-            return [output_gradients[0] * x for x in grad_func(*inputs)]
+            return [T.tensordot(output_gradients[0], x, axes=(0,0)) for x in grad_func(*inputs)]
 
 
 class UpsideRotamerEnergyGapGrad(theano.Op):
@@ -309,11 +310,11 @@ class UpsideRotamerEnergyGapGrad(theano.Op):
     def make_node(self, *param):
         if mode in ('PosBead','PosExprBead'):
             p, = param
-            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dmatrix()])
+            return theano.Apply(self, [T.as_tensor_variable(p)], [T.dtensor3()])
         elif mode == 'PosDirBead':
             p,u,d = param
             return theano.Apply(self, [T.as_tensor_variable(x) for x in (p,u,d)], 
-                    [T.dmatrix(),T.dmatrix(),T.dmatrix()])
+                    [T.dtensor3(),T.dtensor3(),T.dtensor3()])
 
     def perform(self, node, inputs_storage, output_storage):
         energy, flat_deriv = energy_and_deriv_for_rotamer_objects(
