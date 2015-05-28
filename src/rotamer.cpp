@@ -918,6 +918,9 @@ struct RotamerSidechain: public PotentialNode {
     SysArrayStorage node_prob, edge_prob;
     SysArrayStorage node_belief, edge_belief, temp_node_belief, temp_edge_belief;
 
+    SysArrayStorage s_residue_energy1;
+    SysArrayStorage s_residue_energy3;
+
     SysArrayStorage node_marginal_prob, edge_marginal_prob;
     vector<int>     fixed_rotamers3;
 
@@ -1081,6 +1084,9 @@ struct RotamerSidechain: public PotentialNode {
         node_marginal_prob.reset(n_system, 3,   placement3->n_res);
         edge_marginal_prob.reset(n_system, 3*3, max_edges33);
 
+        s_residue_energy1.reset(n_system, 1, placement1->n_res);
+        s_residue_energy3.reset(n_system, 2, placement3->n_res);
+
         n_res_all = placement1->n_res + placement3->n_res;
 
         auto &p1 = *placement1;
@@ -1089,51 +1095,11 @@ struct RotamerSidechain: public PotentialNode {
         if(logging(LOG_DETAILED))
             default_logger->add_logger<float>("rotamer_potential_entropy", {n_system, n_res_all, 2}, [&](float* buffer) {
                     this->ensure_fresh_energy();
-
-                    SysArrayStorage s_residue_energy1(n_system, 1, p1.n_res);
-                    SysArrayStorage s_residue_energy3(n_system, 2, p3.n_res);
+                    this->calculate_per_residue_energies();
 
                     for(int ns: range(n_system)) {
                         VecArray residue_energy1 = s_residue_energy1[ns];
                         VecArray residue_energy3 = s_residue_energy3[ns];
-                        fill(residue_energy1, 1, p1.n_res, 0.f);
-
-                        for(int nr: range(p3.n_res)) {
-                            auto b = load_vec<3>(node_marginal_prob[ns], nr);
-                            auto vs = make_vec2(0.f,0.f);
-                            for(int no: range(3)) {vs[0] += b[no]*p3.pos[ns](no*BT::n_pos_dim+3,nr); vs[1] += -b[no]*logf(1e-10f+b[no]);}
-                            store_vec(residue_energy3, nr, vs);
-                       }
-
-                        for(int ne11: range(n_edge11[ns])) {
-                            auto &e = edges11[ns*max_edges11+ne11];
-                            update_vec(residue_energy1, e.nr1, 0.5f*make_vec1(e.potential[0][0]));
-                            update_vec(residue_energy1, e.nr2, 0.5f*make_vec1(e.potential[0][0]));
-                        }
-
-                        for(int ne13: range(n_edge13[ns])) {
-                            auto &e = edges13[ns*max_edges13+ne13];
-                            Vec<3> b = load_vec<3>(node_marginal_prob[ns], e.nr2);
-                            auto v = make_vec1(0.f);  // 1-body entropies were already handled
-                            for(int no2: range(3)) v[0] += b[no2]*e.potential[0][no2];
-                            update_vec(residue_energy1, e.nr1, 0.5f*v);
-                            update_vec(residue_energy3, e.nr2, 0.5f*v);
-                        }
-
-                        for(int ne33: range(n_edge33[ns])) {
-                            auto &e = edges33[ns*max_edges33+ne33];
-                            Vec<9> bp = load_vec<9>(edge_marginal_prob[ns], ne33);
-                            Vec<3> b1 = load_vec<3>(node_marginal_prob[ns], e.nr1);
-                            Vec<3> b2 = load_vec<3>(node_marginal_prob[ns], e.nr2);
-                            auto vs = make_vec2(0.f,0.f);
-                            for(int no1: range(3)) for(int no2: range(3)) {
-                                int i = no1*3+no2;
-                                vs[0] += bp[i]*e.potential[no1][no2];
-                                vs[1] +=-bp[i]*(logf((1e-10f+bp[i])*rcp((1e-10f+b1[no1]*b2[no2]))));
-                            }
-                            update_vec(residue_energy3, e.nr1, 0.5f*vs);
-                            update_vec(residue_energy3, e.nr2, 0.5f*vs);
-                        }
                         
                         // copy into buffer
                         for(int nr1: range(p1.n_res)) {
@@ -1209,7 +1175,7 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     virtual void compute_value(ComputeMode mode) {
-        // Timer timer("rotamer");
+        Timer timer("rotamer");  // Timer code is not thread-safe, so cannot be used within parallel for
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         auto &p1 = *placement1;
@@ -1217,11 +1183,11 @@ struct RotamerSidechain: public PotentialNode {
 
         #pragma omp parallel for schedule(dynamic)
         for(int ns=0; ns<n_system; ++ns) {
-            Timer t1("rotamer_place");
+            // Timer t1("rotamer_place");
             p1.place_rotamers(alignment.coords().value, rama.coords().value, ns);
             p3.place_rotamers(alignment.coords().value, rama.coords().value, ns);
 
-            t1.stop(); Timer t2("rotamer_compute");
+            // t1.stop(); Timer t2("rotamer_compute");
             compute_all_graph_elements(
                     n_edge11[ns], edges11.data() + ns*max_edges11,
                     n_edge13[ns], edges13.data() + ns*max_edges13,
@@ -1230,14 +1196,14 @@ struct RotamerSidechain: public PotentialNode {
                     p3.n_res, p3.global_restype.data(), p3.pos[ns],
                     n_restype, interactions.data());
 
-            t2.stop(); Timer t3("rotamer_convert");
+            // t2.stop(); Timer t3("rotamer_convert");
             convert_potential_graph_to_probability_graph(
                     node_prob[ns], edge_prob[ns], edge_indices.data() + ns*2*max_edges33,
                     p3.n_res, p3.pos[ns],  // last dimension is 1-residue potential
                     n_edge13[ns], edges13.data()+ns*max_edges13,
                     n_edge33[ns], edges33.data()+ns*max_edges33);
 
-            t3.stop(); Timer t4("rotamer_solve");
+            // t3.stop(); Timer t4("rotamer_solve");
             if(!fixed_rotamers3.size()) {
                 auto result = solve_for_beliefs(
                         node_belief[ns], edge_belief[ns], 
@@ -1264,7 +1230,7 @@ struct RotamerSidechain: public PotentialNode {
                 }
             }
 
-            t4.stop(); Timer t5("rotamer_diff");
+            // t4.stop(); Timer t5("rotamer_diff");
             compute_free_energy_and_derivative(
                     (mode==PotentialAndDerivMode ? potential.data()+ns : nullptr), 
                     node_marginal_prob[ns], edge_marginal_prob[ns],
@@ -1283,6 +1249,56 @@ struct RotamerSidechain: public PotentialNode {
             p3.push_derivatives(alignment.coords().value[ns],alignment.coords().deriv[ns],rama.coords().deriv[ns],ns,scale_final_energy);
         }
     }
+
+    void calculate_per_residue_energies() {
+        auto &p1 = *placement1;
+        auto &p3 = *placement3;
+
+        #pragma omp parallel for schedule(static,1)
+        for(int ns=0; ns<n_system; ++ns) {
+            VecArray residue_energy1 = s_residue_energy1[ns];
+            VecArray residue_energy3 = s_residue_energy3[ns];
+            fill(residue_energy1, 1, p1.n_res, 0.f);
+
+            for(int nr: range(p3.n_res)) {
+                auto b = load_vec<3>(node_marginal_prob[ns], nr);
+                auto vs = make_vec2(0.f,0.f);
+                for(int no: range(3)) {vs[0] += b[no]*p3.pos[ns](no*BT::n_pos_dim+3,nr); vs[1] += -b[no]*logf(1e-10f+b[no]);}
+                store_vec(residue_energy3, nr, vs);
+            }
+
+            for(int ne11: range(n_edge11[ns])) {
+                auto &e = edges11[ns*max_edges11+ne11];
+                update_vec(residue_energy1, e.nr1, 0.5f*make_vec1(e.potential[0][0]));
+                update_vec(residue_energy1, e.nr2, 0.5f*make_vec1(e.potential[0][0]));
+            }
+
+            for(int ne13: range(n_edge13[ns])) {
+                auto &e = edges13[ns*max_edges13+ne13];
+                Vec<3> b = load_vec<3>(node_marginal_prob[ns], e.nr2);
+                auto v = make_vec1(0.f);  // 1-body entropies were already handled
+                for(int no2: range(3)) v[0] += b[no2]*e.potential[0][no2];
+                update_vec(residue_energy1, e.nr1, 0.5f*v);
+                update_vec(residue_energy3, e.nr2, 0.5f*v);
+            }
+
+            for(int ne33: range(n_edge33[ns])) {
+                auto &e = edges33[ns*max_edges33+ne33];
+                Vec<9> bp = load_vec<9>(edge_marginal_prob[ns], ne33);
+                Vec<3> b1 = load_vec<3>(node_marginal_prob[ns], e.nr1);
+                Vec<3> b2 = load_vec<3>(node_marginal_prob[ns], e.nr2);
+                auto vs = make_vec2(0.f,0.f);
+                for(int no1: range(3)) for(int no2: range(3)) {
+                    int i = no1*3+no2;
+                    vs[0] += bp[i]*e.potential[no1][no2];
+                    vs[1] +=-bp[i]*(logf((1e-10f+bp[i])*rcp((1e-10f+b1[no1]*b2[no2]))));
+                }
+                update_vec(residue_energy3, e.nr1, 0.5f*vs);
+                update_vec(residue_energy3, e.nr2, 0.5f*vs);
+            }
+        }
+    }
+
 
     virtual double test_value_deriv_agreement() {
         vector<vector<CoordPair>> coord_pairs_affine(1);
@@ -1343,14 +1359,6 @@ struct RotamerConstructAndSolve {
             interactions[i].update_cutoff2();
         }
 
-        // if(!fixed_rotamers3.size()) {
-        //     for(int nr1: range(n_res1)) fprintf(stderr, "prob1 %3i %.3f\n", nr1, expf(-pos1[0](BT::n_pos_dim-1,nr1)));
-        //     for(int nr3: range(n_res3)) fprintf(stderr, "prob3 %3i %.3f %.3f %.3f\n", nr3, 
-        //             expf(-pos3[0](0*BT::n_pos_dim + BT::n_pos_dim-1,nr3)),
-        //             expf(-pos3[0](1*BT::n_pos_dim + BT::n_pos_dim-1,nr3)),
-        //             expf(-pos3[0](2*BT::n_pos_dim + BT::n_pos_dim-1,nr3)));
-        // }
-            
         compute_all_graph_elements(
                 n_edge11, edges11.data(),
                 n_edge13, edges13.data(),
@@ -1364,19 +1372,6 @@ struct RotamerConstructAndSolve {
                 n_res3, pos3[0],  // last dimension is 1-residue potential
                 n_edge13, edges13.data(),
                 n_edge33, edges33.data());
-        // if(!fixed_rotamers3.size()) {
-        //     for(int nr3: range(n_res3)) fprintf(stderr, "nprob %3i %.3f %.3f %.3f\n", nr3, 
-        //             node_prob[0](0,nr3)/sum(load_vec<3>(node_prob[0],nr3)),
-        //             node_prob[0](1,nr3)/sum(load_vec<3>(node_prob[0],nr3)),
-        //             node_prob[0](2,nr3)/sum(load_vec<3>(node_prob[0],nr3)));
-        // }
-        // if(!fixed_rotamers3.size()) {
-        //     for(int ne: range(n_edge13)) {
-        //         fprintf(stderr, "edge_pot %3i", ne);
-        //         for(int d:range(3)) fprintf(stderr, " %.3f", edges13[ne].potential[0][d]);
-        //         fprintf(stderr,"\n");
-        //     }
-        // }
 
         if(!fixed_rotamers3.size()) {
             auto result = solve_for_beliefs(
@@ -1416,14 +1411,6 @@ struct RotamerConstructAndSolve {
                 n_edge11, edges11.data(),
                 n_edge13, edges13.data(),
                 n_edge33, edges33.data());
-        // if(!fixed_rotamers3.size()) {
-        //     for(int nr3: range(n_res3)) fprintf(stderr, "marg3 %3i %.3f %.3f %.3f\n", nr3, 
-        //             node_marginal_prob[0](0,nr3),
-        //             node_marginal_prob[0](1,nr3),
-        //             node_marginal_prob[0](2,nr3));
-        // }
-        // fprintf(stderr, "free_energy %lu %f\n", fixed_rotamers3.size(), free_energy);
-
 
         compute_parameter_derivatives(
                 parameter_deriv, 
