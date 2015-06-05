@@ -429,6 +429,7 @@ try {
                          // we are done loading a frame, so process it
                          physical_time = all_times[nf];
                          printf(" %lu", nf); fflush(stdout);
+                         engine.compute(PotentialAndDerivMode);
                          default_logger->collect_samples();
                     }});
             printf("\n");
@@ -458,6 +459,7 @@ try {
 
             if(!frame_interval || !(nr%frame_interval)) {
                 if(do_recenter) recenter(engine.pos->coords().value, xy_recenter_only, n_atom, n_system);
+                engine.compute(PotentialAndDerivMode);
                 default_logger->collect_samples();
 
                 double Rg = 0.f;
