@@ -885,7 +885,7 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     z_lib_max = potential_library.root.z_energy._v_attrs.z_max
     potential_library.close()
 
-    for res_num in excluded_residues + unsatisfiedHB_residues:
+    for res_num in list(excluded_residues) + list(unsatisfiedHB_residues):
         if not (0<=res_num<len(sequence)):
            raise ValueError('Residue number %i is invalid'%res_num)
     
