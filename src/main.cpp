@@ -444,6 +444,8 @@ try {
                         [&](double* buffer) {for(int i=0; i<n_frame*n_system; ++i) buffer[i] = old_potential[i];});
             }
 
+            // make sure logger is cleaned up before H5File is
+            default_logger.reset(0);
             return 0; // do not run dynamics
         }
 

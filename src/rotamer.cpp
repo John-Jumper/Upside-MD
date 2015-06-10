@@ -237,7 +237,7 @@ struct PosDirBead {
         bool compatible(const SidechainInteraction& other) const {
             bool comp = cutoff2 == other.cutoff2;
             for(int i: range(6)) comp &= params[i] == other.params[i];
-            for(int i=7; i<12; i+=2) {
+            for(int i=6; i<12; i+=2) {
                 comp &= params[i]   == other.params[i+1];  // switch of restype1 and restype2
                 comp &= params[i+1] == other.params[i];    // switch of restype1 and restype2
             }
