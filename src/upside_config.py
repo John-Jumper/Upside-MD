@@ -138,6 +138,7 @@ def write_backbone_pair(fasta):
     ref_pos[fasta=='GLY',3] = np.nan
 
     ref_pos -= ref_pos[:,:3].mean(axis=1)[:,None]
+    #print np.sqrt(np.sum(ref_pos[0]**2,axis=-1))
 
     grp._v_attrs.energy_scale = 4.
     grp._v_attrs.dist_cutoff = 6.
@@ -195,7 +196,7 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
 
     grp = t.create_group(potential, 'hbond_energy')
-    grp._v_attrs.arguments = np.array(['infer_H_O','backbone_dependent_point'])
+    grp._v_attrs.arguments = np.array(['infer_H_O','placement3_backbone_dependent_point'])
 
     assert len(hbond_energy) == 2
     grp._v_attrs.protein_hbond_energy = hbond_energy[0]
@@ -897,28 +898,43 @@ def write_rama_coord():
 
 
 def write_backbone_dependent_point(fasta, library):
-    grp = t.create_group(potential, 'backbone_dependent_point')
+    # grp = t.create_group(potential, 'backbone_dependent_point')
+    # grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+
+    # with tb.open_file(library) as data:
+    #     n_restype = len(aa_num)
+    #     n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
+    #     point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
+
+    #     for rname,idx in sorted(aa_num.items()):
+    #         point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
+
+    # create_array(grp, 'rama_residue',       np.arange(len(fasta)))
+    # create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
+    # create_array(grp, 'restype',            np.array([aa_num[s] for s in fasta]))
+    # create_array(grp, 'backbone_point_map', point_map)
+
+    grp = t.create_group(potential, 'placement3_backbone_dependent_point')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
 
-    data = tb.open_file(library)
+    with tb.open_file(library) as data:
+        n_restype = len(aa_num)
+        n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
+        point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
 
-    n_restype = len(aa_num)
-    n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
-    point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
+        for rname,idx in sorted(aa_num.items()):
+            point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
 
-    for rname,idx in sorted(aa_num.items()):
-        point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
-    data.close()
-
-    create_array(grp, 'rama_residue',       np.arange(len(fasta)))
-    create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
-    create_array(grp, 'restype',            np.array([aa_num[s] for s in fasta]))
-    create_array(grp, 'backbone_point_map', point_map)
+    create_array(grp, 'signature',       np.array(['point']))
+    create_array(grp, 'rama_residue',    np.arange(len(fasta)))
+    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
+    create_array(grp, 'layer_index',     np.array([aa_num[s] for s in fasta]))
+    create_array(grp, 'placement_data',  point_map)
 
 
 def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
-    g._v_attrs.arguments = np.array(['backbone_dependent_point'])
+    g._v_attrs.arguments = np.array(['placement3_backbone_dependent_point'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -959,7 +975,7 @@ def write_rotamer(fasta, library, scale, damping):
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
 		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
-    grp._v_attrs.arguments = np.array(['backbone_dependent_point'])
+    grp._v_attrs.arguments = np.array(['placement3_backbone_dependent_point'])
 
     potential_library = tb.open_file(potential_library_path)
     resnames  = potential_library.root.names[:]

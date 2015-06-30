@@ -394,8 +394,6 @@ double compute_relative_deviation_for_node(
         CoordNode& argument, 
         const std::vector<std::vector<CoordPair>> &coord_pairs,
         ValueType value_type = CARTESIAN_VALUE) {
-    // FIXME handle multiple systems
-
     std::vector<float>& output = node.potential_term 
         ? reinterpret_cast<PotentialNode&>(node).potential
         : reinterpret_cast<CoordNode&>    (node).output;

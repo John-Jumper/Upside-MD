@@ -45,20 +45,6 @@ struct SysArray {
     }
 };
 
-static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
-    for(int d=0; d<n_dim; ++d) 
-        for(int ne=0; ne<n_elem; ++ne) 
-            v(d,ne) = fill_value;
-}
-
-
-static void fill(SysArray s, int n_system, int n_dim, int n_elem, float value) {
-    #pragma omp parallel for schedule(static,1)
-    for(int ns=0; ns<n_system; ++ns) {
-        fill(s[ns], n_dim, n_elem, value);
-    }
-}
-
 
 struct SysArrayStorage {
     int n_system;
@@ -93,6 +79,21 @@ struct SysArrayStorage {
     VecArray       operator[](int ns)       {return array()[ns];}
     const VecArray operator[](int ns) const {return array()[ns];}
 };
+
+
+static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
+    for(int d=0; d<n_dim; ++d) 
+        for(int ne=0; ne<n_elem; ++ne) 
+            v(d,ne) = fill_value;
+}
+
+
+static void fill(SysArray s, int n_system, int n_dim, int n_elem, float value) {
+    #pragma omp parallel for schedule(static,1)
+    for(int ns=0; ns<n_system; ++ns) {
+        fill(s[ns], n_dim, n_elem, value);
+    }
+}
 
 
 struct range {
