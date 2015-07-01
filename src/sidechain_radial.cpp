@@ -5,22 +5,10 @@
 #include "affine.h"
 #include <cmath>
 #include <vector>
+#include "interaction_graph.h"
 
 using namespace std;
 using namespace h5;
-
-struct SidechainRadialParams {
-    CoordPair loc;
-    int       restype;
-};
-
-
-struct SidechainRadialInteraction {
-    float r0_squared;
-    float scale;
-    float energy;
-};
-
 
 struct ContactPair {
     CoordPair loc[2];
@@ -30,126 +18,62 @@ struct ContactPair {
     float     energy;
 };
 
-struct SidechainRadialResidue {
-    int      restype;
-    Coord<3> coord;
-
-    SidechainRadialResidue(int restype_, const CoordArray &ca, int ns, const CoordPair &loc):
-        restype(restype_),
-        coord(ca, ns, loc) {}
-};
-
-void radial_pairs(
-        float* potential,
-        const CoordArray                  interaction_pos,
-        const SidechainRadialParams*      residue_param,
-        const SidechainRadialInteraction* interaction_params,
-        int n_types, float cutoff,
-        int n_res, int n_system)
-{
-#pragma omp parallel for schedule(static,1)
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        vector<SidechainRadialResidue> residues;  residues.reserve(n_res);
-
-        for(int nr=0; nr<n_res; ++nr)
-            residues.emplace_back(residue_param[nr].restype, interaction_pos, ns, residue_param[nr].loc); 
-
-        for(int nr1=0; nr1<n_res; ++nr1) {
-            SidechainRadialResidue &r1 = residues[nr1];
-
-            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // do not interact with nearest neighbors
-                SidechainRadialResidue &r2 = residues[nr2];
-
-                float3 disp = r1.coord.f3() - r2.coord.f3();
-                SidechainRadialInteraction at = interaction_params[r1.restype*n_types + r2.restype];
-                float dist2 = mag2(disp);
-                float reduced_coord = at.scale * (dist2 - at.r0_squared);
-
-                if(reduced_coord<cutoff) {
-                    //printf("reduced_coord %.1f %.1f\n",reduced_coord,sqrtf(dist2));
-                    float  z = expf(reduced_coord);
-                    float  w = 1.f / (1.f + z);
-                    if(potential) potential[ns] += at.energy*w;
-                    float  deriv_over_r = -2.f*at.scale * at.energy * z * (w*w);
-                    float3 deriv = deriv_over_r * disp;
-
-                    r1.coord.d[0][0] += deriv.x(); r2.coord.d[0][0] += -deriv.x(); 
-                    r1.coord.d[0][1] += deriv.y(); r2.coord.d[0][1] += -deriv.y(); 
-                    r1.coord.d[0][2] += deriv.z(); r2.coord.d[0][2] += -deriv.z(); 
-                }
-            }
-        }
-
-        for(int nr=0; nr<n_res; ++nr)
-            residues[nr].coord.flush();
-    }
-}
-
-
 struct SidechainRadialPairs : public PotentialNode
 {
-    map<string,int> name_map;
-    int n_residue;
-    int n_type;
-    CoordNode& bb_point;
+    struct Helper {
+        // params are r0_squared, scale, energy
+        constexpr static const float base_cutoff = 8.f;  
+        constexpr static int n_param=3, n_dim=3, n_deriv=3;
+        static float cutoff(const Vec<n_param> &p) {return sqrtf(p[0] + base_cutoff/p[1]);}
+        static bool is_compatible(const Vec<n_param> &p1, const Vec<n_param> &p2) {
+            for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
+            return true;
+        }
 
-    vector<SidechainRadialParams> params;
-    vector<SidechainRadialInteraction> interaction_params;
-    float cutoff;
+        static bool exclude_by_id(int id1, int id2) { return abs(id1-id2) < 2; } // no nearest neighbor
+
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
+                float3 disp = x1-x2;
+                float  z = expf(p[1] * (mag2(disp) - p[0]));
+                float  w = 1.f / (1.f + z);
+
+                float  deriv_over_r = -2.f*p[1] * p[2] * z * (w*w);
+                d_base = deriv_over_r * disp;
+                return p[2]*w;
+        };
+
+        static void expand_deriv(Vec<n_deriv> &d1, Vec<n_deriv> &d2, const Vec<n_deriv> &d_base) {
+            d1 =  d_base;
+            d2 = -d_base;
+        }
+    };
+
+    SymmetricInteractionGraph<Helper> igraph;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
         PotentialNode(bb_point_.n_system),
-        n_residue(get_dset_size(1, grp, "id"   )[0]), 
-        n_type   (get_dset_size(1, grp, "data/names")[0]),
-        bb_point(bb_point_), 
-
-        params(n_residue), interaction_params(n_type*n_type),
-        cutoff(read_attribute<float>(grp, "data", "cutoff"))
-    {
-        check_elem_width(bb_point, 3);
-
-        check_size(grp, "id",      n_residue);
-        check_size(grp, "restype", n_residue);
-
-        check_size(grp, "data/names",      n_type);
-        check_size(grp, "data/energy",     n_type, n_type);
-        check_size(grp, "data/scale",      n_type, n_type);
-        check_size(grp, "data/r0_squared", n_type, n_type);
-
-        int i=0; 
-        traverse_string_dset<1>(grp, "data/names", [&](size_t nt, std::string &s) {name_map[s]=i++;});
-        if(i!=n_type) throw std::string("internal error");
-
-        traverse_dset<2,float>(grp, "data/energy", [&](size_t rt1, size_t rt2, float x) {
-                interaction_params[rt1*n_type+rt2].energy = x;});
-        traverse_dset<2,float>(grp, "data/scale", [&](size_t rt1, size_t rt2, float x) {
-                interaction_params[rt1*n_type+rt2].scale = x;});
-        traverse_dset<2,float>(grp, "data/r0_squared", [&](size_t rt1, size_t rt2, float x) {
-                interaction_params[rt1*n_type+rt2].r0_squared = x;});
-
-        traverse_dset<1,int   >(grp, "id",      [&](size_t nr, int x) {params[nr].loc.index = x;});
-        traverse_string_dset<1>(grp, "restype", [&](size_t nr, std::string &s) {
-                if(name_map.find(s) == end(name_map)) std::string("restype contains name not found in data/");
-                params[nr].restype    = name_map[s];
-            });
-
-        for(size_t nr=0; nr<params.size(); ++nr) bb_point.slot_machine.add_request(1, params[nr].loc);
-    }
+        igraph(grp, bb_point_)
+    {};
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
-        radial_pairs((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                bb_point.coords(), 
-                params.data(), interaction_params.data(), n_type, cutoff, 
-                n_residue, bb_point.n_system);
+
+        #pragma omp parallel for schedule(static,1)
+        for(int ns=0; ns<n_system; ++ns) {
+            potential[ns] = 0.f;
+            igraph.compute_edges(ns, [&](
+                        int edge_index, float value, 
+                        int index1, unsigned rt1, unsigned id1,
+                        int index2, unsigned rt2, unsigned id2) {
+                    potential[ns] += value;
+                    igraph.use_derivative(ns, edge_index, 1.f);
+                });
+            igraph.propagate_derivatives(ns);
+        }
     }
 
-    virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
-        for(auto &p: params) coord_pairs.back().push_back(p.loc);
-        return compute_relative_deviation_for_node<3>(*this, bb_point, coord_pairs, CARTESIAN_VALUE);
-    }
+    virtual double test_value_deriv_agreement() { return -1.f; }
 };
 
 

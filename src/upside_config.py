@@ -941,18 +941,20 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
 
     residues = sorted(set(np.arange(len(fasta))).difference(excluded_residues))
 
-    create_array(g, 'restype', obj=map(str,fasta[residues]))
-    create_array(g, 'id',      obj=np.array(residues))
+    with tb.open_file(library) as params:
+        resname2restype = dict((x,i) for i,x in enumerate(params.root.params.names[:]))
+        n_type = len(resname2restype)
 
-    params = tb.open_file(library)
-    data = t.create_group(g, 'data')
-    data._v_attrs.cutoff = 8.
-    create_array(data, 'names',      obj=params.root.params.names[:])
-    create_array(data, 'energy',     obj=params.root.params.energy[:] * scale_energy)
-    create_array(data, 'r0_squared', obj=params.root.params.r0_squared[:] * scale_radius**2)
-    # scale has units 1/A^2
-    create_array(data, 'scale',      obj=params.root.params.scale[:]      / scale_radius)
-    params.close()
+        create_array(g, 'index', obj=np.array(residues))
+        create_array(g, 'type',  obj=np.array([resname2restype[x] for x in fasta[residues]]))
+        create_array(g, 'id',    obj=np.array(residues))  # FIXME update for chain breaks
+
+        data = t.create_group(g, 'data')
+        p = np.zeros((n_type, n_type, 3))
+        p[:,:,0] = params.root.params.r0_squared[:] * scale_radius**2
+        p[:,:,1] = params.root.params.scale[:]      / scale_radius # scale has units 1/A^2
+        p[:,:,2] = params.root.params.energy[:]     * scale_energy
+        create_array(g, 'interaction_param', obj=p)
 
 
 def write_rotamer(fasta, library, scale, damping):
