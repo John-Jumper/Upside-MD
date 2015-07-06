@@ -189,7 +189,7 @@ def write_infer_H_O(fasta, excluded_residues):
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
 
-def write_count_hbond(fasta, hbond_energy):
+def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
     n_res = len(fasta)
     if hbond_energy[0] > 0. or hbond_energy[1] > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
@@ -202,7 +202,7 @@ def write_count_hbond(fasta, hbond_energy):
     grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
 
     create_array(grp, 'sidechain_id',     np.arange(len(fasta)))
-    create_array(grp, 'sidechain_radius', 4.5*np.ones(len(fasta))) 
+    create_array(grp, 'sidechain_radius', hbond_coverage_sidechain_radius*np.ones(len(fasta))) 
     create_array(grp, 'sidechain_scale',  (1./1.0)*np.ones(len(fasta)))
 
 
@@ -1111,6 +1111,8 @@ def main():
             'the first is the energy for a protein-protien HBond and the second is '+
             'the energy of a protein-solvent HBond.  Example "--hbond-energy=-2.15,-1.0".  '+
             'Default is no HBond energy.')
+    parser.add_argument('--hbond-coverage-sidechain-radius', default=4.5, type=float,
+            help='radius to use when determining sidechain coverage of exposed hbonds (default 4.5).')
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
@@ -1234,7 +1236,7 @@ def main():
     if any(x!=0. for x in args.hbond_energy): 
         require_backbone_point = True
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
-        write_count_hbond(fasta_seq, args.hbond_energy)
+        write_count_hbond(fasta_seq, args.hbond_energy, args.hbond_coverage_sidechain_radius)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
