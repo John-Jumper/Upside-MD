@@ -31,28 +31,6 @@ nonbonded_kernel_or_deriv_over_r(float r_mag2)
     return return_deriv ? 2.f*V.y() : V.x();
 }
 
-// template <bool return_deriv>
-// inline float
-// nonbonded_kernel_or_deriv_over_r(float r_mag2)
-// {
-//     const float wall = 2.8f;  // corresponds to vdW *diameter*
-//     const float wall_squared = wall*wall;  
-//     const float width = 0.10f;
-//     const float scale_factor = 1.f/(wall*width);  // ensure character
-// 
-//     // overflow protection prevents NaN
-//     float z = fminf(expf(scale_factor * (r_mag2-wall_squared)), 1e12f);
-//     float w = 1.f/(1.f + z);  // include protection from 0
-//     printf("nbk % f % f   % f % f\n", sqrtf(r_mag2), wall, w, -scale_factor * z * (w*w));
-// 
-//     if(return_deriv) {
-//         float deriv_over_r = -2.f*scale_factor * z * (w*w);
-//         return deriv_over_r;
-//     } else {
-//         return w;
-//     }
-// }
-
 
 template <typename AffineCoordT>
 inline void backbone_pairs_body(

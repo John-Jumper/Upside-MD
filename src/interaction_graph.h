@@ -4,7 +4,7 @@
 #include "vector_math.h"
 #include "h5_support.h"
 
-template <typename IType>
+template <typename IType, bool compute_param_deriv = false>
 struct SymmetricInteractionGraph {
     CoordNode &pos_node;
     int n_system;
@@ -20,9 +20,11 @@ struct SymmetricInteractionGraph {
 
     // FIXME consider padding for vector loads
     std::vector<Vec<IType::n_param>> interaction_param;
+    SysArrayStorage interaction_param_deriv;
     std::vector<float> cutoff2;
 
-    SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_edge)
+    SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_n_edge)
+    SysArrayStorage edge_param_deriv;
     SysArrayStorage pos_deriv;
     std::vector<int> edge_indices;
 
@@ -36,8 +38,10 @@ struct SymmetricInteractionGraph {
         n_elem(h5::get_dset_size(1,grp,"index")[0]),
         max_n_edge((n_elem*(n_elem-1))/2),
         interaction_param(n_type*n_type),
+        interaction_param_deriv(n_system, IType::n_param, (compute_param_deriv ? n_type*n_type : 0)),
         cutoff2(n_type*n_type),
         edge_deriv(n_system, IType::n_deriv, max_n_edge),
+        edge_param_deriv(n_system, IType::n_param, (compute_param_deriv ? max_n_edge : 0)),
         pos_deriv (n_system, IType::n_dim,   n_elem),
         edge_indices(n_system*2*max_n_edge),
         n_edge(n_system)
@@ -76,6 +80,7 @@ struct SymmetricInteractionGraph {
     void compute_edges(int ns, F f) {
         VecArray pos = pos_node.coords().value[ns];
         fill(pos_deriv[ns], IType::n_dim, n_elem, 0.f);
+        if(compute_param_deriv) fill(interaction_param_deriv[ns], IType::n_param, n_type*n_type, 0.f);
 
         int ne = 0;
         for(int i1: range(n_elem)) {
@@ -106,6 +111,13 @@ struct SymmetricInteractionGraph {
                 edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;
 
                 f(ne, value, index1,type1,id1, index2,type2,id2);
+
+                if(compute_param_deriv) {
+                    Vec<IType::n_param> dp;
+                    IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
+                    store_vec(edge_param_deriv[ns], ne, dp);
+                }
+
                 ++ne;
             }
         }
@@ -118,6 +130,13 @@ struct SymmetricInteractionGraph {
         IType::expand_deriv(d1,d2, deriv);
         update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 0], d1);
         update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 1], d2);
+
+        if(compute_param_deriv) {
+            auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
+            auto type1 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
+            auto type2 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
+            update_vec(interaction_param_deriv[ns], type1*n_type+type2, d);
+        }
     }
 
     void propagate_derivatives(int ns) {

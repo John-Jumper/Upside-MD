@@ -30,7 +30,7 @@ struct SidechainRadialPairs : public PotentialNode
             return true;
         }
 
-        static bool exclude_by_id(int id1, int id2) { return abs(id1-id2) < 2; } // no nearest neighbor
+        static bool exclude_by_id(int id1, int id2) { return (id1-id2<2) & (id2-id1<2); } // no nearest neighbor
 
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
@@ -47,6 +47,9 @@ struct SidechainRadialPairs : public PotentialNode
             d1 =  d_base;
             d2 = -d_base;
         }
+
+        static void param_deriv(Vec<n_deriv> &d_param, const Vec<n_param> &p, 
+                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {}
     };
 
     SymmetricInteractionGraph<Helper> igraph;

@@ -373,6 +373,13 @@ inline Vec<D,S> make_zero() {
     return ret;
 }
 
+template <int D, typename S = float>
+inline Vec<D,S> make_one () {
+    Vec<D,S> ret;
+    for(int i=0; i<D; ++i) ret[i] = one <S>();
+    return ret;
+}
+
 template<int start_loc, int stop_loc, int D, typename S>
 inline Vec<stop_loc-start_loc,S> extract(const Vec<D,S>& x) {
     static_assert(0<=start_loc, "extract start must be non-negative");
