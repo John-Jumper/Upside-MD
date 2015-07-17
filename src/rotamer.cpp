@@ -75,6 +75,16 @@ struct NodeHolder {
             return dev;
         }
 
+        template<int N_ROT>
+        void calculate_marginals() {
+            // marginals are stored in the same array in cur_belief but l1 normalized
+            for(int nn: range(n_elem)) {
+                auto b = load_vec<N_ROT>(cur_belief,nn);
+                store_vec(cur_belief,nn, b*rcp(sum(b)));
+            }
+        }
+
+
         template <int N_ROT>
         float node_free_energy(int nn) {
             auto b = load_vec<N_ROT>(cur_belief,nn);
@@ -102,15 +112,20 @@ struct EdgeHolder {
         SysArrayStorage s_prob;
         SysArrayStorage s_belief1;
         SysArrayStorage s_belief2;
+        SysArrayStorage s_marginal;
 
     public:
+        struct EdgeLoc {int edge_num, dim, ne;};
+
         // FIXME include numerical stability data  (basically scale each probability in a sane way)
         VecArray prob;  // stored here
         VecArray cur_belief;
         VecArray old_belief;
+        VecArray marginal;
 
         vector<pair<int,int>> edge_indices;
         unordered_map<unsigned,unsigned> nodes_to_edge;
+        vector<EdgeLoc> edge_loc;
 
         EdgeHolder(NodeHolder &nodes1_, NodeHolder &nodes2_, int max_n_edge):
             n_rot1(nodes1_.n_rot), n_rot2(nodes2_.n_rot),
@@ -118,23 +133,26 @@ struct EdgeHolder {
             s_prob(1, n_rot1*n_rot2, max_n_edge),
             s_belief1(1, n_rot1+n_rot2, max_n_edge),
             s_belief2(1, n_rot1+n_rot2, max_n_edge),
+            s_marginal(1, n_rot1*n_rot2, max_n_edge),
 
             prob(s_prob[0]),
             cur_belief(s_belief1[0]),
             old_belief(s_belief2[0]),
+            marginal(s_marginal[0]),
 
             edge_indices(max_n_edge)
         {
+            edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
             fill(cur_belief, n_rot1*n_rot2, n_edge, 1.f);
             fill(old_belief, n_rot1*n_rot2, n_edge, 1.f);
             reset();
         }
 
-        void reset() {n_edge=0; nodes_to_edge.clear();}
+        void reset() {n_edge=0; nodes_to_edge.clear(); edge_loc.clear();}
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
         void add_to_edge(
-                float prob_val,
+                int ne, float prob_val,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
             // really I could take n_rot1 and n_rot2 as parameters so I didn't have to do a read 
@@ -155,7 +173,9 @@ struct EdgeHolder {
                 idx = ei->second;
             }
 
-            prob(rot1*n_rot2+rot2, idx) *= prob_val;
+            int j = rot1*n_rot2+rot2;
+            prob(j, idx) *= prob_val;
+            edge_loc.emplace_back(EdgeLoc{ne, j, int(idx)});
         }
 
         void move_edge_prob_to_node2() {
@@ -184,39 +204,36 @@ struct EdgeHolder {
             return dev;
         }
 
-
         template<int N_ROT1, int N_ROT2>
-        Vec<N_ROT1*N_ROT2> prob_matrix(int ne) {
+        void calculate_marginals() {
             // FIXME ASSERT(n_rot1 == N_ROT1)
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
 
-            auto e = edge_indices[ne];
-            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);
-            auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, e.second);
+            for(int ne: range(n_edge)) {
+                auto e = edge_indices[ne];
+                auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);
+                auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, e.second);
 
-            // correct for self interaction
-            auto bc1 = b1 * vec_rcp(1e-10f + load_vec<N_ROT1>(cur_belief,                 ne));
-            auto bc2 = b2 * vec_rcp(1e-10f + load_vec<N_ROT2>(cur_belief.shifted(N_ROT1), ne));
+                // correct for self interaction
+                auto bc1 = b1 * vec_rcp(1e-10f + load_vec<N_ROT1>(cur_belief,                 ne));
+                auto bc2 = b2 * vec_rcp(1e-10f + load_vec<N_ROT2>(cur_belief.shifted(N_ROT1), ne));
 
-            auto p = load_vec<N_ROT1*N_ROT2>(prob, ne);
-            for(int no1: range(N_ROT1))
-                for(int no2: range(N_ROT2))
-                    p[no1*N_ROT1+no2] *= bc1[no1]*bc2[no2];
-            p *= rcp(sum(p));
-            return p;
+                auto p = load_vec<N_ROT1*N_ROT2>(prob, ne);
+                for(int no1: range(N_ROT1))
+                    for(int no2: range(N_ROT2))
+                        p[no1*N_ROT1+no2] *= bc1[no1]*bc2[no2];
+                store_vec(marginal, ne, p * rcp(sum(p)));
+            }
         }
 
         template<int N_ROT1, int N_ROT2>
         float edge_free_energy(int ne) {
             auto e = edge_indices[ne];
-            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);
+            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);  // really marginal
             auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, e.second);
 
-            auto p = prob_matrix<N_ROT1,N_ROT2>(ne);
+            auto p  = load_vec<N_ROT1*N_ROT2>(marginal, ne);
             auto pr = load_vec<N_ROT1*N_ROT2>(prob, ne);
-
-            b1 *= rcp(sum(b1)); // l1 normalization
-            b2 *= rcp(sum(b2));
 
             float en = 0.f;
             for(int no1: range(N_ROT1)) {
@@ -273,8 +290,6 @@ struct EdgeHolder {
             }
         }
 };
-
-
 
 
 template <typename BT>
@@ -360,43 +375,13 @@ struct RotamerSidechain: public PotentialNode {
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         fill_holders(0);
-        auto solve_results = solve_for_beliefs();
-        auto en = calculate_energy_from_beliefs();
+        auto solve_results = solve_for_marginals();
+        if(solve_results.first >= max_iter - iteration_chunk_size - 1)
+            printf("solved in %i iterations with an error of %f\n", 
+                    solve_results.first, solve_results.second);
 
-        // nodes3.standardize_probs(); // FIXME debug
-        // printf("\n");
-        // for(int i: range(nodes3.n_elem)) {
-        //     printf("node %3i  ", i);
-        //     for(int j: range(nodes3.n_rot)) printf(" %.2f", nodes3.prob(j,i));
-        //     printf("\n");
-        // }
-        // printf("\n");
-
-        // edges33.standardize_probs(); // FIXME debug
-        // printf("\n");
-        // for(int i: range(edges33.n_edge)) {
-        //     printf("edge %3i %3i  ", edges33.edge_indices[i].first, edges33.edge_indices[i].second);
-        //     for(int j: range(9)) printf(" %.2f", edges33.prob(j,i));
-        //     printf("\n");
-        // }
-        // printf("\n");
-
-        // printf("final beliefs\n");
-        // print(nodes3 .cur_belief, nodes3.n_rot, nodes3.n_elem, "node");
-        // printf("\n");
-
-        // for(int ne:range(edges33.n_edge)) {
-        //     auto a = load_vec<3>(edges33.cur_belief.shifted(0),ne); a*=rcp(max(a));
-        //     auto b = load_vec<3>(edges33.cur_belief.shifted(3),ne); b*=rcp(max(b));
-        //     printf("edge %3i %3i  %.2f %.2f %.2f  %.2f %.2f %.2f\n",
-        //             edges33.edge_indices[ne].first,
-        //             edges33.edge_indices[ne].second,
-        //             a[0],a[1],a[2], b[0],b[1],b[2]);
-        // }
-        // printf("\n");
-
-        printf("\nsolved in %i iterations to tol %.5f\n", solve_results.first, solve_results.second);
-        printf("final energy is %.3f\n", en);
+        propagate_derivatives();
+        if(mode==PotentialAndDerivMode) potential[0] = calculate_energy_from_marginals();
     }
 
     virtual double test_value_deriv_agreement() {return -1.;}
@@ -433,7 +418,7 @@ struct RotamerSidechain: public PotentialNode {
                 unsigned n_rot1 = id1 & selector; id1 >>= n_bit_rotamer;
                 unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
 
-                edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(expf(-pot), id1, rot1, id2, rot2);
+                edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, expf(-pot), id1, rot1, id2, rot2);
                 });
 
         // for edges with a 1, we can just move it
@@ -442,18 +427,37 @@ struct RotamerSidechain: public PotentialNode {
                 edge_holders_matrix[1][n_rot]->move_edge_prob_to_node2();
     }
 
-    float calculate_energy_from_beliefs() {
-        // beliefs must already have been solved
+    float calculate_energy_from_marginals() {
+        // marginals must already have been solved
         // since edges1x were folded into the node probabilites, they should not be accumulated here
         float en = 0.f;
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
-        printf("after en1 %.3f\n", en);
         for(int ne: range(edges33.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
-        printf("after en2 %.3f\n", en);
         for(int ne: range(edges11.n_edge)) en -= logf(edges11.prob(0,ne));
-        printf("after en3 %.3f\n", en);
         return en;
     }
+
+
+    void propagate_derivatives() {
+        for(auto &el: edges11.edge_loc)
+            igraph.use_derivative(0, el.edge_num, 1.f);
+        for(auto &el: edges13.edge_loc)
+            igraph.use_derivative(0, el.edge_num, nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second));
+        for(auto &el: edges33.edge_loc)
+            igraph.use_derivative(0, el.edge_num, edges33.marginal  (el.dim, el.ne));
+        igraph.propagate_derivatives(0);
+
+        VecArray deriv_1body = prob_node.coords().deriv[0];
+        for(int n: range(igraph.n_elem)) {
+            unsigned id = igraph.id[n];
+            unsigned selector = (1u<<n_bit_rotamer) - 1u;
+            unsigned rot      = id & selector; id >>= n_bit_rotamer;
+            unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
+
+            deriv_1body(0,prob_slot[n]) = node_holders_matrix[n_rot]->cur_belief(rot,id);
+        }
+    }
+
 
     void calculate_new_beliefs(float damping_for_this_iteration) {
         for(int no: range(nodes3.n_rot))
@@ -464,7 +468,8 @@ struct RotamerSidechain: public PotentialNode {
         nodes3.finish_belief_update<3>(damping_for_this_iteration);
     }
     
-    pair<int,float> solve_for_beliefs() {
+
+    pair<int,float> solve_for_marginals() {
         // first initialize old node beliefs to just be probability to speed convergence
         for(auto nh: node_holders_matrix)
             if(nh)
@@ -492,6 +497,8 @@ struct RotamerSidechain: public PotentialNode {
             max_deviation = max(nodes3.max_deviation(), edges33.max_deviation());
         }
 
+        nodes3 .calculate_marginals<3>  ();
+        edges33.calculate_marginals<3,3>();
         return make_pair(iter, max_deviation);
     }
 };

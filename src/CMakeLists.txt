@@ -23,8 +23,8 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
-    placement.cpp
     rotamer.cpp
+    placement.cpp
     main.cpp
     basin_correlation.cpp
     rama_map_pot.cpp
