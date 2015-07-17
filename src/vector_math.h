@@ -4,6 +4,7 @@
 #include <cmath>
 #include <type_traits>
 #include <memory>
+#include <cstdio>
 
 struct VecArray {
     float* v;
@@ -24,6 +25,12 @@ struct VecArray {
         return v[i_comp*component_offset + i_elem];
     }
 };
+
+
+inline void swap(VecArray &a, VecArray &b) {
+    { auto tmp=a.v; a.v=b.v; b.v=tmp; }
+    { auto tmp=a.component_offset; a.component_offset=b.component_offset; b.component_offset=tmp; }
+}
 
 
 struct SysArray {
@@ -589,5 +596,14 @@ static float dihedral_germ(
     d3 = -d4 - f_mid;
 
     return atan2f(dot(C,G), dot(A,B) * Gmag);
+}
+
+
+static void print(const VecArray &a, int n_dim, int n_elem, const char* txt) {
+    for(int ne: range(n_elem)) {
+        printf("%s% 4i  ", txt, ne);
+        for(int nd: range(n_dim)) printf(" % .2f", a(nd,ne));
+        printf("\n");
+    }
 }
 #endif

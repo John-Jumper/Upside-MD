@@ -215,3 +215,5 @@ struct RigidPlacementNode: public CoordNode {
 };
 
 static RegisterNodeType<RigidPlacementNode<3>,2> placement3_node("placement3");
+static RegisterNodeType<RigidPlacementNode<3>,2> placement_rotamer_node("placement_rotamer");
+static RegisterNodeType<RigidPlacementNode<1>,2> placement_scalar_node("placement_scalar");

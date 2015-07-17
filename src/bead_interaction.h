@@ -5,7 +5,7 @@
 
 namespace {
     constexpr static const int n_bit_rotamer = 4; // max number of rotamers is 2**n_bit_rotamer
-    bool exclude_by_id_base(unsigned id1, unsigned id2) {return id1>>n_bin_rotamer == id2>>n_bit_rotamer;}
+    bool exclude_by_id_base(unsigned id1, unsigned id2) {return id1>>n_bit_rotamer == id2>>n_bit_rotamer;}
 
     struct PosDistInteraction {
         // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
@@ -23,7 +23,7 @@ namespace {
         }
 
         static bool exclude_by_id(unsigned id1, unsigned id2) { 
-            exclude_by_id_base(id1,id2);
+            return exclude_by_id_base(id1,id2);
         }
 
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
@@ -45,7 +45,7 @@ namespace {
             d2 = -d_base;
         }
 
-        static void param_deriv(Vec<n_deriv> &d_param, const Vec<n_param> &p, 
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
             auto dist = mag(x1-x2);
             for(int i: range(2)) {
@@ -60,7 +60,6 @@ namespace {
                 d_param[off+1] = -sig  .y() * p[off+0];  // radius
                 d_param[off+2] =  sig_s.y() * (dist-p[off+1]) * p[off+0];  // scale
             }
-            return result;
         }
     };
 
@@ -84,10 +83,11 @@ namespace {
 
         static float cutoff(const Vec<n_param> &param) {
             auto p = ParamInterpret(param);
+            auto maxf = [](float a, float b) {return a>b ? a : b;};
             float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);  // 3 sigma cutoff
             float steric_cutoff = p.dist_loc_steric + 1.f/p.dist_scale_steric +
-                                  max(0.f,p.dp1_shift_steric) + max(0.f,p.dp2_shift_steric);
-            return max(steric_cutoff, gauss_cutoff);
+                                  maxf(0.f,p.dp1_shift_steric) + maxf(0.f,p.dp2_shift_steric);
+            return maxf(steric_cutoff, gauss_cutoff);
         }
 
         static bool is_compatible(const Vec<n_param> &p1, const Vec<n_param> &p2) {
@@ -97,7 +97,7 @@ namespace {
         }
 
         static bool exclude_by_id(unsigned id1, unsigned id2) { 
-            exclude_by_id_base(id1,id2);
+            return exclude_by_id_base(id1,id2);
         }
 
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &param, 
@@ -125,14 +125,13 @@ namespace {
             // FIXME calculate d_base
             return steric_en.x() + gauss_en;
         }
-        }
 
         static void expand_deriv(Vec<n_deriv> &d1, Vec<n_deriv> &d2, const Vec<n_deriv> &d_base) {
             d1 =  d_base;
             d2 = -d_base;
         }
 
-        static void param_deriv(Vec<n_deriv> &d_param, const Vec<n_param> &param, 
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &param, 
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
             auto disp      = extract<0,3>(x1) - extract<0,3>(x2);
             auto dist2     = mag2(disp);

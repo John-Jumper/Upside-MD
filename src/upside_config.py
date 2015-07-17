@@ -898,22 +898,6 @@ def write_rama_coord():
 
 
 def write_backbone_dependent_point(fasta, library):
-    # grp = t.create_group(potential, 'backbone_dependent_point')
-    # grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
-
-    # with tb.open_file(library) as data:
-    #     n_restype = len(aa_num)
-    #     n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
-    #     point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
-
-    #     for rname,idx in sorted(aa_num.items()):
-    #         point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
-
-    # create_array(grp, 'rama_residue',       np.arange(len(fasta)))
-    # create_array(grp, 'alignment_residue',  np.arange(len(fasta)))
-    # create_array(grp, 'restype',            np.array([aa_num[s] for s in fasta]))
-    # create_array(grp, 'backbone_point_map', point_map)
-
     grp = t.create_group(potential, 'placement3_backbone_dependent_point')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
 
@@ -957,22 +941,83 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
         create_array(g, 'interaction_param', obj=p)
 
 
-def write_rotamer(fasta, library, scale, damping):
+def write_rotamer_placement(fasta, placement_library):
+    # FIXME handle fix-rotamer to fix all or some of the rotamers
+    with tb.open_file(placement_library) as data:
+        restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
+        placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
+        placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
+        start_stop = data.root.rotamer_start_stop[:]
+
+    rama_residue = []
+    affine_residue = []
+    layer_index = []
+
+    for rnum,aa in enumerate(fasta):
+        restype = restype_num[aa]
+        start,stop = start_stop[restype]
+        n_rot = stop-start
+
+        rama_residue  .extend([rnum]*n_rot)
+        affine_residue.extend([rnum]*n_rot)
+        layer_index   .extend(np.arange(start,stop))
+
+    grp = t.create_group(potential, 'placement_rotamer')
+    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    create_array(grp, 'signature',       np.array(['point']))
+    create_array(grp, 'rama_residue',    rama_residue)
+    create_array(grp, 'affine_residue',  affine_residue)
+    create_array(grp, 'layer_index',     layer_index)
+    create_array(grp, 'placement_data',  placement_pos)
+
+    grp = t.create_group(potential, 'placement_scalar')
+    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    create_array(grp, 'signature',       np.array(['scalar']))
+    create_array(grp, 'rama_residue',    rama_residue)
+    create_array(grp, 'affine_residue',  affine_residue)
+    create_array(grp, 'layer_index',     layer_index)
+    create_array(grp, 'placement_data',  placement_energy)
+
+
+def write_rotamer(fasta, placement_library, interaction_library, damping):
+    n_bit_rotamer = 4
     g = t.create_group(t.root.input.potential, 'rotamer')
-    g._v_attrs.arguments = np.array(['rama_coord', 'affine_alignment'])
+    g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'])
     g._v_attrs.max_iter = 10000
     g._v_attrs.tol      = 1e-4
     g._v_attrs.damping  = damping
-    g._v_attrs.scale_final_energy = scale
+    g._v_attrs.iteration_chunk_size = 2
 
-    create_array(g, 'restype', obj=map(str,fasta))
+    pg = t.create_group(g, "pair_interaction")
 
-    params = tb.open_file(library)
-    #for nm in 'energy radius width restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
-    for nm in 'interaction_params restype_order rotamer_center rotamer_prob rotamer_start_stop'.split():
-        create_array(g, nm, obj=params.get_node('/'+nm)[:])
-    params.close()
+    with tb.open_file(placement_library) as data:
+        restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
+        start_stop = data.root.rotamer_start_stop[:]
 
+    with tb.open_file(interaction_library) as data:
+         create_array(pg, 'interaction_param', data.root.interaction_params[:])
+
+    # now I need to create index, type, and id
+    index = []
+    type  = []
+    id    = []
+
+    count_by_n_rot = dict()
+    for rnum,aa in enumerate(fasta):
+        restype = restype_num[aa]
+        start,stop = start_stop[restype]
+        n_rot = stop-start
+
+        if n_rot not in count_by_n_rot: 
+            count_by_n_rot[n_rot] = 0;
+
+        base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
+        count_by_n_rot[n_rot] += 1
+
+        for no in range(n_rot): 
+            index.append(len(index))  # just an increasing counter
+            type .append(restype)
+            id   .append((base_id<<n_bit_rotamer) + no)
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
 		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
@@ -1110,12 +1155,12 @@ def main():
             help='do not use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--backbone-dependent-point', default=None,
             help='use backbone-depedent sidechain location library')
-    parser.add_argument('--rotamer', default=None, 
-            help='use rotameric sidechain library')
+    parser.add_argument('--rotamer-placement', default=None, 
+            help='rotameric sidechain library')
+    parser.add_argument('--rotamer-interaction', default=None, 
+            help='rotamer sidechain pair interaction parameters')
     parser.add_argument('--rotamer-solve-damping', default=0.4, type=float,
             help='damping factor to use for solving sidechain placement problem')
-    parser.add_argument('--rotamer-scale-energy', default=1., type=float,
-            help='Scale the final rotamer energy (including the entropy)')
     parser.add_argument('--sidechain-radial', default=None,
             help='use sidechain radial potential library')
     parser.add_argument('--sidechain-radial-exclude-residues', default=[], type=parse_segments,
@@ -1301,6 +1346,7 @@ def main():
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
 
+<<<<<<< 239dc0f5842392e8544011c0d8770f8cf404b995
     if args.tension:
         write_tension(parser,fasta_seq, args.tension)
 
@@ -1308,6 +1354,12 @@ def main():
         require_rama = True
         require_affine = True
         write_rotamer(fasta_seq, args.rotamer, args.rotamer_scale_energy, args.rotamer_solve_damping)
+=======
+    if args.rotamer_interaction:
+        require_placement = True
+        write_rotamer(fasta_seq, args.rotamer_placement, 
+                args.rotamer_interaction, args.rotamer_solve_damping)
+>>>>>>> Working potential but not deriv on rotamer rewrite
 
     if args.sidechain_radial:
         require_backbone_point = True
@@ -1324,6 +1376,7 @@ def main():
         if args.membrane_thickness is None:
             parser.error('--membrane-potential requires --membrane-thickness')
         require_backbone_point = True
+<<<<<<< 239dc0f5842392e8544011c0d8770f8cf404b995
         write_membrane_potential(fasta_seq, 
                                  args.membrane_potential, 
 	                         args.membrane_potential_scale, 
@@ -1331,6 +1384,16 @@ def main():
 	                         args.membrane_potential_exclude_residues, 
 	                         args.membrane_potential_unsatisfied_hbond_residues_type1,
 	                         args.membrane_potential_unsatisfied_hbond_residues_type2)
+=======
+        write_membrane_potential(fasta_seq, args.membrane_potential, args.membrane_potential_scale, args.membrane_thickness,
+	        args.membrane_potential_exclude_residues, args.membrane_potential_unsatisfied_hbond_residues)
+    if require_placement:
+        if args.rotamer_placement is None:
+            parser.error('--rotamer_placement is required, based on other options.')
+        require_rama = True
+        require_affine = True
+        write_rotamer_placement(fasta_seq, args.rotamer_placement)
+>>>>>>> Working potential but not deriv on rotamer rewrite
 
     if require_backbone_point:
         if args.backbone_dependent_point is None:

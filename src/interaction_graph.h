@@ -1,6 +1,7 @@
 #ifndef INTERACTION_GRAPH_H
 #define INTERACTION_GRAPH_H
 
+#include "deriv_engine.h"
 #include "vector_math.h"
 #include "h5_support.h"
 
