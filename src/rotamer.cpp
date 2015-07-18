@@ -17,7 +17,6 @@ using namespace h5;
 
 constexpr const int UPPER_ROT = 4;  // 1 more than the most possible rotamers (handle 0)
 
-
 struct NodeHolder {
     public:
         const int n_rot;
@@ -309,7 +308,8 @@ array<int,UPPER_ROT> calculate_n_elem(SymmetricInteractionGraph<BT> &igraph) {
 
 template <typename BT>
 struct RotamerSidechain: public PotentialNode {
-    CoordNode &prob_node;
+    vector<CoordNode*> prob_nodes;
+    int n_prob_nodes;
     vector<slot_t> prob_slot;
     SymmetricInteractionGraph<BT> igraph;
     array<int,UPPER_ROT> n_elem_rot;
@@ -327,9 +327,10 @@ struct RotamerSidechain: public PotentialNode {
 
     bool energy_fresh_relative_to_derivative;
 
-    RotamerSidechain(hid_t grp, CoordNode &pos_node_, CoordNode &prob_node_):
+    RotamerSidechain(hid_t grp, CoordNode &pos_node_, vector<CoordNode*> prob_nodes_):
         PotentialNode(pos_node_.n_system),
-        prob_node(prob_node_),
+        prob_nodes(prob_nodes_),
+        n_prob_nodes(prob_nodes.size()),
         igraph(open_group(grp,"pair_interaction").get(), pos_node_),
         n_elem_rot(calculate_n_elem(igraph)),
 
@@ -361,8 +362,10 @@ struct RotamerSidechain: public PotentialNode {
         // the index and the type information is already stored in the igraph
         for(auto &x: igraph.param) {
             CoordPair p; p.index = x.index;
-            prob_node.slot_machine.add_request(1, p);
-            prob_slot.push_back(p.slot);
+            for(auto pn: prob_nodes) {  // must request a slot for each prob_node
+                pn->slot_machine.add_request(1, p);
+                prob_slot.push_back(p.slot);
+            }
         }
     }
 
@@ -374,7 +377,7 @@ struct RotamerSidechain: public PotentialNode {
         Timer timer("rotamer");  // Timer code is not thread-safe, so cannot be used within parallel for
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
-        fill_holders(0);
+        fill_holders();
         auto solve_results = solve_for_marginals();
         if(solve_results.first >= max_iter - iteration_chunk_size - 1)
             printf("solved in %i iterations with an error of %f\n", 
@@ -386,26 +389,33 @@ struct RotamerSidechain: public PotentialNode {
 
     virtual double test_value_deriv_agreement() {return -1.;}
 
-    void fill_holders(int ns)
+    void fill_holders()
     {
         for(int n_rot1: range(UPPER_ROT))
             for(int n_rot2: range(UPPER_ROT))
                 if(edge_holders_matrix[n_rot1][n_rot2])
                     edge_holders_matrix[n_rot1][n_rot2]->reset();
 
-        // Fill node base probabilities
-        VecArray energy_1body = prob_node.coords().value[ns];
+        vector<VecArray> energy_1body;
+        energy_1body.reserve(n_prob_nodes);
+        for(int i: range(n_prob_nodes)) 
+            energy_1body.emplace_back(prob_nodes[i]->coords().value[0]);
+
         for(int n: range(igraph.n_elem)) {
             unsigned id = igraph.id[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
+            int index = igraph.param[n].index;
 
-            node_holders_matrix[n_rot]->prob(rot,id) = expf(-energy_1body(0,igraph.param[n].index));
+            float energy = 0.f;
+            for(auto &a: energy_1body) energy += a(0,index);
+
+            node_holders_matrix[n_rot]->prob(rot,id) = expf(-energy);
         }
 
         // Fill edge probabilities
-        igraph.compute_edges(ns, [&](int ne, float pot,
+        igraph.compute_edges(0, [&](int ne, float pot,
                     int index1, unsigned type1, unsigned id1,
                     int index2, unsigned type2, unsigned id2) {
                 unsigned selector = (1u<<n_bit_rotamer) - 1u;
@@ -447,14 +457,19 @@ struct RotamerSidechain: public PotentialNode {
             igraph.use_derivative(0, el.edge_num, edges33.marginal  (el.dim, el.ne));
         igraph.propagate_derivatives(0);
 
-        VecArray deriv_1body = prob_node.coords().deriv[0];
+        vector<VecArray> deriv_1body;
+        deriv_1body.reserve(n_prob_nodes);
+        for(int i: range(n_prob_nodes)) 
+            deriv_1body.emplace_back(prob_nodes[i]->coords().deriv[0]);
+
         for(int n: range(igraph.n_elem)) {
             unsigned id = igraph.id[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
 
-            deriv_1body(0,prob_slot[n]) = node_holders_matrix[n_rot]->cur_belief(rot,id);
+            for(int i: range(n_prob_nodes))
+                deriv_1body[i](0,prob_slot[n*n_prob_nodes+i]) = node_holders_matrix[n_rot]->cur_belief(rot,id);
         }
     }
 
@@ -502,4 +517,17 @@ struct RotamerSidechain: public PotentialNode {
         return make_pair(iter, max_deviation);
     }
 };
-static RegisterNodeType<RotamerSidechain<preferred_bead_type>,2> rotamer_node ("rotamer");
+
+template <typename BT>
+struct RegisterRotamerSidechain {
+    RegisterRotamerSidechain(string name_prefix) {
+        NodeCreationFunction f = [name_prefix](hid_t grp, const ArgList& args) {
+            if(args.size()<1u) throw string("node " + name_prefix + " needs at least 1 arg");
+            ArgList args_rest;
+            for(int i: range(1,args.size())) args_rest.push_back(args[i]);
+            return new RotamerSidechain<BT>(grp, *args[0], args_rest);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+
+static RegisterRotamerSidechain<preferred_bead_type> rotamer_node ("rotamer");
