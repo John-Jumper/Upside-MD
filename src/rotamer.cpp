@@ -142,8 +142,8 @@ struct EdgeHolder {
             edge_indices(max_n_edge)
         {
             edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
-            fill(cur_belief, n_rot1*n_rot2, n_edge, 1.f);
-            fill(old_belief, n_rot1*n_rot2, n_edge, 1.f);
+            fill(cur_belief, n_rot1+n_rot2, max_n_edge, 1.f);
+            fill(old_belief, n_rot1+n_rot2, max_n_edge, 1.f);
             reset();
         }
 
@@ -292,7 +292,7 @@ struct EdgeHolder {
 
 
 template <typename BT>
-array<int,UPPER_ROT> calculate_n_elem(SymmetricInteractionGraph<BT> &igraph) {
+array<int,UPPER_ROT> calculate_n_elem(WithinInteractionGraph<BT> &igraph) {
     array<int,UPPER_ROT> result; // 0-rot is included
     for(int& i: result) i=0;
 
@@ -311,7 +311,7 @@ struct RotamerSidechain: public PotentialNode {
     vector<CoordNode*> prob_nodes;
     int n_prob_nodes;
     vector<slot_t> prob_slot;
-    SymmetricInteractionGraph<BT> igraph;
+    WithinInteractionGraph<BT> igraph;
     array<int,UPPER_ROT> n_elem_rot;
 
     NodeHolder* node_holders_matrix[UPPER_ROT];

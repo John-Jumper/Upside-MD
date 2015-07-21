@@ -23,6 +23,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 add_executable (upside
+    hbond.cpp 
     rotamer.cpp
     placement.cpp
     main.cpp
@@ -34,7 +35,6 @@ add_executable (upside
     sidechain_radial.cpp
     nonbond.cpp 
     bonds.cpp 
-    hbond.cpp 
     backbone_dependent_sidechain.cpp
     eig.cpp 
     dihedral_range.cpp

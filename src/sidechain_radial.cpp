@@ -52,7 +52,7 @@ struct SidechainRadialPairs : public PotentialNode
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {}
     };
 
-    SymmetricInteractionGraph<Helper> igraph;
+    WithinInteractionGraph<Helper> igraph;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
         PotentialNode(bb_point_.n_system),

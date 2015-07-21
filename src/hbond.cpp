@@ -5,6 +5,7 @@
 #include "md_export.h"
 #include <algorithm>
 #include "state_logger.h"
+#include "interaction_graph.h"
 
 using namespace h5;
 using namespace std;
@@ -180,12 +181,6 @@ struct Infer_H_O : public CoordNode
 static RegisterNodeType<Infer_H_O,1>  infer_node("infer_H_O");
 
 
-struct VirtualHBondParams {
-    CoordPair id;
-    unsigned residue_id;
-};
-
-
 #define radial_cutoff2 (3.5f*3.5f)
 // angular cutoff at 90 degrees
 #define angular_cutoff (0.f)    
@@ -216,8 +211,6 @@ float2 hbond_angular_potential(float dotp)
 }
 
 
-
-
 float hbond_score(
         float3   H, float3   O, float3   rHN, float3   rOC,
         float3& dH, float3& dO, float3& drHN, float3& drOC)
@@ -233,7 +226,10 @@ float hbond_score(
     float dotHOC =  dot(rHO,rOC);
     float dotOHN = -dot(rHO,rHN);
 
-    if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) return 0.f;
+    if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) {
+        dH=dO=drHN=drOC=make_zero<3>();
+        return 0.f;
+    }
 
     float2 radial   = hbond_radial_potential (magHO );  // x has val, y has deriv
     float2 angular1 = hbond_angular_potential(dotHOC);
@@ -255,11 +251,9 @@ float hbond_score(
 
 // displacement is sc-H
 inline float coverage_score(
-        float3 displace, float3 rHN, float3& d_displace, float3& drHN, float radius, float scale)
+        float3 displace, float3 rHN, float3& d_displace, float3& drHN, float radius, float scale,
+        float cover_angular_cutoff, float cover_angular_scale)
 {
-    const float cover_angular_cutoff = 0.174f;  // 80 degrees, rather arbitrary
-    const float cover_angular_scale  = 2.865f;  // 20 degrees-ish, rather arbitrary
-
     float  dist2 = mag2(displace);
     float  inv_dist = rsqrt(dist2);
     float  dist = dist2*inv_dist;
@@ -280,36 +274,97 @@ inline float coverage_score(
 }
 
 
-struct SCVirtualCoverageDeriv {
-    int sc_index;
-    int virtual_index;
+namespace {
+    struct ProteinProteinHBondInteraction {
+        // inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
+        // first group is donors; second group is acceptors
+        constexpr static const int n_param=6, n_dim1=6, n_dim2=6, n_deriv=12;
 
-    float3 d_sc;
-    float3 d_rHN; // or d_rOC depending on donor or acceptor
-    // float3 d_virtual;  // this deriv is the opposite of d_sc
-};
+        static float cutoff(const Vec<n_param> &p) {
+            return sqrtf(radial_cutoff2); // FIXME make parameter dependent
+        }
+
+        static bool exclude_by_id(unsigned id1, unsigned id2) { 
+            return false; // no exclusions
+        }
+
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
+            float3 dH,dO,drHN,drOC;
+
+            float hb = hbond_score(extract<0,3>(x1), extract<0,3>(x2), extract<3,6>(x1), extract<3,6>(x2),
+                                   dH,               dO,               drHN,             drOC);
+            float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
+
+            float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
+            store<0, 3>(d_base, dH   * deriv_prefactor);
+            store<3, 6>(d_base, drHN * deriv_prefactor);
+            store<6, 9>(d_base, dO   * deriv_prefactor);
+            store<9,12>(d_base, drOC * deriv_prefactor);
+
+            return hb_log;
+        }
+
+        static void expand_deriv(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const Vec<n_deriv> &d_base) {
+            d1 = extract<0, 6>(d_base);
+            d2 = extract<6,12>(d_base);
+        }
+
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
+            throw "broken";
+        }
+    };
 
 
-struct HBondScoreDeriv {
-    int donor_index, acceptor_index;
-    float3 dH, drHN, dO, drOC;
-};
+    struct HBondCoverageInteraction {
+        // radius scale angular_width angular_scale
+        // first group is donors; second group is acceptors
+        constexpr static const int n_param=4, n_dim1=6, n_dim2=3, n_deriv=6;
 
-struct HBondSidechainParams {
-    CoordPair id;
-    float radius, scale, cutoff2;
-};
-   
+        static float cutoff(const Vec<n_param> &p) {
+            // const float cover_angular_cutoff = 0.174f;  // 80 degrees, rather arbitrary
+            // const float cover_angular_scale  = 2.865f;  // 20 degrees-ish, rather arbitrary
+            return p[0] + 1.f/p[1];
+        }
+
+        static bool exclude_by_id(unsigned id1, unsigned id2) { 
+            return false; // no exclusions
+        }
+
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+                const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
+            float3 d_sc, d_rHN;
+            float coverage = coverage_score(sc_pos-extract<0,3>(hb_pos), extract<3,6>(hb_pos), 
+                    d_sc, d_rHN, p[0], p[1], p[2], p[3]);
+
+            store<0,3>(d_base, d_sc);
+            store<3,6>(d_base, d_rHN);
+
+            return coverage;
+        }
+
+        static void expand_deriv(Vec<n_dim1> &d_hb, Vec<n_dim2> &d_sc, const Vec<n_deriv> &d_base) {
+            store<0,3>(d_hb, -extract<0,3>(d_base));  // opposite of d_sc by Newton's third
+            store<3,6>(d_hb,  extract<3,6>(d_base));
+            store<0,3>(d_sc,  extract<0,3>(d_base));
+        }
+
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
+            throw "broken";
+        }
+    };
+}
+
 
 
 void count_hbond(
         float* potential,
+        BetweenInteractionGraph<ProteinProteinHBondInteraction> &pp_igraph,
+        BetweenInteractionGraph<HBondCoverageInteraction> &hb_sc_igraph,
         SysArray virtual_score,
-        const CoordArray virtual_pos,
         int n_donor,    int n_acceptor,
-        const CoordPair* virtual_pair,
-        const CoordArray sidechain_pos,
-        int n_sidechain, const HBondSidechainParams * restrict sidechains,
         int n_system,
         float E_protein,
         float E_protein_solvent)
@@ -321,60 +376,19 @@ void count_hbond(
         for(int nv=0; nv<n_virtual; ++nv) for(int d=0; d<2; ++d) vs(d,nv) = 0.f;
         if(potential) potential[ns] = 0.f;
 
-        vector<float3> virtual_site(n_donor+n_acceptor);
-        vector<float3> virtual_dir (n_donor+n_acceptor);
-
-        for(int nv=0; nv<n_virtual; ++nv) {
-            StaticCoord<6> x(virtual_pos.value, ns, nv);
-            virtual_site[nv] = make_vec3(x.v[0],x.v[1],x.v[2]);
-            virtual_dir [nv] = make_vec3(x.v[3],x.v[4],x.v[5]);
-        }
-
         // Compute coverage and its derivative
-        vector<SCVirtualCoverageDeriv> coverage_deriv;
-        for(int n_sc=0; n_sc<n_sidechain; ++n_sc) {
-            HBondSidechainParams p = sidechains[n_sc];
-            float3 sc_pos = StaticCoord<3>(sidechain_pos.value, ns, p.id.index).f3();
-
-            for(int nv=0; nv<n_virtual; ++nv) {
-                float3 displace  = sc_pos-virtual_site[nv];
-                float dist2 = mag2(displace);
-
-                if(dist2<p.cutoff2) {
-                    coverage_deriv.emplace_back();
-                    auto& d = coverage_deriv.back();
-                    d.sc_index = n_sc;
-                    d.virtual_index = nv;
-
-                    vs(1,nv) += coverage_score(displace, virtual_dir[nv], d.d_sc, d.d_rHN, p.radius, p.scale);
-                }
-            }
-        }
+        hb_sc_igraph.compute_edges(ns, [&](int ne, float coverage,
+                    int index1, unsigned type1, unsigned id1,
+                    int index2, unsigned type2, unsigned id2) {
+                vs(1,index1) += coverage;});
 
         // Compute protein hbonding score and its derivative
-        vector<HBondScoreDeriv> hbond_deriv;
-        for(int nd=0; nd<n_donor; ++nd) {
-            for(int na=n_donor; na<n_donor+n_acceptor; ++na) {
-                if(mag2(virtual_site[nd] - virtual_site[na])<radial_cutoff2) {
-                    hbond_deriv.emplace_back();
-                    auto& d = hbond_deriv.back();
-                    d.donor_index = nd;
-                    d.acceptor_index = na;
+        pp_igraph.compute_edges(ns, [&](int ne, float hb_log,
+                    int index1, unsigned type1, unsigned id1,
+                    int index2, unsigned type2, unsigned id2) {
+                vs(0,index1) += hb_log;
+                vs(0,index2) += hb_log;});
 
-                    float hb = hbond_score(virtual_site[nd], virtual_site[na], virtual_dir[nd], virtual_dir[na],
-                                           d.dH,             d.dO,             d.drHN,          d.drOC);
-                    float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
-                    vs(0,nd) += hb_log;
-                    vs(0,na) += hb_log;
-
-                    float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
-                    d.dH   *= deriv_prefactor;
-                    d.dO   *= deriv_prefactor;
-                    d.drHN *= deriv_prefactor;
-                    d.drOC *= deriv_prefactor;
-                }
-            }
-        }
 
         // Compute probabilities of P and S states
         struct PSDeriv {float d_hbond,d_burial;};
@@ -395,54 +409,25 @@ void count_hbond(
             ps_deriv[nv].d_hbond  = protein_hbond_prob.y()*(E_protein-solvation_fraction.x()*E_protein_solvent);
             ps_deriv[nv].d_burial = (1.f-P)*solvation_fraction.y()*E_protein_solvent;
         }
-
-        // now I need to push those derivatives back and accumulate
-        vector<MutableCoord<6>> virtual_deriv; virtual_deriv.reserve(n_virtual);
-        vector<MutableCoord<3>> sc_deriv;      sc_deriv     .reserve(n_sidechain);
-        for(int nv=0; nv<n_virtual;     ++nv) 
-            virtual_deriv.emplace_back(virtual_pos.deriv, ns, virtual_pair[nv].slot, MutableCoord<6>::Zero);
-        for(int nsc=0; nsc<n_sidechain; ++nsc) 
-            sc_deriv.emplace_back(sidechain_pos.deriv, ns, sidechains[nsc].id.slot, MutableCoord<3>::Zero);
-
+ 
         // Push coverage derivatives
-        for(auto& p: coverage_deriv) {
-            float3 d = ps_deriv[p.virtual_index].d_burial * p.d_sc;
-            float3 d_rHN = ps_deriv[p.virtual_index].d_burial * p.d_rHN;
-
-            sc_deriv[p.sc_index] += d;
-            virtual_deriv[p.virtual_index] += -d;
-            virtual_deriv[p.virtual_index].v[3] += d_rHN.x();
-            virtual_deriv[p.virtual_index].v[4] += d_rHN.y();
-            virtual_deriv[p.virtual_index].v[5] += d_rHN.z();
+        for(int ned: range(hb_sc_igraph.n_edge[ns])) {
+            int hb_num = hb_sc_igraph.edge_indices[ns*2*hb_sc_igraph.max_n_edge + 2*ned + 0];
+            int hb_idx = hb_sc_igraph.param1[hb_num].index;
+            hb_sc_igraph.use_derivative(ns, ned, ps_deriv[hb_idx].d_burial);
         }
+        hb_sc_igraph.propagate_derivatives(ns);
 
         // Push protein HBond derivatives
-        for(auto& p: hbond_deriv) {
-            float prefactor = ps_deriv[p.donor_index].d_hbond + ps_deriv[p.acceptor_index].d_hbond;
-            float* d_donor    = virtual_deriv[p.donor_index   ].v;
-            float* d_acceptor = virtual_deriv[p.acceptor_index].v;
-
-            d_donor   [0] += prefactor * p.dH  .x();
-            d_donor   [1] += prefactor * p.dH  .y();
-            d_donor   [2] += prefactor * p.dH  .z();
-            d_donor   [3] += prefactor * p.drHN.x();
-            d_donor   [4] += prefactor * p.drHN.y();
-            d_donor   [5] += prefactor * p.drHN.z();
-
-            d_acceptor[0] += prefactor * p.dO  .x();
-            d_acceptor[1] += prefactor * p.dO  .y();
-            d_acceptor[2] += prefactor * p.dO  .z();
-            d_acceptor[3] += prefactor * p.drOC.x();
-            d_acceptor[4] += prefactor * p.drOC.y();
-            d_acceptor[5] += prefactor * p.drOC.z();
+        for(int ned: range(pp_igraph.n_edge[ns])) {
+            int don_idx = pp_igraph.param1[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 0]].index;
+            int acc_idx = pp_igraph.param2[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 1]].index;
+            pp_igraph.use_derivative(ns, ned,  ps_deriv[don_idx].d_hbond + ps_deriv[acc_idx].d_hbond);
         }
+        pp_igraph.propagate_derivatives(ns);
 
-        // Write the derivatives to memory
-        for(auto& d: virtual_deriv) d.flush();
-        for(auto& d: sc_deriv     ) d.flush();
     }
 }
-
 
 
 struct HBondEnergy : public HBondCounter
@@ -450,12 +435,12 @@ struct HBondEnergy : public HBondCounter
     Infer_H_O& infer;
     CoordNode& sidechains;
 
+    BetweenInteractionGraph<ProteinProteinHBondInteraction> pp_igraph;
+    BetweenInteractionGraph<HBondCoverageInteraction>    hb_sc_igraph;
+
     int n_donor;
     int n_acceptor;
-    int n_sidechain;
     SysArrayStorage virtual_score;
-    vector<CoordPair> virtual_pair;
-    vector<HBondSidechainParams> sidechain_params;
 
     float E_protein;
     float E_protein_solvent;
@@ -464,36 +449,16 @@ struct HBondEnergy : public HBondCounter
         HBondCounter(infer_.n_system),
         infer(dynamic_cast<Infer_H_O&>(infer_)), 
         sidechains(sidechains_),
+        pp_igraph   (open_group(grp,"pp_interaction"   ).get(),infer,infer),
+        hb_sc_igraph(open_group(grp,"hb_sc_interaction").get(),infer,sidechains),
+        
         n_donor    (infer.n_donor),
         n_acceptor (infer.n_acceptor),
-        n_sidechain(sidechains.n_elem),
         virtual_score(n_system, 2, n_donor+n_acceptor),
-        virtual_pair (n_donor+n_acceptor),
-        sidechain_params(sidechains.n_elem),
 
         E_protein(        read_attribute<float>(grp, ".", "protein_hbond_energy")),
         E_protein_solvent(read_attribute<float>(grp, ".", "solvent_hbond_energy"))
     {
-        check_elem_width(sidechains, 3);
-
-        check_size(grp, "sidechain_id",     n_sidechain);
-        check_size(grp, "sidechain_radius", n_sidechain);
-        check_size(grp, "sidechain_scale",  n_sidechain);
-
-        traverse_dset<1,int>  (grp, "sidechain_id",     [&](int n_sc, int   x) {sidechain_params[n_sc].id.index = x;});
-        traverse_dset<1,float>(grp, "sidechain_radius", [&](int n_sc, float x) {sidechain_params[n_sc].radius = x;});
-        traverse_dset<1,float>(grp, "sidechain_scale",  [&](int n_sc, float x) {sidechain_params[n_sc].scale = x;});
-
-        for(auto &p: sidechain_params) {
-            p.cutoff2 = sqr(p.radius + 1.f/p.scale);
-            sidechains.slot_machine.add_request(1,p.id);
-        }
-
-        for(int i=0; i<n_donor+n_acceptor; ++i) {
-            virtual_pair[i].index = i;
-            infer.slot_machine.add_request(1, virtual_pair[i]);
-        }
-
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
                     for(int ns: range(n_system))
@@ -505,15 +470,12 @@ struct HBondEnergy : public HBondCounter
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_energy"));
-
         count_hbond(
                 potential.data(),
+                pp_igraph,
+                hb_sc_igraph,
                 virtual_score.array(),
-                infer.coords(),
                 n_donor,    n_acceptor,
-                virtual_pair.data(),
-                sidechains.coords(),
-                n_sidechain, sidechain_params.data(),
                 n_system,
                 E_protein,
                 E_protein_solvent);
@@ -522,14 +484,7 @@ struct HBondEnergy : public HBondCounter
     }
 
     virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> virtual_coord_pairs(1);
-        vector<vector<CoordPair>> sidechain_coord_pairs(1);
-        virtual_coord_pairs.back() = virtual_pair;
-        for(auto &p: sidechain_params) sidechain_coord_pairs.back().push_back(p.id);
-        
-        double virtual_dev   = compute_relative_deviation_for_node<6>(*this, infer, virtual_coord_pairs);
-        double sidechain_dev = compute_relative_deviation_for_node<3>(*this, sidechains, sidechain_coord_pairs);
-        return 0.5 * (virtual_dev+sidechain_dev);
+        return -1.f;
     }
 };
 

@@ -387,6 +387,8 @@ inline Vec<D,S> make_one () {
     return ret;
 }
 
+
+
 template<int start_loc, int stop_loc, int D, typename S>
 inline Vec<stop_loc-start_loc,S> extract(const Vec<D,S>& x) {
     static_assert(0<=start_loc, "extract start must be non-negative");
@@ -397,6 +399,16 @@ inline Vec<stop_loc-start_loc,S> extract(const Vec<D,S>& x) {
     #pragma unroll
     for(int i=0; i<stop_loc-start_loc; ++i) ret[i] = x[i+start_loc];
     return ret;
+}
+
+template<int start_loc, int stop_loc, int D, typename S>
+inline void store(Vec<D,S>& x, const Vec<stop_loc-start_loc,S> &y) {
+    static_assert(0<=start_loc, "extract start must be non-negative");
+    static_assert(start_loc<=stop_loc, "extract start must be <= extract stop");
+    static_assert(stop_loc<=D, "extract stop must be <= dimension");
+
+    #pragma unroll
+    for(int i=0; i<stop_loc-start_loc; ++i) x[i+start_loc] = y[i];
 }
 
 template <typename S>

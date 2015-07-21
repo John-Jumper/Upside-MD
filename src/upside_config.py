@@ -183,11 +183,15 @@ def write_infer_H_O(fasta, excluded_residues):
     donors    = t.create_group(grp, 'donors')
     acceptors = t.create_group(grp, 'acceptors')
 
+    create_array(donors,    'residue', obj=donor_residues)
+    create_array(acceptors, 'residue', obj=acceptor_residues)
+
     create_array(donors,    'bond_length', obj=H_bond_length*np.ones(len(   donor_residues)))
     create_array(acceptors, 'bond_length', obj=O_bond_length*np.ones(len(acceptor_residues)))
 
     create_array(donors,    'id', obj=np.array((-1,0,1))[None,:] + 3*donor_residues   [:,None])
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
+
 
 
 def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
@@ -202,9 +206,53 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
     grp._v_attrs.protein_hbond_energy = hbond_energy[0]
     grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
 
-    create_array(grp, 'sidechain_id',     np.arange(len(fasta)))
-    create_array(grp, 'sidechain_radius', hbond_coverage_sidechain_radius*np.ones(len(fasta))) 
-    create_array(grp, 'sidechain_scale',  (1./1.0)*np.ones(len(fasta)))
+
+    infer_group = t.get_node('/input/potential/%s'%grp._v_attrs.arguments[0])
+
+    n_donor    = infer_group.donors   .id.shape[0]
+    n_acceptor = infer_group.acceptors.id.shape[0]
+
+    igrp = t.create_group(grp, 'pp_interaction')
+
+    # group1 is the HBond donors
+    create_array(igrp, 'index1', np.arange(0,n_donor))
+    create_array(igrp, 'type1',  np.zeros(n_donor, dtype='i'))
+    create_array(igrp, 'id1',    infer_group.donors.residue[:])
+
+    # group 2 is the HBond acceptors
+    create_array(igrp, 'index2', np.arange(n_donor,n_donor+n_acceptor))
+    create_array(igrp, 'type2',  np.zeros(n_acceptor, dtype='i'))
+    create_array(igrp, 'id2',    infer_group.acceptors.residue[:])
+
+    # parameters are inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
+    # FIXME currently changing these has no effect
+    create_array(igrp, 'interaction_param', np.array([[
+        [1.4,   1./0.10,
+         2.5,   1./0.125,
+         0.682, 1./0.05]]]))
+
+    cgrp = t.create_group(grp, 'hb_sc_interaction')
+
+    # group1 is the HBond partners
+    create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
+    create_array(cgrp, 'type1',  1*(np.arange(n_donor+n_acceptor) >= n_donor))  # donor is 0, acceptor is 1
+    create_array(cgrp, 'id1',    np.concatenate([infer_group.donors   .residue[:],
+                                                 infer_group.acceptors.residue[:]]))
+
+    # group 2 is the sidechains
+    create_array(cgrp, 'index2', np.arange(len(fasta)))
+    create_array(cgrp, 'type2',  np.array([aa_num[s] for s in fasta]))
+    create_array(cgrp, 'id2',    np.arange(len(fasta)))
+
+    # parameters are inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
+    cover_interaction = np.zeros((2,len(aa_num),4))
+    cover_interaction[:,:,0] = hbond_coverage_sidechain_radius 
+    cover_interaction[:,:,1] = 1./1.0   # cover scale, rather arbitrary
+    cover_interaction[:,:,2] = 0.174    # 80 degrees, rather arbitrary
+    cover_interaction[:,:,3] = 2.865    # 20 degrees-ish, rather arbitrary
+
+    create_array(cgrp, 'interaction_param', cover_interaction)
+
 
 
 def make_restraint_group(group_num, residues, initial_pos, strength):

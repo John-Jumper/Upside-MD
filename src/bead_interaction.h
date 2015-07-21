@@ -40,7 +40,7 @@ namespace {
             return en.x();
         }
 
-        static void expand_deriv(Vec<n_deriv> &d1, Vec<n_deriv> &d2, const Vec<n_deriv> &d_base) {
+        static void expand_deriv(Vec<n_dim> &d1, Vec<n_dim> &d2, const Vec<n_deriv> &d_base) {
             d1 =  d_base;
             d2 = -d_base;
         }
@@ -126,9 +126,8 @@ namespace {
             return steric_en.x() + gauss_en;
         }
 
-        static void expand_deriv(Vec<n_deriv> &d1, Vec<n_deriv> &d2, const Vec<n_deriv> &d_base) {
-            d1 =  d_base;
-            d2 = -d_base;
+        static void expand_deriv(Vec<n_dim> &d1, Vec<n_dim> &d2, const Vec<n_deriv> &d_base) {
+            throw "broken";
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &param, 
