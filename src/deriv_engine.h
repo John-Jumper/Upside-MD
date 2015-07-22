@@ -89,7 +89,7 @@ struct DerivComputation
         potential_term(potential_term_), n_system(n_system_) {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
-    virtual double test_value_deriv_agreement() = 0;
+    virtual double test_value_deriv_agreement() {return -1.;}
 };
 
 struct CoordNode : public DerivComputation

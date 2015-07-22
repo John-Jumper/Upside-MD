@@ -195,24 +195,13 @@ def write_infer_H_O(fasta, excluded_residues):
 
 
 def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
-    n_res = len(fasta)
-    if hbond_energy[0] > 0. or hbond_energy[1] > 0.:
-        print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
-
-    grp = t.create_group(potential, 'hbond_energy')
-    grp._v_attrs.arguments = np.array(['infer_H_O','placement3_backbone_dependent_point'])
-
-    assert len(hbond_energy) == 2
-    grp._v_attrs.protein_hbond_energy = hbond_energy[0]
-    grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
-
-
-    infer_group = t.get_node('/input/potential/%s'%grp._v_attrs.arguments[0])
+    infer_group = t.get_node('/input/potential/infer_H_O')
 
     n_donor    = infer_group.donors   .id.shape[0]
     n_acceptor = infer_group.acceptors.id.shape[0]
 
-    igrp = t.create_group(grp, 'pp_interaction')
+    igrp = t.create_group(potential, 'protein_hbond')
+    igrp._v_attrs.arguments = np.array(['infer_H_O'])
 
     # group1 is the HBond donors
     create_array(igrp, 'index1', np.arange(0,n_donor))
@@ -231,7 +220,8 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
          2.5,   1./0.125,
          0.682, 1./0.05]]]))
 
-    cgrp = t.create_group(grp, 'hb_sc_interaction')
+    cgrp = t.create_group(potential, 'hbond_coverage')
+    cgrp._v_attrs.arguments = np.array(['infer_H_O','placement3_backbone_dependent_point'])
 
     # group1 is the HBond partners
     create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
@@ -252,6 +242,17 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
     cover_interaction[:,:,3] = 2.865    # 20 degrees-ish, rather arbitrary
 
     create_array(cgrp, 'interaction_param', cover_interaction)
+
+    n_res = len(fasta)
+    if hbond_energy[0] > 0. or hbond_energy[1] > 0.:
+        print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
+
+    grp = t.create_group(potential, 'hbond_energy')
+    grp._v_attrs.arguments = np.array(['protein_hbond','hbond_coverage'])
+
+    assert len(hbond_energy) == 2
+    grp._v_attrs.protein_hbond_energy = hbond_energy[0]
+    grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
 
 
 

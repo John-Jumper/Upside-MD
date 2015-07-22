@@ -312,7 +312,7 @@ namespace {
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            throw "broken";
+            throw "not implemented";
         }
     };
 
@@ -352,141 +352,201 @@ namespace {
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            throw "broken";
+            throw "not implemented";
         }
     };
 }
 
 
-
-void count_hbond(
-        float* potential,
-        BetweenInteractionGraph<ProteinProteinHBondInteraction> &pp_igraph,
-        BetweenInteractionGraph<HBondCoverageInteraction> &hb_sc_igraph,
-        SysArray virtual_score,
-        int n_donor,    int n_acceptor,
-        int n_system,
-        float E_protein,
-        float E_protein_solvent)
+struct ProteinHBond : public CoordNode 
 {
-    #pragma omp parallel for
-    for(int ns=0; ns<n_system; ++ns) {
-        int n_virtual = n_donor + n_acceptor;
-        VecArray vs = virtual_score[ns];
-        for(int nv=0; nv<n_virtual; ++nv) for(int d=0; d<2; ++d) vs(d,nv) = 0.f;
-        if(potential) potential[ns] = 0.f;
+    BetweenInteractionGraph<ProteinProteinHBondInteraction> pp_igraph;
+    int n_donor, n_acceptor, n_virtual;
 
-        // Compute coverage and its derivative
-        hb_sc_igraph.compute_edges(ns, [&](int ne, float coverage,
-                    int index1, unsigned type1, unsigned id1,
-                    int index2, unsigned type2, unsigned id2) {
-                vs(1,index1) += coverage;});
-
-        // Compute protein hbonding score and its derivative
-        pp_igraph.compute_edges(ns, [&](int ne, float hb_log,
-                    int index1, unsigned type1, unsigned id1,
-                    int index2, unsigned type2, unsigned id2) {
-                vs(0,index1) += hb_log;
-                vs(0,index2) += hb_log;});
-
-
-        // Compute probabilities of P and S states
-        struct PSDeriv {float d_hbond,d_burial;};
-        vector<PSDeriv> ps_deriv(n_virtual);
-        for(int nv=0; nv<n_virtual; ++nv) {
-            float zp = expf(-vs(0,nv));  // protein
-            float zs = expf(-vs(1,nv));  // solvent
-            float2 protein_hbond_prob = make_vec2(1.f-zp, zp);
-            float2 solvation_fraction = make_vec2(zs,-zs);  // we summed log-coverage to get here
-
-            float P = protein_hbond_prob.x();
-            float S = (1.f-P) * solvation_fraction.x();
-            vs(0,nv) = P;
-            vs(1,nv) = S;
-
-            if(potential) potential[ns] += P*E_protein + S*E_protein_solvent;  // FIXME add z-dependence
-
-            ps_deriv[nv].d_hbond  = protein_hbond_prob.y()*(E_protein-solvation_fraction.x()*E_protein_solvent);
-            ps_deriv[nv].d_burial = (1.f-P)*solvation_fraction.y()*E_protein_solvent;
+    ProteinHBond(hid_t grp, CoordNode& infer):
+        CoordNode(infer.n_system, get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 1),
+        pp_igraph(grp, infer, infer) ,
+        n_donor   (pp_igraph.n_elem1),
+        n_acceptor(pp_igraph.n_elem2),
+        n_virtual (n_donor+n_acceptor)
+    {
+        if(logging(LOG_DETAILED)) {
+            default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor}, [&](float* buffer) {
+                    for(int ns: range(n_system))
+                       for(int nv: range(n_donor+n_acceptor))
+                           buffer[ns*(n_donor+n_acceptor) + nv] = coords().value[ns](0,nv);});
         }
- 
-        // Push coverage derivatives
-        for(int ned: range(hb_sc_igraph.n_edge[ns])) {
-            int hb_num = hb_sc_igraph.edge_indices[ns*2*hb_sc_igraph.max_n_edge + 2*ned + 0];
-            int hb_idx = hb_sc_igraph.param1[hb_num].index;
-            hb_sc_igraph.use_derivative(ns, ned, ps_deriv[hb_idx].d_burial);
-        }
-        hb_sc_igraph.propagate_derivatives(ns);
-
-        // Push protein HBond derivatives
-        for(int ned: range(pp_igraph.n_edge[ns])) {
-            int don_idx = pp_igraph.param1[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 0]].index;
-            int acc_idx = pp_igraph.param2[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 1]].index;
-            pp_igraph.use_derivative(ns, ned,  ps_deriv[don_idx].d_hbond + ps_deriv[acc_idx].d_hbond);
-        }
-        pp_igraph.propagate_derivatives(ns);
-
     }
-}
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("protein_hbond"));
+
+        for(int ns=0; ns<n_system; ++ns) {
+            int n_virtual = n_donor + n_acceptor;
+            VecArray vs = coords().value[ns];
+            for(int nv=0; nv<n_virtual; ++nv) vs(0,nv) = 0.f;
+
+            // Compute protein hbonding score and its derivative
+            pp_igraph.compute_edges(ns, [&](int ne, float hb_log,
+                        int index1, unsigned type1, unsigned id1,
+                        int index2, unsigned type2, unsigned id2) {
+                    vs(0,index1) += hb_log;
+                    vs(0,index2) += hb_log;});
+
+            for(int nv=0; nv<n_virtual; ++nv) vs(0,nv) = 1.f - expf(-vs(0,nv));
+        }
+    }
+
+
+    virtual void propagate_deriv() {
+        Timer timer(string("protein_hbond_deriv"));
+
+        for(int ns=0; ns<n_system; ++ns) {
+            vector<float> sens(n_virtual, 0.f);
+            VecArray accum = slot_machine.accum_array()[ns];
+            VecArray hb    = coords().value[ns];
+
+           for(auto tape_elem: slot_machine.deriv_tape)
+               for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                   sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
+
+           for(int nv: range(n_virtual))
+               sens[nv] *= 1.f-hb(0,nv);
+
+           // Push protein HBond derivatives
+           for(int ned: range(pp_igraph.n_edge[ns])) {
+               int don_idx = pp_igraph.param1[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 0]].index;
+               int acc_idx = pp_igraph.param2[pp_igraph.edge_indices[ns*2*pp_igraph.max_n_edge + 2*ned + 1]].index;
+               pp_igraph.use_derivative(ns, ned,  sens[don_idx] + sens[acc_idx]);
+           }
+           pp_igraph.propagate_derivatives(ns);
+        }
+    }
+};
+static RegisterNodeType<ProteinHBond,1> hbond_node("protein_hbond");
+
+
+struct HBondCoverage : public CoordNode {
+    BetweenInteractionGraph<HBondCoverageInteraction> hb_sc_igraph;
+    int n_virtual;
+
+    HBondCoverage(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
+        CoordNode(infer_.n_system, get_dset_size(1,grp,"index1")[0], 1),
+        hb_sc_igraph(grp, infer_, sidechains_),
+        n_virtual(hb_sc_igraph.n_elem1) {}
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("hbond_coverage"));
+
+        for(int ns=0; ns<n_system; ++ns) {
+            VecArray cov = coords().value[ns];
+            for(int nv=0; nv<n_virtual; ++nv) cov(0,nv) = 0.f;
+
+            // Compute coverage and its derivative
+            hb_sc_igraph.compute_edges(ns, [&](int ne, float coverage,
+                        int index1, unsigned type1, unsigned id1,
+                        int index2, unsigned type2, unsigned id2) {
+                    cov(0,index1) += coverage;});
+            // FIXME I should store the answer as a function of the sidechain, not the hbond index
+            // I will keep it like this until I verify it
+        }
+    }
+
+    virtual void propagate_deriv() {
+        Timer timer(string("hbond_coverage_deriv"));
+
+        for(int ns=0; ns<n_system; ++ns) {
+            vector<float> sens(n_virtual, 0.f);
+            VecArray accum = slot_machine.accum_array()[ns];
+
+           for(auto tape_elem: slot_machine.deriv_tape)
+               for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                   sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
+
+           // Push coverage derivatives
+           for(int ned: range(hb_sc_igraph.n_edge[ns])) {
+               // FIXME results should be in terms of sidechain here
+               int hb_num = hb_sc_igraph.edge_indices[ns*2*hb_sc_igraph.max_n_edge + 2*ned + 0];
+               int hb_idx = hb_sc_igraph.param1[hb_num].index;
+               hb_sc_igraph.use_derivative(ns, ned, sens[hb_idx]);
+           }
+           hb_sc_igraph.propagate_derivatives(ns);
+        }
+    }
+};
+static RegisterNodeType<HBondCoverage,2> coverage_node("hbond_coverage");
 
 
 struct HBondEnergy : public HBondCounter
 {
-    Infer_H_O& infer;
-    CoordNode& sidechains;
-
-    BetweenInteractionGraph<ProteinProteinHBondInteraction> pp_igraph;
-    BetweenInteractionGraph<HBondCoverageInteraction>    hb_sc_igraph;
-
-    int n_donor;
-    int n_acceptor;
-    SysArrayStorage virtual_score;
+    CoordNode& protein_hbond;
+    CoordNode& hbond_coverage;
+    int n_virtual;
 
     float E_protein;
     float E_protein_solvent;
 
-    HBondEnergy(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
-        HBondCounter(infer_.n_system),
-        infer(dynamic_cast<Infer_H_O&>(infer_)), 
-        sidechains(sidechains_),
-        pp_igraph   (open_group(grp,"pp_interaction"   ).get(),infer,infer),
-        hb_sc_igraph(open_group(grp,"hb_sc_interaction").get(),infer,sidechains),
-        
-        n_donor    (infer.n_donor),
-        n_acceptor (infer.n_acceptor),
-        virtual_score(n_system, 2, n_donor+n_acceptor),
+    struct SlotHolder { slot_t pp,cov; };
+    vector<SlotHolder> slots;
 
+    HBondEnergy(hid_t grp, CoordNode& protein_hbond_, CoordNode& hbond_coverage_):
+        HBondCounter(protein_hbond_.n_system),
+        protein_hbond(protein_hbond_),
+        hbond_coverage(hbond_coverage_),
+        n_virtual(protein_hbond.n_elem),
+        
         E_protein(        read_attribute<float>(grp, ".", "protein_hbond_energy")),
         E_protein_solvent(read_attribute<float>(grp, ".", "solvent_hbond_energy"))
     {
-        if(logging(LOG_DETAILED)) {
-            default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor,2}, [&](float* buffer) {
-                    for(int ns: range(n_system))
-                       for(int nv: range(n_donor+n_acceptor))
-                           for(int d: range(2))
-                               buffer[(ns*(n_donor+n_acceptor) + nv)*2 + d] = virtual_score[ns](d,nv);});
+        for(int nv: range(n_virtual)) {
+            slots.emplace_back();
+
+            CoordPair cp;
+            cp.index = nv;
+            protein_hbond.slot_machine.add_request(1,cp);
+            slots.back().pp  = cp.slot;
+            hbond_coverage.slot_machine.add_request(1,cp);
+            slots.back().cov = cp.slot;
         }
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_energy"));
-        count_hbond(
-                potential.data(),
-                pp_igraph,
-                hb_sc_igraph,
-                virtual_score.array(),
-                n_donor,    n_acceptor,
-                n_system,
-                E_protein,
-                E_protein_solvent);
+        n_hbond = 0.f;
+        for(int ns=0; ns<n_system; ++ns) {
+            float pot = 0.f;
+            VecArray pp    = protein_hbond .coords().value[ns];
+            VecArray cov   = hbond_coverage.coords().value[ns];
 
-        n_hbond = -2.f; // FIXME handle this later / more generally report P, S, and N values
+            VecArray d_pp  = protein_hbond .coords().deriv[ns];
+            VecArray d_cov = hbond_coverage.coords().deriv[ns];
+
+            // Compute probabilities of P and S states
+            for(int nv=0; nv<n_virtual; ++nv) {
+                float exposure_prob = expf(-cov(0,nv));  // solvent exposure
+
+                float P = pp(0,nv); if(!ns) n_hbond += P; // only accumulate for system 0
+                float S = (1.f-P) * exposure_prob;
+
+                pot += P*E_protein + S*E_protein_solvent;
+
+                d_pp (0,slots[nv].pp ) = E_protein - exposure_prob*E_protein_solvent;
+                d_cov(0,slots[nv].cov) = -S*E_protein_solvent;
+            }
+            potential[ns] = pot;
+        }
     }
 
     virtual double test_value_deriv_agreement() {
-        return -1.f;
+        vector<vector<CoordPair>> coord_pairs_pp (1);
+        vector<vector<CoordPair>> coord_pairs_cov(1);
+
+        for(int nv: range(n_virtual)) coord_pairs_pp .back().push_back(CoordPair(nv, slots[nv].pp));
+        for(int nv: range(n_virtual)) coord_pairs_cov.back().push_back(CoordPair(nv, slots[nv].cov));
+
+        double pp_err  = compute_relative_deviation_for_node<1>(*this, protein_hbond, coord_pairs_pp);
+        double cov_err = compute_relative_deviation_for_node<1>(*this, hbond_coverage, coord_pairs_cov);
+        return 0.5*(pp_err + cov_err);
     }
 };
-
-
-static RegisterNodeType<HBondEnergy,2> hbond_node("hbond_energy");
+static RegisterNodeType<HBondEnergy,2> hbond_energy_node("hbond_energy");
