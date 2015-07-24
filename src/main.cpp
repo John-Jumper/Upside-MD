@@ -236,18 +236,18 @@ try {
         printf("\n");
 
         deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
-        // {
-        //     if(n_system>1) throw string("Testing code does not support n_system > 1");
-        //     printf("Initial agreement:\n");
-        //     for(auto &n: engine.nodes)
-        //         printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
-        //     printf("\n");
+        {
+            if(n_system>1) throw string("Testing code does not support n_system > 1");
+            printf("Initial agreement:\n");
+            for(auto &n: engine.nodes)
+                printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
+            printf("\n");
 
-        //     auto relative_error = potential_deriv_agreement(engine);
-        //     printf("overall potential relative error: ");
-        //     for(auto r: relative_error) printf(" %.5f", r);
-        //     printf("\n");
-        // }
+            auto relative_error = potential_deriv_agreement(engine);
+            printf("overall potential relative error: ");
+            for(auto r: relative_error) printf(" %.5f", r);
+            printf("\n");
+        }
 
         float dt = time_step_arg.getValue();
         double duration = duration_arg.getValue();
@@ -355,8 +355,8 @@ try {
 
         if(do_recenter) {
             for(auto &n: engine.nodes) {
-                if(is_prefix(n.name, "cavity_radial"))
-                    throw string("You have re-centering and a radial potential turned on.  "
+                if(is_prefix(n.name, "cavity_radial") || is_prefix(n.name, "tension"))
+                    throw string("You have re-centering and a position-dependent potential turned on.  "
                             "This is not what you want.  Consider --disable-recentering.");
             }
         }

@@ -95,6 +95,33 @@ def write_z_flat_bottom(parser, fasta, z_spring_table):
     create_array(g, 'spring_constant', obj=spring_constant)
 
 
+def write_tension(parser, fasta, tension_table):
+    fields = [ln.split() for ln in open(tension_table,'U')]
+    header = 'residue tension_x tension_y tension_z'
+    actual_header = [x.lower() for x in fields[0]]
+    if actual_header != header.split():
+        parser.error('First line of tension table must be "%s" but is "%s"'
+                %(header," ".join(actual_header)))
+    if not all(len(f)==len(fields[0]) for f in fields):
+        parser.error('Invalid format for tension file')
+    fields = fields[1:]
+    n_spring = len(fields)
+
+    g = t.create_group(t.root.input.potential, 'tension')
+    g._v_attrs.arguments = np.array(['pos'])
+
+    atom    = np.zeros((n_spring,), dtype='i')
+    tension = np.zeros((n_spring,3))
+
+    for i,f in enumerate(fields):
+        res = int(f[0])
+        msg = 'tension energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
+        if not (0 <= res < len(fasta)): raise ValueError(msg % (res, len(fasta)))
+        atom[i] = int(f[0])*3 + 1  # restrain the CA atom in each residue
+        tension[i] = [float(x) for x in (f[1],f[2],f[3])]
+
+    create_array(g, 'atom',    obj=atom)
+    create_array(g, 'tension_coeff', obj=tension)
 
 
 def write_backbone_pair(fasta):
@@ -994,8 +1021,13 @@ def main():
             help='hbond energy perturbation file for helices')
     parser.add_argument('--z-flat-bottom', default='', 
             help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line '+
-            'must contact "residue z0 radius spring_constant".  The restraint is applied to the CA atom '+
+            'must contain "residue z0 radius spring_constant".  The restraint is applied to the CA atom '+
             'of each residue.')
+    parser.add_argument('--tension', default='', 
+            help='Table of linear tensions.  Each line must contain 4 fields and the first line '+
+            'must contain "residue tension_x tension_y tension_z".  The residue will be pulled in the '+
+            'direction (tension_x,tension_y,tension_z) by its CA atom.  The magnitude of the tension vector '+
+            'sets the force.  Units are kT/Angstrom.')
     parser.add_argument('--initial-structures', default='', 
             help='Pickle file for initial structures for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
@@ -1119,6 +1151,9 @@ def main():
 
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
+
+    if args.tension:
+        write_tension(parser,fasta_seq, args.tension)
 
     if args.sidechain_radial:
         require_backbone_point = True
