@@ -359,6 +359,12 @@ struct RotamerSidechain: public PotentialNode {
         edge_holders_matrix[1][3] = &edges13;
         edge_holders_matrix[3][3] = &edges33;
 
+        for(int i: range(prob_nodes.size())) 
+            if(igraph.pos_node.n_elem != prob_nodes[i]->n_elem)
+                throw string("rotamer positions have " + to_string(igraph.pos_node.n_elem) +
+                        " elements but the " + to_string(i) + "-th (0-indexed) probability node has only " +
+                        to_string(prob_nodes[i]->n_elem) + " elements.");
+
         // the index and the type information is already stored in the igraph
         for(auto &x: igraph.param) {
             CoordPair p; p.index = x.index;

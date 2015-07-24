@@ -255,6 +255,41 @@ struct BetweenInteractionGraph {
                 Vec<IType::n_deriv> deriv;
                 auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
 
+                // // compute finite difference deriv to check
+                // if(IType::n_dim1==7 && IType::n_dim2==3) {
+                //     float eps = 1e-3f;
+                //     Vec<IType::n_dim1> actual_deriv1;
+                //     for(int dim: range(IType::n_dim1)) {
+                //         auto dx = make_zero<IType::n_dim1>();
+                //         dx[dim] = eps;
+                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1+dx,coord2);
+                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1-dx,coord2);
+                //         actual_deriv1[dim] = (vp-vm)/(2.f*eps);
+                //     }
+                //     Vec<IType::n_dim2> actual_deriv2;
+                //     for(int dim: range(IType::n_dim2)) {
+                //         auto dx = make_zero<IType::n_dim2>();
+                //         dx[dim] = eps;
+                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2+dx);
+                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2-dx);
+                //         actual_deriv2[dim] = (vp-vm)/(2.f*eps);
+                //     }
+
+                //     IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
+                //     Vec<IType::n_dim1> pred_deriv1;
+                //     Vec<IType::n_dim2> pred_deriv2;
+                //     IType::expand_deriv(pred_deriv1, pred_deriv2, deriv);
+
+                //     printf("%i %i pred_deriv", IType::n_dim1, IType::n_dim2); 
+                //     for(int i: range(IType::n_dim1)) printf(" % .2f", pred_deriv1[i]);
+                //     for(int i: range(IType::n_dim2)) printf(" % .2f", pred_deriv2[i]);
+                //     printf("\n");
+                //     printf("%i %i actu_deriv", IType::n_dim1, IType::n_dim2); 
+                //     for(int i: range(IType::n_dim1)) printf(" % .2f", actual_deriv1[i]);
+                //     for(int i: range(IType::n_dim2)) printf(" % .2f", actual_deriv2[i]);
+                //     printf("\n\n");
+                // }
+
                 store_vec(edge_deriv[ns], ne, deriv);
                 edge_indices[ns*2*max_n_edge + 2*ne + 0] = i1;
                 edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;

@@ -194,7 +194,7 @@ def write_infer_H_O(fasta, excluded_residues):
 
 
 
-def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
+def write_count_hbond(fasta, hbond_energy):
     infer_group = t.get_node('/input/potential/infer_H_O')
 
     n_donor    = infer_group.donors   .id.shape[0]
@@ -221,7 +221,7 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
          0.682, 1./0.05]]]))
 
     cgrp = t.create_group(potential, 'hbond_coverage')
-    cgrp._v_attrs.arguments = np.array(['infer_H_O','placement3_backbone_dependent_point'])
+    cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_rotamer'])
 
     # group1 is the HBond partners
     create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
@@ -230,13 +230,15 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
                                                  infer_group.acceptors.residue[:]]))
 
     # group 2 is the sidechains
-    create_array(cgrp, 'index2', np.arange(len(fasta)))
-    create_array(cgrp, 'type2',  np.array([aa_num[s] for s in fasta]))
-    create_array(cgrp, 'id2',    np.arange(len(fasta)))
+    rseq = t.root.input.potential.placement_rotamer.restype_seq[:]
+    create_array(cgrp, 'index2', np.arange(len(rseq)))
+    create_array(cgrp, 'type2',  np.array([aa_num[s] for s in rseq]))
+    create_array(cgrp, 'id2',    np.arange(len(rseq)))
 
+    # FIXME add overall energy here
     # parameters are inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
     cover_interaction = np.zeros((2,len(aa_num),4))
-    cover_interaction[:,:,0] = hbond_coverage_sidechain_radius 
+    cover_interaction[:,:,0] = 4.0 # hbond_coverage_sidechain_radius 
     cover_interaction[:,:,1] = 1./1.0   # cover scale, rather arbitrary
     cover_interaction[:,:,2] = 0.174    # 80 degrees, rather arbitrary
     cover_interaction[:,:,3] = 2.865    # 20 degrees-ish, rather arbitrary
@@ -244,15 +246,12 @@ def write_count_hbond(fasta, hbond_energy, hbond_coverage_sidechain_radius):
     create_array(cgrp, 'interaction_param', cover_interaction)
 
     n_res = len(fasta)
-    if hbond_energy[0] > 0. or hbond_energy[1] > 0.:
+    if hbond_energy > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
 
     grp = t.create_group(potential, 'hbond_energy')
-    grp._v_attrs.arguments = np.array(['protein_hbond','hbond_coverage'])
-
-    assert len(hbond_energy) == 2
-    grp._v_attrs.protein_hbond_energy = hbond_energy[0]
-    grp._v_attrs.solvent_hbond_energy = hbond_energy[1]
+    grp._v_attrs.arguments = np.array(['protein_hbond'])
+    grp._v_attrs.protein_hbond_energy = hbond_energy
 
 
 
@@ -1001,6 +1000,7 @@ def write_rotamer_placement(fasta, placement_library):
     rama_residue = []
     affine_residue = []
     layer_index = []
+    restype_seq = []
 
     for rnum,aa in enumerate(fasta):
         restype = restype_num[aa]
@@ -1010,6 +1010,7 @@ def write_rotamer_placement(fasta, placement_library):
         rama_residue  .extend([rnum]*n_rot)
         affine_residue.extend([rnum]*n_rot)
         layer_index   .extend(np.arange(start,stop))
+        restype_seq   .extend([aa]*n_rot)
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -1018,6 +1019,7 @@ def write_rotamer_placement(fasta, placement_library):
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_pos)
+    create_array(grp, 'restype_seq',     restype_seq)
 
     grp = t.create_group(potential, 'placement_scalar')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -1031,7 +1033,8 @@ def write_rotamer_placement(fasta, placement_library):
 def write_rotamer(fasta, placement_library, interaction_library, damping):
     n_bit_rotamer = 4
     g = t.create_group(t.root.input.potential, 'rotamer')
-    g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'])
+    g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'] + 
+            (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []))
     g._v_attrs.max_iter = 10000
     g._v_attrs.tol      = 1e-4
     g._v_attrs.damping  = damping
@@ -1235,13 +1238,8 @@ def main():
             'sheet content in the final structure.  Default is 0.')
     parser.add_argument('--dimer-basin-library', default='',
             help='dimer basin probability library')
-    parser.add_argument('--hbond-energy', default=(0.,0.), type=parse_float_pair,
-            help='energy for forming a hydrogen bond.  Must be two numbers, where '+
-            'the first is the energy for a protein-protien HBond and the second is '+
-            'the energy of a protein-solvent HBond.  Example "--hbond-energy=-2.15,-1.0".  '+
-            'Default is no HBond energy.')
-    parser.add_argument('--hbond-coverage-sidechain-radius', default=4.5, type=float,
-            help='radius to use when determining sidechain coverage of exposed hbonds (default 4.5).')
+    parser.add_argument('--hbond-energy', default=0., type=float,
+            help='energy for forming a protein-protein hydrogen bond.  Default is no HBond energy.')
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors') 
     parser.add_argument('--helix-energy-perturbation', default=None,
@@ -1362,10 +1360,16 @@ def main():
         write_angle_spring(args)
         write_dihedral_spring(fasta_seq_with_cpr)
 
-    if any(x!=0. for x in args.hbond_energy): 
-        require_backbone_point = True
+    if args.rotamer_interaction:
+        if args.rotamer_placement is None:
+            parser.error('--rotamer_placement is required, based on other options.')
+        require_rama = True
+        require_affine = True
+        write_rotamer_placement(fasta_seq, args.rotamer_placement)
+
+    if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
-        write_count_hbond(fasta_seq, args.hbond_energy, args.hbond_coverage_sidechain_radius)
+        write_count_hbond(fasta_seq, args.hbond_energy)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
@@ -1395,20 +1399,13 @@ def main():
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
 
-<<<<<<< 239dc0f5842392e8544011c0d8770f8cf404b995
     if args.tension:
         write_tension(parser,fasta_seq, args.tension)
 
-    if args.rotamer:
-        require_rama = True
-        require_affine = True
-        write_rotamer(fasta_seq, args.rotamer, args.rotamer_scale_energy, args.rotamer_solve_damping)
-=======
     if args.rotamer_interaction:
-        require_placement = True
+        # must be after write_count_hbond if hbond_coverage is used
         write_rotamer(fasta_seq, args.rotamer_placement, 
                 args.rotamer_interaction, args.rotamer_solve_damping)
->>>>>>> Working potential but not deriv on rotamer rewrite
 
     if args.sidechain_radial:
         require_backbone_point = True
@@ -1425,7 +1422,6 @@ def main():
         if args.membrane_thickness is None:
             parser.error('--membrane-potential requires --membrane-thickness')
         require_backbone_point = True
-<<<<<<< 239dc0f5842392e8544011c0d8770f8cf404b995
         write_membrane_potential(fasta_seq, 
                                  args.membrane_potential, 
 	                         args.membrane_potential_scale, 
@@ -1433,16 +1429,12 @@ def main():
 	                         args.membrane_potential_exclude_residues, 
 	                         args.membrane_potential_unsatisfied_hbond_residues_type1,
 	                         args.membrane_potential_unsatisfied_hbond_residues_type2)
-=======
-        write_membrane_potential(fasta_seq, args.membrane_potential, args.membrane_potential_scale, args.membrane_thickness,
-	        args.membrane_potential_exclude_residues, args.membrane_potential_unsatisfied_hbond_residues)
     if require_placement:
         if args.rotamer_placement is None:
             parser.error('--rotamer_placement is required, based on other options.')
         require_rama = True
         require_affine = True
         write_rotamer_placement(fasta_seq, args.rotamer_placement)
->>>>>>> Working potential but not deriv on rotamer rewrite
 
     if require_backbone_point:
         if args.backbone_dependent_point is None:
