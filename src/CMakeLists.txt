@@ -22,16 +22,14 @@ set (CMAKE_CXX_FLAGS "${OMP_FLAGS} ${CMAKE_CXX_FLAGS} ${DEBUG_FLAGS} -std=c++11 
 set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
-add_executable (upside
+set (ENGINE_SRC 
     hbond.cpp 
     rotamer.cpp
     placement.cpp
-    main.cpp
     basin_correlation.cpp
     rama_map_pot.cpp
     spline.cpp
     deriv_engine.cpp 
-    string_method.cpp
     sidechain_radial.cpp
     nonbond.cpp 
     bonds.cpp 
@@ -43,8 +41,11 @@ add_executable (upside
     timing.cpp 
     thermostat.cpp
     h5_support.cpp 
-    state_logger.cpp
-    )
+    state_logger.cpp)
+
+add_executable (upside
+    ${ENGINE_SRC}
+    main.cpp)
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIRS})
 target_link_libraries(upside stdc++ ${HDF5_LIBRARIES})
@@ -53,14 +54,9 @@ find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 add_library(upside_calculation SHARED EXCLUDE_FROM_ALL
-    rotamer.cpp
-    spline.cpp
-    deriv_engine.cpp 
-    md.cpp 
-    timing.cpp 
-    thermostat.cpp
-    h5_support.cpp 
-    state_logger.cpp)
+    engine_c_library.cpp
+    ${ENGINE_SRC})
+
 target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES})
 
 add_custom_target(support ALL COMMENT "Creating supporting executables")
