@@ -10,9 +10,9 @@ extern "C" {
     int evaluate_energy(float* energy, DerivEngine* engine, const float* pos);
     int evaluate_deriv (float* deriv,  DerivEngine* engine, const float* pos);
 
-    // calling with deriv==nullptr just gives the size
-    int  get_param_deriv(float* deriv, DerivEngine* engine, const char* node_name);
-    void set_param(const float* param, DerivEngine* engine, const char* node_name);
+    int set_param(int n_param, const float* param, DerivEngine* engine, const char* node_name);
+    int get_param_deriv(int n_param, float* deriv, DerivEngine* engine, const char* node_name);
+    int get_param      (int n_param, float* param, DerivEngine* engine, const char* node_name);
 }
 
 #endif

@@ -90,6 +90,12 @@ struct DerivComputation
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
     virtual double test_value_deriv_agreement() {return -1.;}
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return std::vector<float>();}
+    virtual void set_param(const std::vector<float>& new_params) {}
+    virtual std::vector<float> get_param_deriv() const {return std::vector<float>();}
+#endif
 };
 
 struct CoordNode : public DerivComputation

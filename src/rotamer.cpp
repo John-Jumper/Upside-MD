@@ -1,6 +1,5 @@
 #include "bead_interaction.h"
 #include "interaction_graph.h"
-#include "rotamer.h"
 #include <vector>
 #include <string>
 #include "h5_support.h"
@@ -522,6 +521,12 @@ struct RotamerSidechain: public PotentialNode {
         edges33.calculate_marginals<3,3>();
         return make_pair(iter, max_deviation);
     }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return igraph.get_param();}
+    virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
+#endif
 };
 
 template <typename BT>

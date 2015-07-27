@@ -57,6 +57,50 @@ int evaluate_deriv(float* deriv, DerivEngine* engine, const float* pos) try {
 }
 
 
-// // calling with deriv==nullptr just gives the size
-// int  get_param_deriv(float* deriv, DerivEngine* engine, const char* node_name);
-// void set_param(const float* param, DerivEngine* engine, const char* node_name);
+int set_param(int n_param, const float* param, DerivEngine* engine, const char* node_name) try {
+#ifdef PARAM_DERIV
+    vector<float> param_v(param, param+n_param);
+    engine->get(string(node_name)).computation->set_param(param_v);
+    return 0;
+#else
+    return -1;
+#endif
+} catch(...) {
+    return 1;
+}
+
+int get_param(int n_param, float* param, DerivEngine* engine, const char* node_name) try {
+#ifdef PARAM_DERIV
+    auto param_v = engine->get(string(node_name)).computation->get_param();
+    if(param_v.size() != size_t(n_param)) 
+        throw string("Wrong number of parameters, expected ") + to_string(param_v.size()) + " but got " + 
+            to_string(n_param);
+    copy(begin(param_v), end(param_v), param);
+    return 0;
+#else
+    return -1;
+#endif
+} catch(const string& s) {
+    fprintf(stderr, "ERROR: %s\n", s.c_str());
+    return 1;
+} catch(...) {
+    return 1;
+}
+
+int get_param_deriv(int n_param, float* deriv, DerivEngine* engine, const char* node_name) try {
+#ifdef PARAM_DERIV
+    auto deriv_v = engine->get(string(node_name)).computation->get_param_deriv();
+    if(deriv_v.size() != size_t(n_param)) 
+        throw string("Wrong number of parameters, expected ") + to_string(deriv_v.size()) + " but got " + 
+            to_string(n_param);
+    copy(begin(deriv_v), end(deriv_v), deriv);
+    return 0;
+#else
+    return -1;
+#endif
+} catch(const string& s) {
+    fprintf(stderr, "ERROR: %s\n", s.c_str());
+    return 1;
+} catch(...) {
+    return 1;
+}

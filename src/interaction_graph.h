@@ -1,11 +1,12 @@
 #ifndef INTERACTION_GRAPH_H
 #define INTERACTION_GRAPH_H
 
+#include <vector>
 #include "deriv_engine.h"
 #include "vector_math.h"
 #include "h5_support.h"
 
-template <typename IType, bool compute_param_deriv = false>
+template <typename IType>
 struct WithinInteractionGraph {
     CoordNode &pos_node;
     int n_system;
@@ -21,15 +22,18 @@ struct WithinInteractionGraph {
 
     // FIXME consider padding for vector loads
     std::vector<Vec<IType::n_param>> interaction_param;
-    SysArrayStorage interaction_param_deriv;
     std::vector<float> cutoff2;
 
     SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_n_edge)
-    SysArrayStorage edge_param_deriv;
     SysArrayStorage pos_deriv;
     std::vector<int> edge_indices;
 
     std::vector<int> n_edge;
+
+#ifdef PARAM_DERIV
+    SysArrayStorage interaction_param_deriv;
+    SysArrayStorage edge_param_deriv;
+#endif
 
     // It is easiest if I just get my own subgroup of the .h5 file
     WithinInteractionGraph(hid_t grp, CoordNode& pos_node_):
@@ -39,29 +43,22 @@ struct WithinInteractionGraph {
         n_elem(h5::get_dset_size(1,grp,"index")[0]),
         max_n_edge((n_elem*(n_elem-1))/2),
         interaction_param(n_type*n_type),
-        interaction_param_deriv(n_system, IType::n_param, (compute_param_deriv ? n_type*n_type : 0)),
         cutoff2(n_type*n_type),
         edge_deriv(n_system, IType::n_deriv, max_n_edge),
-        edge_param_deriv(n_system, IType::n_param, (compute_param_deriv ? max_n_edge : 0)),
         pos_deriv (n_system, IType::n_dim,   n_elem),
         edge_indices(n_system*2*max_n_edge),
         n_edge(n_system)
+#ifdef PARAM_DERIV
+        ,interaction_param_deriv(n_system, IType::n_param, n_type*n_type)
+        ,edge_param_deriv(n_system, IType::n_param, max_n_edge)
+#endif
     {
         using namespace h5;
 
         check_size(grp, "interaction_param", n_type, n_type, IType::n_param);
         traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {
                 interaction_param[nt1*n_type+nt2][np] = x;});
-
-        for(int nt1: range(n_type)) {
-            for(int nt2: range(n_type)) {
-                cutoff2[nt1*n_type+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type+nt2]));
-                if(!IType::is_compatible(interaction_param[nt1*n_type+nt2], 
-                                         interaction_param[nt2*n_type+nt1])) {
-                    throw std::string("incompatibile parameters");
-                }
-            }
-        }
+        update_cutoffs();
 
         check_size(grp, "index", n_elem);
         check_size(grp, "type",  n_elem);
@@ -81,7 +78,10 @@ struct WithinInteractionGraph {
     void compute_edges(int ns, F f) {
         VecArray pos = pos_node.coords().value[ns];
         fill(pos_deriv[ns], IType::n_dim, n_elem, 0.f);
-        if(compute_param_deriv) fill(interaction_param_deriv[ns], IType::n_param, n_type*n_type, 0.f);
+
+        #ifdef PARAM_DERIV
+        fill(interaction_param_deriv[ns], IType::n_param, n_type*n_type, 0.f);
+        #endif
 
         int ne = 0;
         for(int i1: range(n_elem)) {
@@ -113,11 +113,11 @@ struct WithinInteractionGraph {
 
                 f(ne, value, index1,type1,id1, index2,type2,id2);
 
-                if(compute_param_deriv) {
-                    Vec<IType::n_param> dp;
-                    IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                    store_vec(edge_param_deriv[ns], ne, dp);
-                }
+                #ifdef PARAM_DERIV
+                Vec<IType::n_param> dp;
+                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
+                store_vec(edge_param_deriv[ns], ne, dp);
+                #endif
 
                 ++ne;
             }
@@ -132,12 +132,12 @@ struct WithinInteractionGraph {
         update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 0], d1);
         update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 1], d2);
 
-        if(compute_param_deriv) {
-            auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
-            auto type1 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
-            auto type2 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
-            update_vec(interaction_param_deriv[ns], type1*n_type+type2, d);
-        }
+        #ifdef PARAM_DERIV
+        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
+        auto type1 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
+        auto type2 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
+        update_vec(interaction_param_deriv[ns], type1*n_type+type2, d);
+        #endif
     }
 
     void propagate_derivatives(int ns) {
@@ -149,6 +149,46 @@ struct WithinInteractionGraph {
        for(int i: range(n_elem))
            store_vec(pos_accum, param[i].slot, load_vec<IType::n_dim>(pos_deriv[ns],i));
     }
+
+    void update_cutoffs() {
+        for(int nt1: range(n_type)) {
+            for(int nt2: range(n_type)) {
+                cutoff2[nt1*n_type+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type+nt2]));
+                if(!IType::is_compatible(interaction_param[nt1*n_type+nt2], 
+                                         interaction_param[nt2*n_type+nt1])) {
+                    throw std::string("incompatibile parameters");
+                }
+            }
+        }
+    }
+
+#ifdef PARAM_DERIV
+    std::vector<float> get_param() const {
+        std::vector<float> ret; ret.reserve(n_type*n_type*IType::n_param);
+        for(int i: range(n_type*n_type))
+            for(int d: range(IType::n_param))
+                ret.push_back(interaction_param[i][d]);
+        return ret;
+    }
+
+    std::vector<float> get_param_deriv() const {
+        std::vector<float> ret; ret.reserve(n_system*n_type*n_type*IType::n_param);
+        for(int ns: range(n_system))
+            for(int i: range(n_type*n_type))
+                for(int d: range(IType::n_param))
+                    ret.push_back(interaction_param_deriv[ns](d,i));
+        return ret;
+    }
+
+    void set_param(const std::vector<float>& new_param) {
+        if(new_param.size() != size_t(n_type*n_type*IType::n_param)) throw std::string("Bad params");
+        // just blast over interaction param and update cutoffs
+        for(int i: range(n_type*n_type))
+            for(int np: range(IType::n_param)) 
+                interaction_param[i][np] = new_param[i*IType::n_param + np];
+        update_cutoffs();
+    }
+#endif
 };
 
 
