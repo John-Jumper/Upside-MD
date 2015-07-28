@@ -6,102 +6,11 @@ import sys
 import cPickle
 import argparse
 import tables
+import collections
+import re
 
-model_geom = np.zeros((3,3))
-model_geom[0] = (-1.19280531, -0.83127186, 0.)  # N
-model_geom[1] = ( 0.,          0.,         0.)  # CA
-model_geom[2] = ( 1.25222632, -0.87268266, 0.)  # C
-model_geom -= model_geom.mean(axis=0)
-
+np.set_printoptions(precision=2,suppress=True)
 deg = np.pi/180.
-
-def vmag(x):
-    assert x.shape[-1] == 3
-    return np.sqrt(np.sum(x**2,axis=-1))
-
-def rmsd_transform(target, model):
-    assert target.shape == model.shape == (model.shape[0],3)
-    base_shift_target = target.mean(axis=0)
-    base_shift_model  = model .mean(axis=0)
-    
-    target = target - target.mean(axis=0)
-    model = model   - model .mean(axis=0)
-
-    R = np.dot(target.T, model)
-    U,S,Vt = np.linalg.svd(R)
-    if np.linalg.det(np.dot(U,Vt))<0.:
-        Vt[:,-1] *= -1.  # fix improper rotation
-    rot = np.dot(U,Vt)
-    shift = base_shift_target - np.dot(rot, base_shift_model)
-    return rot, shift
-
-
-def dihedral(x1,x2,x3,x4):
-    '''four atom dihedral angle in radians'''
-    b1 = x2-x1
-    b2 = x3-x2
-    b3 = x4-x3
-    b2b3 = np.cross(b2,b3)
-    b2mag = np.sqrt(np.sum(b2**2, axis=-1))
-    return np.arctan2(
-            b2mag * (b1*b2b3).sum(axis=-1),
-            (np.cross(b1,b2) * b2b3).sum(axis=-1))
-
-def initial_rama(pos):
-    n_res = len(pos)/3
-    assert pos.shape == (3*n_res,3)
-
-    pos = pos.reshape((-1,3,3))
-
-    N  = 0
-    CA = 1
-    C  = 2
-
-    rama = np.zeros((n_res,2)) - 1.3963
-    rama[1:,0] = dihedral(
-            pos[0:-1, C],
-            pos[1:,   N],
-            pos[1:,   CA],
-            pos[1:,   C])
-
-    rama[:-1,1] = dihedral(
-            pos[0:-1,  N],
-            pos[0:-1,  CA],
-            pos[0:-1,  C],
-            pos[1:,    N])
-
-    return rama
-
-
-def parse_dynamic_backbone_point(fname):
-    import scipy.interpolate as interp
-
-    lib = tables.open_file(fname)
-    ret = dict()
-    for resname,g in lib.root._v_children.items():
-        # construct splines for each dimension
-        splines = [interp.RectBivariateSpline(
-            g.bin_values[:],
-            g.bin_values[:],
-            g.center[:,:,d]) for d in range(3)]
-
-        ret[resname] = lambda phi,psi,splines=splines: np.concatenate(
-                [s(phi,psi,grid=False)[...,None] for s in splines],axis=-1)
-    lib.close()
-    return ret
-
-
-def parse_static_backbone_point(fname):
-    import scipy.interpolate as interp
-
-    sc_lib = tables.open_file(fname)
-    sc_dict = dict(zip(
-        map(str, sc_lib.root.names[:]),
-        sc_lib.root.com_pos[:]))
-    sc_lib.close()
-
-    return dict([(resname, lambda phi,psi,pt=pt: pt) for resname,pt in sc_dict.items()])
-
 
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
@@ -115,144 +24,153 @@ aa_num = dict([(k,i) for i,k in enumerate(sorted(three_letter_aa.values()))])
 
 one_letter_aa = dict([(v,k) for k,v in three_letter_aa.items()])
 
+def vmag(x):
+    assert x.shape[-1] == 3
+    return np.sqrt(np.sum(x**2,axis=-1))
+
+def dihedral(x1,x2,x3,x4):
+    '''four atom dihedral angle in radians'''
+    b1 = x2-x1
+    b2 = x3-x2
+    b3 = x4-x3
+    b2b3 = np.cross(b2,b3)
+    b2mag = np.sqrt(np.sum(b2**2, axis=-1))
+    return np.arctan2(
+            b2mag * (b1*b2b3).sum(axis=-1),
+            (np.cross(b1,b2) * b2b3).sum(axis=-1))
+
+Residue = collections.namedtuple('Residue', 'resnum restype phi psi omega N CA C CB CG chi1')
+
+def read_residues(chain):
+    ignored_restypes = dict()
+
+    residues = []
+    for res in chain.iterResidues():
+        restype = res.getResname()
+        if restype not in one_letter_aa: 
+            ignored_restypes[restype] = ignored_restypes.get(restype,0) + 1
+            continue  # let's hope it is HOH or something
+
+        try:
+            phi = prody.calcPhi(res)*deg
+        except ValueError:
+            phi = np.nan
+
+        try:
+            psi = prody.calcPsi(res)*deg
+        except ValueError:
+            psi = np.nan
+
+        try:
+            omega = prody.calcOmega(res)*deg
+        except ValueError:
+            omega = np.nan
+
+        adict   = dict((a.getName(),a.getCoords()) for a in res.iterAtoms())
+        cg_list = [v for k,v in adict.items() if re.match(".G1?$",k)]
+        assert len(cg_list) in (0,1)
+
+        r = Residue(
+            res.getResnum(),
+            restype if not (restype=='PRO' and np.abs(omega)<90.*deg) else 'CPR',
+            phi,psi,omega,
+            adict.get('N',  np.nan*np.ones(3)),
+            adict.get('CA', np.nan*np.ones(3)),
+            adict.get('C',  np.nan*np.ones(3)),
+            adict.get('CB', np.nan*np.ones(3)),
+            cg_list[0] if cg_list else np.nan*np.ones(3),
+            np.nan)
+        r = r._replace(chi1=dihedral(r.N,r.CA,r.CB,r.CG))
+        residues.append(r)
+
+    return residues, ignored_restypes
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb', help='input .pdb file')
-    parser.add_argument('output', help='output .pkl file')
-    parser.add_argument('--additional-selector', default='', help='Find the backbone with the name and an additional selector (such as "chain A" or "protein").')
+    parser.add_argument('basename', help='output basename')
     parser.add_argument('--model', default=None, help='Choose only a specific model in the .pdb')
-    parser.add_argument('--remove-nonstandard-residues', default=False, action='store_true', 
-            help='Remove non-standard residues.  Useful for stripping capping, but be careful because this might break chains.')
-    parser.add_argument('--allow-chain-breaks', default=False, action='store_true', help='Do not fail on chain breaks')
-    parser.add_argument('--output-fasta', default=None, help='Output a fasta file as well')
-    parser.add_argument('--output-rama', default='', help='Output rama angles')
-    parser.add_argument('--output-chi1', default='', help='Output chi1 angles')
-    parser.add_argument('--output-sidechain-com', default=None, 
-            help='Output a file containing the sidechain center-of-mass positions ' +
-            '(based on alignment of backbone atoms) as well.  Requires --sidechain-com-reference')
-    parser.add_argument('--static-sidechain-com-reference', default=None,
-            help='Reference file for sidechain center-of-mass positions')
-    parser.add_argument('--dynamic-sidechain-com-reference', default=None,
-            help='Reference file for backbone-dependent sidechain center-of-mass positions')
+    parser.add_argument('--chains', default='', 
+            help='Comma-separated list of chains to parse (e.g. --chains=A,C,E). Default is all chains.')
+    parser.add_argument('--allow-unexpected-chain-breaks', default=False, action='store_true', 
+            help='Do not fail on unexpected chain breaks (dangerous)')
     args = parser.parse_args()
     
-    if args.output_sidechain_com and not (args.static_sidechain_com_reference or args.dynamic_sidechain_com_reference):
-        parser.error('--output-sidechain-com requires --static-sidechain-com-reference or --dynamic-sidechain-com-reference')
-    if args.static_sidechain_com_reference and args.dynamic_sidechain_com_reference:
-        parser.error('--static-sidechain-com-reference is incompatible with --dynamic-sidechain-com-reference')
-
-    additional_selector = ''
-    if args.additional_selector: additional_selector += ' and (%s)'%args.additional_selector
-    if args.remove_nonstandard_residues: additional_selector += ' and resname %s' % (' '.join(sorted(three_letter_aa.values())))
-
     structure = prody.parsePDB(args.pdb, model=args.model)
+    print
 
-    sel_str = 'name CA' + additional_selector
-    coords_CA = structure.select(sel_str)
-    
-    sel_str = 'name N CA C' + additional_selector
-    coords = structure.select(sel_str).getCoords()
-    print len(coords)/3., 'residues found.'
-    bond_lengths = np.sqrt(np.sum(np.diff(coords,axis=0)**2,axis=-1))
-    
-    if bond_lengths.max() > 2.:
-        breaks = bond_lengths>2.
-        msg = "%i separate chains found with breaks at residue(s) %s" % (1+breaks.sum(), list(breaks.nonzero()[0]/3))
-        if args.allow_chain_breaks:
-            print "WARNING:", msg
-        else:
-            print >>sys.stderr, "ERROR: " + msg + " (see --allow-chain-breaks if you expected this)"
-            sys.exit(1)
+    chain_ids = set(x for x in args.chains.split(',') if x)
+    chains = [(ch.getChid(),read_residues(ch)) for ch in structure.iterChains() 
+        if not chain_ids or ch.getChid() in chain_ids]
 
-    
-    f=open(args.output,'wb')
-    cPickle.dump(coords[...,None], f, -1)
-    f.close()
-    
-    if args.output_fasta is not None:
-        omega = dihedral(
-                coords[1:-3:3],
-                coords[2:-3:3],
-                coords[3:  :3],
-                coords[4:  :3])
-        omega = np.concatenate(([np.nan],omega))
+    missing_chains = chain_ids.difference(x[0] for x in chains)
+    if missing_chains:
+        print >>sys.stderr, "ERROR: missing chain %s" % ",".join(sorted(missing_chains))
+        sys.exit(1)
 
-        seq = ''.join([(one_letter_aa[s] if not (s=='PRO' and np.abs(omega[i])<90*deg) else one_letter_aa['CPR'])
-            for i,s in enumerate(coords_CA.getResnames())])
+    coords = []
+    sequence = []
+    chi = []
+    unexpected_chain_breaks = False
 
-        print coords.shape
-        f=open(args.output_fasta,'w')
+    for chain_id, (res,ignored_restype) in chains:
+        print "chain %s:" % chain_id
+
+        # only look at residues with complete backbones
+        res = [r for r in res if np.all(np.isfinite(np.array((r.N,r.CA,r.C))))]
+
+        print '    found %i usable residues' % len(res)
+        print
+
+        for k,v in sorted(ignored_restype.items()):
+            print '    ignored restype %-3s (%i residues)'%(k,v)
+        print
+
+        for i,r in enumerate(res):
+            if coords: # residues left by a previous chain
+                dist = vmag(r.N-coords[-1])
+                if dist > 2.:
+                    print '    %s chain break at residue %i (%4.1f A)' % (('UNEXPECTED' if i else 'expected  '),
+                         len(coords)/3, dist)
+                    if i: unexpected_chain_breaks = True
+
+            coords.extend([r.N,r.CA,r.C])
+            sequence.append(r.restype)
+            chi.append(r.chi1)
+        print
+    coords = np.array(coords)
+
+    if unexpected_chain_breaks and not args.allow_unexpected_chain_breaks:
+        print >>sys.stderr, ('ERROR: see above for unexpected chain breaks, probably missing residues in crystal '+
+                'structure (--allow-unexpected-chain-breaks to suppress this error at your own risk)')
+        sys.exit(1)
+
+    fasta_seq = ''.join(one_letter_aa[s] for s in sequence)
+
+    with open(args.basename + '.initial.pkl','wb') as f:
+        cPickle.dump(coords[...,None], f, -1)
+        f.close()
+
+    with open(args.basename+'.fasta','w') as f:
         print >>f, '> Created from %s' % args.pdb
-        nlines = int(np.ceil(len(seq)/80.))
+        nlines = int(np.ceil(len(fasta_seq)/80.))
         for nl in range(nlines):
-            print >>f,  seq[80*nl:80*(nl+1)]
+            print >>f,  fasta_seq[80*nl:80*(nl+1)]
     
-    def vmag(x):
-        assert x.shape[-1] == 3
-        return np.sqrt(x[...,0]**2+x[...,1]**2+x[...,2]**2)
+    with open(args.basename+'.chi','w') as f:
+        print >>f, 'residue restype rotamer chi1'
+        for nr,restype in enumerate(sequence):
+            if np.isnan(chi[nr]): continue  # no chi1 data to write
 
-    n_res = len(seq)
-    rama = initial_rama(coords)
-    if args.output_rama:
-        f = open(args.output_rama,'w')
-        for nr in range(n_res):
-            print >>f, '% 3i %3s % 8.3f % 8.3f' % (nr, three_letter_aa[seq[nr]], rama[nr,0]/deg, rama[nr,1]/deg)
-        f.close()
+            # PRO is a special case since it only has two states
+            # the PRO state 1 is the state from -120 to 0
+            chi1_state = 1
+            if    0.*deg <= chi[nr] < 120.*deg: chi1_state = 0
+            if -120.*deg <= chi[nr] <   0.*deg and restype not in ('PRO','CPR'): chi1_state = 2
 
-    if args.output_chi1:
-        sel_str = 'name CB "^.G1?$"' + additional_selector
-        sel = structure.select(sel_str)
-        chi_coords = sel.getCoords()
-        seq_array = np.array([three_letter_aa[s] for s in seq])
-        res_names_chi1 = sel.getResnames()
-        expected_number_of_atoms = 2*len(seq_array) - 1*(seq_array=='ALA').sum() - 2*(seq_array=='GLY').sum()
-        assert len(chi_coords) == expected_number_of_atoms  # chi for the right number of atoms to compute chi1
+            print >>f, '% 3i %3s %i % 8.3f' % (nr, restype, chi1_state, chi[nr]/deg)
 
-        loc = 0
-        f = open(args.output_chi1,'w')
-        for nr in range(len(seq_array)):
-            resname = seq_array[nr]
-            if   resname == 'GLY': 
-                chi1 = 0.
-                chi1_state = 0
-                loc += 0
-            elif resname == 'ALA':
-                assert res_names_chi1[loc] == 'ALA'
-                chi1 = 0.
-                chi1_state = 0
-                loc += 1  # advance position of CB
-            else:
-                assert res_names_chi1[loc] == resname
-                chi1 = dihedral(coords[3*nr+0], coords[3*nr+1], chi_coords[loc], chi_coords[loc+1])
-                # PRO is a special case since it only has two states
-                # the PRO state 1 is the state from -120 to 0
-                chi1_state = 1
-                if    0.*deg <= chi1 < 120.*deg: chi1_state = 0
-                if -120.*deg <= chi1 <   0.*deg and resname != 'PRO': chi1_state = 2
-                loc += 2
-            print >>f, '% 3i %3s % 8.3f %i' % (nr, resname, chi1/deg, chi1_state)
-        f.close()
-        assert loc == len(chi_coords)
-
-    np.set_printoptions(precision=2,suppress=True)
-    if args.output_sidechain_com:
-        assert len(coords) == 3*n_res
-
-        if args.dynamic_sidechain_com_reference:
-            sc_dict = parse_dynamic_backbone_point(args.dynamic_sidechain_com_reference) 
-        else:
-            sc_dict = parse_static_backbone_point (args.static_sidechain_com_reference) 
-    
-        com = np.zeros((n_res,3))
-        for nr in range(n_res):
-            z = coords[3*nr+0:3*nr+3]
-            rot,trans = rmsd_transform(z, model_geom)
-            com[nr] = np.dot(sc_dict[three_letter_aa[seq[nr]]](rama[nr,0],rama[nr,1]), rot.T) + trans
-    
-        f = open(args.output_sidechain_com,'w')
-        for nr in range(n_res):
-            print >>f, '% 3i %3s % 8.3f % 8.3f % 8.3f' % (nr, three_letter_aa[seq[nr]], com[nr,0], com[nr,1], com[nr,2])
-        f.close()
 
 if __name__ == '__main__':
     main()

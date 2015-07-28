@@ -33,7 +33,6 @@ set (ENGINE_SRC
     sidechain_radial.cpp
     nonbond.cpp 
     bonds.cpp 
-    backbone_dependent_sidechain.cpp
     eig.cpp 
     dihedral_range.cpp
     membrane_potential.cpp
