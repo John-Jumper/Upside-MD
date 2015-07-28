@@ -20,6 +20,7 @@ one_letter_aa = dict([(v,k) for k,v in three_letter_aa.items()])
 deg=np.deg2rad(1)
 
 default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
+n_bit_rotamer = 4
 
 base_sc_ref = {
  'ALA': np.array([-0.01648328,  1.50453228,  1.20193768]),
@@ -989,7 +990,7 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
         create_array(g, 'interaction_param', obj=p)
 
 
-def write_rotamer_placement(fasta, placement_library):
+def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     # FIXME handle fix-rotamer to fix all or some of the rotamers
     with tb.open_file(placement_library) as data:
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
@@ -997,20 +998,50 @@ def write_rotamer_placement(fasta, placement_library):
         placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
         start_stop = data.root.rotamer_start_stop[:]
 
+    fix = dict()
+    if fix_rotamer:
+        fields = [x.split()[:3] for x in list(open(fix_rotamer))]  # only consider first 3 columns
+
+        header = 'residue restype rotamer'
+        actual_header = [x.lower() for x in fields[0]]
+        if actual_header != header.split():
+            parser.error('First line of fix-rotamer table must be "%s" but is "%s"'
+                    %(header," ".join(actual_header)))
+
+        for residue, restype, rotamer in fields[1:]:
+            if fasta[int(residue)] != restype: raise RuntimeError("fix-rotamer files does not match FASTA")
+            fix[int(residue)] = int(rotamer)
+
     rama_residue = []
     affine_residue = []
     layer_index = []
     restype_seq = []
+    id_seq = []
+
+    count_by_n_rot = dict()
 
     for rnum,aa in enumerate(fasta):
         restype = restype_num[aa]
         start,stop = start_stop[restype]
         n_rot = stop-start
 
+        # if it should be fixed, then we must modify these answers to get a single rotamer
+        if rnum in fix:
+            if not (0 <= fix[rnum] < n_rot): raise ValueError('invalid fix rotamer state')
+            start,stop = start+fix[rnum], start+fix[rnum]+1
+            n_rot = 1
+
+        if n_rot not in count_by_n_rot: 
+            count_by_n_rot[n_rot] = 0;
+
+        base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
+        count_by_n_rot[n_rot] += 1
+
         rama_residue  .extend([rnum]*n_rot)
         affine_residue.extend([rnum]*n_rot)
         layer_index   .extend(np.arange(start,stop))
         restype_seq   .extend([aa]*n_rot)
+        id_seq        .extend(np.arange(n_rot) + (base_id<<n_bit_rotamer))
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -1020,6 +1051,7 @@ def write_rotamer_placement(fasta, placement_library):
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_pos)
     create_array(grp, 'restype_seq',     restype_seq)
+    create_array(grp, 'id_seq',       np.array(id_seq))
 
     grp = t.create_group(potential, 'placement_scalar')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -1030,8 +1062,7 @@ def write_rotamer_placement(fasta, placement_library):
     create_array(grp, 'placement_data',  placement_energy)
 
 
-def write_rotamer(fasta, placement_library, interaction_library, damping):
-    n_bit_rotamer = 4
+def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
     g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'] + 
             (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []))
@@ -1041,10 +1072,6 @@ def write_rotamer(fasta, placement_library, interaction_library, damping):
     g._v_attrs.iteration_chunk_size = 2
 
     pg = t.create_group(g, "pair_interaction")
-
-    with tb.open_file(placement_library) as data:
-        restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
-        start_stop = data.root.rotamer_start_stop[:]
 
     with tb.open_file(interaction_library) as data:
          create_array(pg, 'interaction_param', data.root.interaction_params[:])
@@ -1070,6 +1097,12 @@ def write_rotamer(fasta, placement_library, interaction_library, damping):
             index.append(len(index))  # just an increasing counter
             type .append(restype)
             id   .append((base_id<<n_bit_rotamer) + no)
+
+    rseq = t.root.input.potential.placement_rotamer.restype_seq[:]
+    create_array(pg, 'index', np.arange(len(rseq)))
+    create_array(pg, 'type',  np.array([aa_num[s] for s in rseq]))
+    create_array(pg, 'id',    t.root.input.potential.placement_rotamer.id_seq[:])
+
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
 		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
@@ -1209,6 +1242,14 @@ def main():
             help='use backbone-depedent sidechain location library')
     parser.add_argument('--rotamer-placement', default=None, 
             help='rotameric sidechain library')
+    parser.add_argument('--fix-rotamer', default='', 
+            help='Table of fixed rotamers for specific sidechains.  A header line must be present and the first '+
+            'three columns of that header must be '+
+            '"residue restype rotamer", but there can be additional, ignored columns.  The restype must '+
+            'match the corresponding restype in the FASTA file (intended to prevent errors).  It is permissible '+
+            'to fix only a subset of rotamers.  The value of rotamer must be an integer, corresponding to the '+ 
+            'numbering in the --rotamer-placement file.  Such a file can be created with PDB_to_initial_structure '+
+            '--output-chi1.')
     parser.add_argument('--rotamer-interaction', default=None, 
             help='rotamer sidechain pair interaction parameters')
     parser.add_argument('--rotamer-solve-damping', default=0.4, type=float,
@@ -1365,7 +1406,7 @@ def main():
             parser.error('--rotamer_placement is required, based on other options.')
         require_rama = True
         require_affine = True
-        write_rotamer_placement(fasta_seq, args.rotamer_placement)
+        write_rotamer_placement(fasta_seq, args.rotamer_placement,args.fix_rotamer)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
@@ -1404,8 +1445,7 @@ def main():
 
     if args.rotamer_interaction:
         # must be after write_count_hbond if hbond_coverage is used
-        write_rotamer(fasta_seq, args.rotamer_placement, 
-                args.rotamer_interaction, args.rotamer_solve_damping)
+        write_rotamer(fasta_seq, args.rotamer_interaction, args.rotamer_solve_damping)
 
     if args.sidechain_radial:
         require_backbone_point = True
