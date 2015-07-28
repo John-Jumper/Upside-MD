@@ -446,6 +446,7 @@ struct RotamerSidechain: public PotentialNode {
         // marginals must already have been solved
         // since edges1x were folded into the node probabilites, they should not be accumulated here
         float en = 0.f;
+        for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_energy<1>  (nn);
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
         for(int ne: range(edges33.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
         for(int ne: range(edges11.n_edge)) en -= logf(edges11.prob(0,ne));
