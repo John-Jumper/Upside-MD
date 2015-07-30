@@ -57,7 +57,7 @@ void Pos::propagate_deriv() {
 
 void DerivEngine::add_node(
         const string& name, 
-        unique_ptr<DerivComputation>&& fcn, 
+        unique_ptr<DerivComputation> fcn, 
         vector<string> argument_names) 
 {
     if(any_of(nodes.begin(), nodes.end(), [&](const Node& n) {return n.name==name;})) 
@@ -186,7 +186,7 @@ struct ComputeMyDeriv {
 
 DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t potential_group, bool quiet)
 {
-    auto engine = DerivEngine(n_atom, n_system);
+    DerivEngine engine(n_atom, n_system);
     auto& m = node_creation_map();
 
     map<string, pair<bool,vector<string>>> dep_graph;  // bool indicates node is active

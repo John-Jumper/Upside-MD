@@ -87,6 +87,7 @@ struct DerivComputation
     int n_system;
     DerivComputation(bool potential_term_, int n_system_):
         potential_term(potential_term_), n_system(n_system_) {}
+    virtual ~DerivComputation() {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
     virtual double test_value_deriv_agreement() {return -1.;}
@@ -163,8 +164,18 @@ struct DerivEngine
         int germ_exec_level;
         int deriv_exec_level;
 
-        Node(std::string name_, std::unique_ptr<DerivComputation>&& computation_):
-            name(name_), computation(move(computation_)) {};
+        Node(std::string name_, std::unique_ptr<DerivComputation> computation_):
+            name(name_), computation(std::move(computation_)) {};
+        Node(std::string name_, DerivComputation* computation_):
+            name(name_), computation(computation_) {};
+        Node(const Node& other) = delete;
+        Node(Node&& other):
+            name(std::move(other.name)),
+            computation(std::move(other.computation)),
+            parents(std::move(other.parents)),
+            children(std::move(other.children)),
+            germ_exec_level(other.germ_exec_level),
+            deriv_exec_level(other.deriv_exec_level) {}
     };
 
     std::vector<Node> nodes;  // nodes[0] is the pos node
@@ -174,13 +185,13 @@ struct DerivEngine
     DerivEngine(int n_atom, int n_system): 
         potential(n_system)
     {
-        nodes.emplace_back("pos", std::unique_ptr<DerivComputation>(new Pos(n_atom, n_system)));
+        nodes.emplace_back("pos", new Pos(n_atom, n_system));
         pos = dynamic_cast<Pos*>(nodes[0].computation.get());
     }
 
     void add_node(
             const std::string& name, 
-            std::unique_ptr<DerivComputation>&& fcn, 
+            std::unique_ptr<DerivComputation> fcn, 
             std::vector<std::string> argument_names);
 
     Node& get(const std::string& name);
