@@ -702,3 +702,34 @@ struct DihedralSpring : public PotentialNode
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");
+
+
+struct ConstantCoord : public CoordNode
+{
+    SysArrayStorage value;
+
+    ConstantCoord(hid_t grp):
+        CoordNode(get_dset_size(3, grp, "value")[0], 
+                  get_dset_size(3, grp, "value")[1], 
+                  get_dset_size(3, grp, "value")[2]),
+        value(n_system, elem_width, n_elem)
+    {
+        traverse_dset<3,float>(grp, "value", [&](size_t ns, size_t ne, size_t nd, float x) {
+                value[ns](nd,ne) = x;});
+    }
+
+    virtual void compute_value(ComputeMode mode) {
+        for(int ns=0; ns<n_system; ++ns) {
+            VecArray to   = coords().value[ns];
+            VecArray from = value[ns];
+
+            for(int nd: range(elem_width))
+                for(int ne: range(n_elem))
+                    to(nd,ne) = from(nd,ne);
+        }
+    }
+
+    virtual void propagate_deriv() {}
+    double test_value_deriv_agreement() { return 0.f; }
+};
+static RegisterNodeType<ConstantCoord,0> constant_coord_node("constant");
