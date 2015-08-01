@@ -243,6 +243,7 @@ def write_count_hbond(fasta, hbond_energy):
     cover_interaction[:,:,1] = 1./1.0   # cover scale, rather arbitrary
     cover_interaction[:,:,2] = 0.174    # 80 degrees, rather arbitrary
     cover_interaction[:,:,3] = 2.865    # 20 degrees-ish, rather arbitrary
+    cover_interaction[:,:,4] = 1.0      # 1 unit of energy, completely arbitrary
 
     create_array(cgrp, 'interaction_param', cover_interaction)
 

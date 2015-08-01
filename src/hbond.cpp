@@ -320,7 +320,7 @@ namespace {
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_param=4, n_dim1=7, n_dim2=3, n_deriv=7;
+        constexpr static const int n_param=5, n_dim1=7, n_dim2=3, n_deriv=7;
 
         static float cutoff(const Vec<n_param> &p) {
             return p[0] + 1.f/p[1];
@@ -335,13 +335,13 @@ namespace {
             float3 d_sc, d_rHN;
             float coverage = coverage_score(sc_pos-extract<0,3>(hb_pos), extract<3,6>(hb_pos), 
                     d_sc, d_rHN, p[0], p[1], p[2], p[3]);
-            float prob_not_pp_hbond = 1.f - hb_pos[6];
+            float prefactor = p[4] * (1.f-hb_pos[6]);
 
-            store<0,3>(d_base, prob_not_pp_hbond * d_sc);
-            store<3,6>(d_base, prob_not_pp_hbond * d_rHN);
-            d_base[6] = -coverage;
+            store<0,3>(d_base, prefactor * d_sc);
+            store<3,6>(d_base, prefactor * d_rHN);
+            d_base[6] = -p[4]*coverage;
 
-            return prob_not_pp_hbond * coverage;
+            return prefactor * coverage;
         }
 
         static void expand_deriv(Vec<n_dim1> &d_hb, Vec<n_dim2> &d_sc, const Vec<n_deriv> &d_base) {
@@ -352,8 +352,29 @@ namespace {
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
-                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            throw "not implemented";
+                const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
+            float3 displace = sc_pos-extract<0,3>(hb_pos);
+            float3 rHN = extract<3,6>(hb_pos);
+
+            float  dist2 = mag2(displace);
+            float  inv_dist = rsqrt(dist2);
+            float  dist = dist2*inv_dist;
+            float3 displace_unitvec = inv_dist*displace;
+            float  cos_coverage_angle = dot(rHN,displace_unitvec);
+
+            float2 radial_cover  = compact_sigmoid(dist-p[0], p[1]);
+            float2 angular_cover = compact_sigmoid(p[2]-cos_coverage_angle, p[3]);
+
+            float radial_cover_s =(dist-p[0])*compact_sigmoid((dist-p[0])*p[1],1.f).y();
+            float angular_cover_s=(p[2]-cos_coverage_angle)*compact_sigmoid((p[2]-cos_coverage_angle)*p[3],1.f).y();
+
+            float prefactor = p[4] * (1.f-hb_pos[6]);
+
+            d_param[0] = prefactor * -radial_cover.y() * angular_cover.x();
+            d_param[1] = prefactor *  radial_cover_s   * angular_cover.x();
+            d_param[2] = prefactor *  radial_cover.x() * angular_cover.y();
+            d_param[3] = prefactor *  radial_cover.x() * angular_cover_s;
+            d_param[4] = (1.f-hb_pos[6]) * radial_cover.x() * angular_cover.x();
         }
     };
 }
@@ -491,6 +512,12 @@ struct HBondCoverage : public CoordNode {
            igraph.propagate_derivatives(ns);
         }
     }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return igraph.get_param();}
+    virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
+#endif
 };
 static RegisterNodeType<HBondCoverage,2> coverage_node("hbond_coverage");
 

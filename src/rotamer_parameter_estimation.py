@@ -32,21 +32,33 @@ def unpack_param_maker():
     outer_radius = inner_radius + T.exp(read_symm())
     outer_scale  = T.exp(read_symm())
 
-    return T.stack(inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale
+    rot = T.stack(inner_energy, inner_radius, inner_scale, outer_energy, outer_radius, outer_scale
             ).transpose((1,2,0))
 
-unpack_param, unpack_param_expr = func(unpack_param_maker())
+    def read_cov():
+        return read_param((2,n_restype))
 
-l2sqr = lambda expr: T.mean(expr**2)
+    cov_radius      = T.exp(read_cov())
+    cov_scale       = T.exp(read_cov())
+    cov_angle       = read_cov()
+    cov_angle_scale = T.exp(read_cov())
+    cov_energy      = read_cov()
 
-def pack_param(loose_param, check_accuracy=True):
-    discrep,     discrep_expr = func(T.sum((unpack_param_expr - loose_param)**2))
+    cov = T.stack(cov_radius, cov_scale, cov_angle, cov_angle_scale, cov_energy).transpose((1,2,0))
+
+    return func(rot), func(cov)
+
+(unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr) = unpack_param_maker()
+
+def pack_param(loose_rot,loose_cov, check_accuracy=True):
+    discrep,     discrep_expr = func(T.sum((unpack_rot_expr - loose_rot)**2) +
+                                     T.sum((unpack_cov_expr - loose_cov)**2))
     d_discrep, d_discrep_expr = func(T.grad(discrep_expr,lparam))
 
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
             (lambda x: discrep(x)),
-            np.zeros(20*20*6),
+            np.zeros(n_restype*n_restype*6+2*n_restype*5),
             method = 'L-BFGS-B',
             jac = (lambda x: d_discrep(x)))
 

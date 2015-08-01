@@ -227,7 +227,7 @@ struct WithinInteractionGraph {
 };
 
 
-template <typename IType, bool compute_param_deriv = false>
+template <typename IType>
 struct BetweenInteractionGraph {
     CoordNode &pos_node1, &pos_node2;
     int n_system;
@@ -243,15 +243,18 @@ struct BetweenInteractionGraph {
 
     // FIXME consider padding for vector loads
     std::vector<Vec<IType::n_param>> interaction_param;
-    SysArrayStorage interaction_param_deriv;
     std::vector<float> cutoff2;
 
     SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_n_edge)
-    SysArrayStorage edge_param_deriv;
     SysArrayStorage pos_deriv1, pos_deriv2;
     std::vector<int> edge_indices;
 
     std::vector<int> n_edge;
+
+#ifdef PARAM_DERIV
+    SysArrayStorage interaction_param_deriv;
+    SysArrayStorage edge_param_deriv;
+#endif
 
     // It is easiest if I just get my own subgroup of the .h5 file
     BetweenInteractionGraph(hid_t grp, CoordNode& pos_node1_, CoordNode& pos_node2_):
@@ -261,23 +264,22 @@ struct BetweenInteractionGraph {
         n_elem1(h5::get_dset_size(1,grp,"index1")[0]),            n_elem2(h5::get_dset_size(1,grp,"index2")[0]),
         max_n_edge(n_elem1*n_elem2),
         interaction_param(n_type1*n_type2),
-        interaction_param_deriv(n_system, IType::n_param, (compute_param_deriv ? n_type1*n_type2 : 0)),
         cutoff2(n_type1*n_type2),
         edge_deriv(n_system, IType::n_deriv, max_n_edge),
-        edge_param_deriv(n_system, IType::n_param, (compute_param_deriv ? max_n_edge : 0)),
         pos_deriv1(n_system, IType::n_dim1, n_elem1), pos_deriv2(n_system, IType::n_dim2, n_elem2),
         edge_indices(n_system*2*max_n_edge),
         n_edge(n_system)
+#ifdef PARAM_DERIV
+        ,interaction_param_deriv(n_system, IType::n_param, n_type1*n_type2)
+        ,edge_param_deriv(n_system, IType::n_param, max_n_edge)
+#endif
     {
         using namespace h5;
 
         check_size(grp, "interaction_param", n_type1, n_type2, IType::n_param);
         traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {
                 interaction_param[nt1*n_type2+nt2][np] = x;});
-
-        for(int nt1: range(n_type1))
-            for(int nt2: range(n_type2))
-                cutoff2[nt1*n_type2+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type2+nt2]));
+        update_cutoffs();
 
         check_size(grp, "index1", n_elem1); check_size(grp, "index2", n_elem2);
         check_size(grp, "type1",  n_elem1); check_size(grp, "type2",  n_elem2);
@@ -304,7 +306,11 @@ struct BetweenInteractionGraph {
         VecArray pos2 = pos_node2.coords().value[ns];
         fill(pos_deriv1[ns], IType::n_dim1, n_elem1, 0.f);
         fill(pos_deriv2[ns], IType::n_dim2, n_elem2, 0.f);
-        if(compute_param_deriv) fill(interaction_param_deriv[ns], IType::n_param, n_type1*n_type2, 0.f);
+
+
+        #ifdef PARAM_DERIV
+        fill(interaction_param_deriv[ns], IType::n_param, n_type1*n_type2, 0.f);
+        #endif
 
         int ne = 0;
         for(int i1: range(n_elem1)) {
@@ -371,11 +377,11 @@ struct BetweenInteractionGraph {
 
                 f(ne, value, index1,type1,my_id1, index2,type2,my_id2);
 
-                if(compute_param_deriv) {
-                    Vec<IType::n_param> dp;
-                    IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                    store_vec(edge_param_deriv[ns], ne, dp);
-                }
+                #ifdef PARAM_DERIV
+                Vec<IType::n_param> dp;
+                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
+                store_vec(edge_param_deriv[ns], ne, dp);
+                #endif
 
                 ++ne;
             }
@@ -391,12 +397,12 @@ struct BetweenInteractionGraph {
         update_vec(pos_deriv1[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 0], d1);
         update_vec(pos_deriv2[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 1], d2);
 
-        if(compute_param_deriv) {
-            auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
-            auto type1 = types1[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
-            auto type2 = types2[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
-            update_vec(interaction_param_deriv[ns], type1*n_type2+type2, d);
-        }
+        #ifdef PARAM_DERIV
+        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
+        auto type1 = types1[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
+        auto type2 = types2[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
+        update_vec(interaction_param_deriv[ns], type1*n_type2+type2, d);
+        #endif
     }
 
     void propagate_derivatives(int ns) {
@@ -412,6 +418,42 @@ struct BetweenInteractionGraph {
        for(int i: range(n_elem2))
            store_vec(pos_accum2, param2[i].slot, load_vec<IType::n_dim2>(pos_deriv2[ns],i));
     }
+
+    void update_cutoffs() {
+        for(int nt1: range(n_type1)) {
+            for(int nt2: range(n_type2)) {
+                cutoff2[nt1*n_type2+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type2+nt2]));
+            }
+        }
+    }
+
+#ifdef PARAM_DERIV
+    std::vector<float> get_param() const {
+        std::vector<float> ret; ret.reserve(n_type1*n_type2*IType::n_param);
+        for(int i: range(n_type1*n_type2))
+            for(int d: range(IType::n_param))
+                ret.push_back(interaction_param[i][d]);
+        return ret;
+    }
+
+    std::vector<float> get_param_deriv() const {
+        std::vector<float> ret; ret.reserve(n_system*n_type1*n_type2*IType::n_param);
+        for(int ns: range(n_system))
+            for(int i: range(n_type1*n_type2))
+                for(int d: range(IType::n_param))
+                    ret.push_back(interaction_param_deriv[ns](d,i));
+        return ret;
+    }
+
+    void set_param(const std::vector<float>& new_param) {
+        if(new_param.size() != size_t(n_type1*n_type2*IType::n_param)) throw std::string("Bad params");
+        // just blast over interaction param and update cutoffs
+        for(int i: range(n_type1*n_type2))
+            for(int np: range(IType::n_param)) 
+                interaction_param[i][np] = new_param[i*IType::n_param + np];
+        update_cutoffs();
+    }
+#endif
 };
 
 
