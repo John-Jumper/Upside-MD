@@ -519,6 +519,8 @@ try {
         printf("\n");
         global_time_keeper.print_report(3*n_round+1);
         printf("\n");
+
+        default_logger.reset(nullptr);
     } catch(const string &e) {
         fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
         return 1;

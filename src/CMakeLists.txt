@@ -13,7 +13,7 @@ else()
     set(DEBUG_FLAGS "-g")
 endif()
 
-set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
+set (OMP_FLAGS "") # "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
 set (OPT     "-O3 -ffast-math -fno-finite-math-only -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
@@ -55,6 +55,9 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 add_library(upside_calculation SHARED EXCLUDE_FROM_ALL
     engine_c_library.cpp
     ${ENGINE_SRC})
+
+set_target_properties(upside_calculation PROPERTIES
+    COMPILE_FLAGS "-DPARAM_DERIV")
 
 target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES})
 

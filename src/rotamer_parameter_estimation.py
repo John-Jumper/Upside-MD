@@ -7,6 +7,10 @@ import theano
 import theano.tensor as T
 import cPickle as cp
 import scipy.optimize as opt
+import threading
+import concurrent.futures
+
+executor = concurrent.futures.ThreadPoolExecutor(8)
 
 n_restype = 20
 
@@ -71,19 +75,30 @@ def pack_param(loose_rot,loose_cov, check_accuracy=True):
 def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
     energy = np.zeros(2)
     deriv = [np.zeros((2,)+pm.shape) for pm in param_matrices]
+    update_lock = threading.Lock()
 
-    for pos, fix, free in pos_fix_free:
+    def f(x):
+        pos, fix, free = x
         for nm, pm in zip(node_names, param_matrices):
             fix .set_param(pm, nm) 
             free.set_param(pm, nm) 
 
-        energy[0] += fix .energy(pos)
-        energy[1] += free.energy(pos)
+        en0 = fix .energy(pos)
+        en1 = free.energy(pos)
 
-        for d,nm in zip(deriv,node_names):
-            d[0] += fix .get_param_deriv(d[0].shape, nm)
-            d[1] += free.get_param_deriv(d[0].shape, nm)
+        this_deriv = [(fix .get_param_deriv(d[0].shape, nm),
+                       free.get_param_deriv(d[0].shape, nm)) for d,nm in zip(deriv,node_names)]
 
+        # must take a lock since numpy updates may not be atomic
+        with update_lock:
+            energy[0] += en0
+            energy[1] += en1
+
+            for d,(d0,d1) in zip(deriv, this_deriv):
+                d[0] += d0
+                d[1] += d1
+
+    list(executor.map(f, pos_fix_free))
     return energy, deriv
 
 

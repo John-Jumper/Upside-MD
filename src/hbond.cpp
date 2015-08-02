@@ -335,11 +335,11 @@ namespace {
             float3 d_sc, d_rHN;
             float coverage = coverage_score(sc_pos-extract<0,3>(hb_pos), extract<3,6>(hb_pos), 
                     d_sc, d_rHN, p[0], p[1], p[2], p[3]);
-            float prefactor = p[4] * (1.f-hb_pos[6]);
+            float prefactor = p[4] * sqr(1.f-hb_pos[6]);
 
             store<0,3>(d_base, prefactor * d_sc);
             store<3,6>(d_base, prefactor * d_rHN);
-            d_base[6] = -p[4]*coverage;
+            d_base[6] = -p[4]*coverage * (1.f-hb_pos[6])*2.f;
 
             return prefactor * coverage;
         }
@@ -368,13 +368,13 @@ namespace {
             float radial_cover_s =(dist-p[0])*compact_sigmoid((dist-p[0])*p[1],1.f).y();
             float angular_cover_s=(p[2]-cos_coverage_angle)*compact_sigmoid((p[2]-cos_coverage_angle)*p[3],1.f).y();
 
-            float prefactor = p[4] * (1.f-hb_pos[6]);
+            float prefactor = p[4] * sqr(1.f-hb_pos[6]);
 
             d_param[0] = prefactor * -radial_cover.y() * angular_cover.x();
             d_param[1] = prefactor *  radial_cover_s   * angular_cover.x();
             d_param[2] = prefactor *  radial_cover.x() * angular_cover.y();
             d_param[3] = prefactor *  radial_cover.x() * angular_cover_s;
-            d_param[4] = (1.f-hb_pos[6]) * radial_cover.x() * angular_cover.x();
+            d_param[4] = sqr(1.f-hb_pos[6]) * radial_cover.x() * angular_cover.x();
         }
     };
 }

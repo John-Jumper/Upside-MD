@@ -195,7 +195,7 @@ def write_infer_H_O(fasta, excluded_residues):
 
 
 
-def write_count_hbond(fasta, hbond_energy):
+def write_count_hbond(fasta, hbond_energy, coverage_library):
     infer_group = t.get_node('/input/potential/infer_H_O')
 
     n_donor    = infer_group.donors   .id.shape[0]
@@ -236,16 +236,8 @@ def write_count_hbond(fasta, hbond_energy):
     create_array(cgrp, 'type2',  np.array([aa_num[s] for s in rseq]))
     create_array(cgrp, 'id2',    np.arange(len(rseq)))
 
-    # FIXME add overall energy here
-    # parameters are inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
-    cover_interaction = np.zeros((2,len(aa_num),4))
-    cover_interaction[:,:,0] = 4.0 # hbond_coverage_sidechain_radius 
-    cover_interaction[:,:,1] = 1./1.0   # cover scale, rather arbitrary
-    cover_interaction[:,:,2] = 0.174    # 80 degrees, rather arbitrary
-    cover_interaction[:,:,3] = 2.865    # 20 degrees-ish, rather arbitrary
-    cover_interaction[:,:,4] = 1.0      # 1 unit of energy, completely arbitrary
-
-    create_array(cgrp, 'interaction_param', cover_interaction)
+    with tb.open_file(coverage_library) as data:
+         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
     n_res = len(fasta)
     if hbond_energy > 0.:
@@ -1075,7 +1067,7 @@ def write_rotamer(fasta, interaction_library, damping):
     pg = t.create_group(g, "pair_interaction")
 
     with tb.open_file(interaction_library) as data:
-         create_array(pg, 'interaction_param', data.root.interaction_params[:])
+         create_array(pg, 'interaction_param', data.root.pair_interaction[:])
 
     # now I need to create index, type, and id
     index = []
@@ -1411,7 +1403,7 @@ def main():
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
-        write_count_hbond(fasta_seq, args.hbond_energy)
+        write_count_hbond(fasta_seq, args.hbond_energy, args.rotamer_interaction)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
