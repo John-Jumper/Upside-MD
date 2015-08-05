@@ -46,9 +46,10 @@ def unpack_param_maker():
     cov_scale       = T.exp(read_cov())
     cov_angle       = read_cov()
     cov_angle_scale = T.exp(read_cov())
-    cov_energy      = read_cov()
+    cov_energy0     = read_cov()
+    cov_energy1     = read_cov()
 
-    cov = T.stack(cov_radius, cov_scale, cov_angle, cov_angle_scale, cov_energy).transpose((1,2,0))
+    cov = T.stack(cov_radius, cov_scale, cov_angle, cov_angle_scale, cov_energy0, cov_energy1).transpose((1,2,0))
 
     return func(rot), func(cov)
 
@@ -62,7 +63,7 @@ def pack_param(loose_rot,loose_cov, check_accuracy=True):
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
             (lambda x: discrep(x)),
-            np.zeros(n_restype*n_restype*6+2*n_restype*5),
+            np.zeros(n_restype*n_restype*6+2*n_restype*6),
             method = 'L-BFGS-B',
             jac = (lambda x: d_discrep(x)))
 
