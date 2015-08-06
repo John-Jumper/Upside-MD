@@ -616,8 +616,8 @@ def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference
             frac2 = (1. if N_term else 0.5)*frac2
             frac_coil = 1. - (frac1 + frac2)
 
-            frac1_energy = -np.log(1e-10 + frac1) + sheet_reference_energy
-            frac2_energy = -np.log(1e-10 + frac2) + sheet_reference_energy
+            frac1_energy = -np.log(1e-10 + frac1) - sheet_reference_energy
+            frac2_energy = -np.log(1e-10 + frac2) - sheet_reference_energy
             frac_coil_energy = -np.log(1e-10+frac_coil)
 
             e1 = map1         + frac1_energy
@@ -633,7 +633,7 @@ def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference
 
             # taking out e_min increases numerical stability
             rama_maps[i] = e_min + -np.log(np.exp(-ec) + np.exp(-e1) + np.exp(-e2))
-            rama_maps[i] -= (rama_maps[i]*np.exp(-rama_maps[i]))/np.exp(-rama_maps[i]).sum()  # make average energy 0.
+            rama_maps[i] -= (rama_maps[i]*np.exp(-rama_maps[i])).sum()/np.exp(-rama_maps[i]).sum()  # make average energy 0.
 
     t.close()
     return dict(rama_maps = rama_maps, phi=np.arange(-180,180,5), psi=np.arange(-180,180,5))
