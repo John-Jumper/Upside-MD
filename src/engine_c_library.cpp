@@ -33,6 +33,12 @@ int evaluate_energy(float* energy, DerivEngine* engine, const float* pos) try {
     engine->compute(PotentialAndDerivMode);
     *energy = engine->potential[0];
     return 0;
+} catch(const char* e) {
+    fprintf(stderr, "\n\nERROR: %s\n", e);
+    return 1;
+} catch(const string& e) {
+    fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
+    return 1;
 } catch(...) {
     return 1;
 }

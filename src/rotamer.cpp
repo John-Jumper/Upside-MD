@@ -372,7 +372,24 @@ struct RotamerSidechain: public PotentialNode {
                 prob_slot.push_back(p.slot);
             }
         }
+
+        if(default_logger) {
+            default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem}, 
+                    [&](float* buffer) {
+                       auto en = residue_free_energies();
+                       copy(begin(en), end(en), buffer);});
+
+            for(int npn: range(n_prob_nodes))
+                default_logger->add_logger<float>(("rotamer_1body_energy" + to_string(npn)).c_str(),
+                        {nodes1.n_elem+nodes3.n_elem}, [npn,this](float* buffer) {
+                            auto en = this->rotamer_1body_energy(npn);
+                            copy(begin(en), end(en), buffer);});
+        }
+
+
     }
+
+
 
     void ensure_fresh_energy() {
         if(!energy_fresh_relative_to_derivative) compute_value(PotentialAndDerivMode);
@@ -448,11 +465,78 @@ struct RotamerSidechain: public PotentialNode {
         float en = 0.f;
         for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_energy<1>  (nn);
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
+        for(int ne: range(edges11.n_edge)) en += -logf(edges11.prob(0,ne));
         for(int ne: range(edges33.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
-        for(int ne: range(edges11.n_edge)) en -= logf(edges11.prob(0,ne));
         return en;
     }
 
+    vector<float> residue_free_energies() {
+        vector<float> e1(nodes1.n_elem, 0.f);
+        vector<float> e3(nodes3.n_elem, 0.f);
+
+        for(int nn: range(nodes1 .n_elem)) {float en = nodes1.node_free_energy<1>(nn); e1[nn] += en;}
+        for(int nn: range(nodes3 .n_elem)) {float en = nodes3.node_free_energy<3>(nn); e3[nn] += en;}
+
+        for(int ne: range(edges11.n_edge)) {
+            float         en = -logf(edges11.prob(0,ne));
+            pair<int,int> ei = edges11.edge_indices[ne];
+            e1[ei.first ] += 0.5*en;
+            e1[ei.second] += 0.5*en;
+        }
+
+        for(int ne: range(edges33.n_edge)) {
+            float         en = edges33.edge_free_energy<3,3>(ne);
+            pair<int,int> ei = edges33.edge_indices[ne];
+            e3[ei.first ] += 0.5*en;
+            e3[ei.second] += 0.5*en;
+        }
+
+        return arrange_energies(e1,e3);
+    }
+
+    vector<float> rotamer_1body_energy(int prob_node_index) {
+        vector<float> e1(nodes1.n_elem, 0.f);
+        vector<float> e3(nodes3.n_elem, 0.f);
+
+        VecArray energy_1body = prob_nodes[prob_node_index]->coords().value[0];
+        for(int n: range(igraph.n_elem)) {
+            unsigned id = igraph.id[n];
+            unsigned selector = (1u<<n_bit_rotamer) - 1u;
+            unsigned rot      = id & selector; id >>= n_bit_rotamer;
+            unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
+            int index = igraph.param[n].index;
+
+            switch(n_rot) {
+                case 1: e1[id] += nodes1.cur_belief(rot,id) * energy_1body(0,index); break;
+                case 3: e3[id] += nodes3.cur_belief(rot,id) * energy_1body(0,index); break;
+                default: throw string("impossible");
+            }
+        }
+
+        return arrange_energies(e1,e3);
+    }
+
+    vector<float> arrange_energies(const vector<float>& e1, const vector<float>& e3) {
+        vector<float> energies(n_elem_rot[1]+n_elem_rot[3]);
+        auto en_loc = begin(energies);
+
+        for(unsigned id: igraph.id) {
+            unsigned selector = (1u<<n_bit_rotamer) - 1u;
+            if(id&selector) continue; // only count on the 0th rotamer
+            id>>=n_bit_rotamer;
+            unsigned n_rot = id & selector;
+            id>>=n_bit_rotamer;  // now id contains the local alignment
+
+            switch(n_rot) {
+                case 1: *en_loc = e1[id]; ++en_loc; break;
+                case 3: *en_loc = e3[id]; ++en_loc; break;
+                default: throw string("impossible");
+            }
+        }
+
+        if(en_loc != end(energies)) throw string("wrong number of residues");
+        return energies;
+    }
 
     void propagate_derivatives() {
         for(auto &el: edges11.edge_loc)
