@@ -28,7 +28,6 @@ void basin_correlation_pot(
         float basin_sharpness, Basin* basins,
         int n_term, int n_system) 
 {
-    #pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
 

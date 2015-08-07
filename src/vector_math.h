@@ -96,7 +96,6 @@ static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
 
 
 static void fill(SysArray s, int n_system, int n_dim, int n_elem, float value) {
-    #pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         fill(s[ns], n_dim, n_elem, value);
     }

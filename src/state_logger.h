@@ -133,7 +133,7 @@ struct H5Logger {
     }
 };
 
-extern std::unique_ptr<H5Logger> default_logger;
+extern std::shared_ptr<H5Logger> default_logger;
 
 static bool logging(LogLevel level) {
     if(!default_logger) return false; // cannot log without a defined logger

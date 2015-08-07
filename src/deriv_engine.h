@@ -182,6 +182,7 @@ struct DerivEngine
     Pos* pos;
     std::vector<float> potential;
 
+    DerivEngine() {}
     DerivEngine(int n_atom, int n_system): 
         potential(n_system)
     {
@@ -268,7 +269,6 @@ void reverse_autodiff(
         int n_atom, 
         int n_system)
 {
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         std::vector<TempCoord<my_width>> sens(n_atom);
         for(int nt=0; nt<n_tape; ++nt) {

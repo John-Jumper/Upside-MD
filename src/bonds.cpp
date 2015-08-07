@@ -151,7 +151,6 @@ void rama_coord(
         const RamaCoordParams* params,
         const int n_term, const int n_system) 
 {
-#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<2> rama_pos(output, ns, nt);
@@ -348,13 +347,12 @@ struct CavityRadialParams {
 };
 
 
-__attribute__ ((noinline)) void cavity_radial(
+void cavity_radial(
         float* potential,
         const CoordArray pos,
         const CavityRadialParams* params,
         int n_terms, int n_system)
 {
-    #pragma omp parallel for schedule(static,1)
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
 
@@ -491,7 +489,6 @@ void angle_spring(
         const AngleSpringParams* restrict params,
         int n_terms, int n_system)
 {
-#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
 
@@ -588,7 +585,6 @@ void dynamic_dihedral_spring(
         int params_offset,
         int n_terms, int n_system)
 {
-#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {
@@ -651,7 +647,6 @@ void dihedral_spring(
         const DihedralSpringParams* restrict params,
         int n_terms, int n_system)
 {
-#pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         if(potential) potential[ns] = 0.f;
         for(int nt=0; nt<n_terms; ++nt) {

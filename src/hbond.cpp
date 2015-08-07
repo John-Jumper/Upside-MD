@@ -97,7 +97,6 @@ void infer_HN_OC_pos_and_dir(
         const VirtualParams* params,
         int n_term, int n_system)
 {
-    #pragma omp parallel for
     for(int ns=0; ns<n_system; ++ns) {
         for(int nt=0; nt<n_term; ++nt) {
             MutableCoord<6> hbond_pos(HN_OC, ns, nt);
@@ -478,7 +477,6 @@ struct HBondCoverage : public CoordNode {
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_coverage"));
-        #pragma omp parallel for
         for(int ns=0; ns<n_system; ++ns) {
             VecArray cov = coords().value[ns];
             for(int nc: range(n_sc)) cov(0,nc) = 0.f;
@@ -493,7 +491,6 @@ struct HBondCoverage : public CoordNode {
 
     virtual void propagate_deriv() {
         Timer timer(string("hbond_coverage_deriv"));
-        #pragma omp parallel for
         for(int ns=0; ns<n_system; ++ns) {
             vector<float> sens(n_sc, 0.f);
             VecArray accum = slot_machine.accum_array()[ns];

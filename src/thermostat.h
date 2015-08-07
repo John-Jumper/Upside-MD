@@ -14,7 +14,7 @@ struct OrnsteinUhlenbeckThermostat
         }
 
     public:
-        const int n_system;
+        int n_system;
         uint32_t random_seed;
         float timescale;
         float delta_t;
@@ -23,6 +23,7 @@ struct OrnsteinUhlenbeckThermostat
         std::vector<float> temp;
         std::vector<float> noise_scale;
 
+        OrnsteinUhlenbeckThermostat(): n_system(1) {}
         OrnsteinUhlenbeckThermostat(uint32_t random_seed_, float timescale_, std::vector<float> temp_, float delta_t_):
             n_invocations(0), n_system(temp_.size()),
             random_seed(random_seed_), timescale(timescale_), delta_t(delta_t_), temp(temp_), noise_scale(n_system)

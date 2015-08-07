@@ -153,7 +153,6 @@ struct RigidPlacementNode: public CoordNode {
         // FIXME need to move the energy scaling back to the rotamer;
         SysArray pos_s = coords().value;
 
-        #pragma omp parallel for
         for(int ns=0; ns<n_system; ++ns) {
            VecArray pos   = pos_s[ns];
            VecArray accum = slot_machine.accum_array()[ns];

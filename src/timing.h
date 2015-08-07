@@ -30,6 +30,7 @@ struct TimeKeeper {
 };
 extern TimeKeeper global_time_keeper;
 
+#ifdef COLLECT_PROFILE
 struct Timer {
     TimeKeeper &time_keeper;
     const std::string name;
@@ -51,5 +52,13 @@ struct Timer {
 
     ~Timer() {stop();}
 };
+#else
+struct Timer {
+    Timer(const std::string &name_, TimeKeeper& time_keeper_ = global_time_keeper) {}
+    void stop () {}
+    void abort() {}
+};
+#endif
+
 
 #endif

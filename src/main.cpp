@@ -17,32 +17,45 @@
 using namespace std;
 using namespace h5;
 
+struct System {
+    int n_atom;
+    uint32_t random_seed;
+    float temperature;
+    H5Obj config;
+    shared_ptr<H5Logger> logger;
+    DerivEngine engine;
+    PivotSampler pivot_sampler;
+    SysArrayStorage mom; // momentum
+    OrnsteinUhlenbeckThermostat thermostat;
+    uint64_t round_num;
+    System(): round_num(0) {}
+};
+
 
 void parallel_tempering_step(
         uint32_t seed, uint64_t round,
-        vector<int>& coord_indices,
-        const vector<float>& temperatures, DerivEngine& engine) {
-    int n_system = engine.pos->n_system;
-    if(int(temperatures.size()) != n_system) throw string("impossible");
-    if(int(coord_indices.size()) != n_system) throw string("impossible");
+        vector<System>& systems) {
+    int n_system = systems.size();
 
     vector<float> beta(n_system);
-    for(int i=0; i<n_system; ++i) beta[i] = 1.f/temperatures[i];
+    for(int i=0; i<n_system; ++i) beta[i] = 1.f/systems[i].temperature;
 
     // compute the boltzmann factors for everyone
     auto compute_log_boltzmann = [&]() {
-        engine.compute(PotentialAndDerivMode);
         vector<float> result(n_system);
-        for(int i=0; i<n_system; ++i) 
-            result[i] = -beta[i]*engine.potential[i];
+        for(int i=0; i<n_system; ++i) {
+            systems[i].engine.compute(PotentialAndDerivMode);
+            result[i] = -beta[i]*systems[i].engine.potential[0];
+        }
         return result;
     };
 
     // swap coordinates and the associated system indices
     auto coord_swap = [&](int ns1, int ns2) {
-        SysArray pos = engine.pos->coords().value;
-        swap_ranges(pos[ns1].v, pos[ns1+1].v, pos[ns2].v);
-        swap(coord_indices[ns1], coord_indices[ns2]);
+        swap_ranges(
+                systems[ns1].engine.pos->coords().value[0].v,  
+                systems[ns1].engine.pos->coords().value[1].v,  
+                systems[ns2].engine.pos->coords().value[0].v);
     };
 
     RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
@@ -153,9 +166,6 @@ try {
     CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (Upside)\n Author: John Jumper", 
             ' ', "0.1");
 
-    ValueArg<string> config_arg("", "config", 
-            "path to .h5 file from make_sys.py that contains the simulation configuration",
-            true, "", "file path", cmd);
     ValueArg<double> time_step_arg("", "time-step", "time step for integration (default 0.01)", 
             false, 0.01, "float", cmd);
     ValueArg<double> duration_arg("", "duration", "duration of simulation", 
@@ -188,16 +198,9 @@ try {
     SwitchArg disable_z_recenter_arg("", "disable-z-recentering", 
             "Disable z-recentering of protein in the universe", 
             cmd, false);
-    ValueArg<double> equilibration_duration_arg("", "equilibration-duration", 
-            "duration to limit max force for equilibration (also decreases thermostat interval)", 
-            false, 0., "float", cmd);
     SwitchArg generate_expected_deriv_arg("", "generate-expected-deriv", 
             "write an expected deriv to the input for later testing (developer only)", 
             cmd, false);
-    ValueArg<string> re_energize_arg("", "re-energize", 
-            "path to .h5 file with a trajectory under /output/pos for which the energy will be recalculated "
-            "using the energy in --config.  Must have the same number of systems as --config and must be a "
-            "different file than --config.", false, "", "file path", cmd);
     ValueArg<string> log_level_arg("", "log-level", 
             "Use this option to control which arrays are stored in /output.  Availabe levels are basic, detailed, "
             "or extensive.  Default is basic.",
@@ -207,79 +210,16 @@ try {
             "of the potential for the initial structure.  This may give strange answers for native structures "
             "(no steric clashes may given an agreement of NaN) or random structures (where bonds and angles are "
             "exactly at their equilibrium values).  Interpret these results at your own risk.", cmd, false);
+    UnlabeledMultiArg<string> config_args("config_files","configuration .h5 files", true, "h5_files");
+    cmd.add(config_args);
     cmd.parse(argc, argv);
 
-    printf("invocation:");
-    std::string invocation(argv[0]);
-    for(auto arg=argv+1; arg!=argv+argc; ++arg) invocation += string(" ") + *arg;
-    printf("%s\n", invocation.c_str());
-
     try {
-        h5_noerr(H5Eset_auto(H5E_DEFAULT, nullptr, nullptr));
-        H5Obj config;
-        try {
-            config = h5_obj(H5Fclose, H5Fopen(config_arg.getValue().c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        } catch(string &s) {
-            throw string("Unable to open configuration file at ") + config_arg.getValue();
-        }
 
-        if(h5_exists(config.get(), "/output", false)) {
-            // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
-            // datasets or groups.  Subsequent h5repack will reclaim space, however.
-            if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(config.get(), "/output", H5P_DEFAULT));
-            else throw string("/output already exists and --overwrite-output was not specified");
-        }
-
-        {
-            LogLevel log_level;
-            if     (log_level_arg.getValue() == "")          log_level = LOG_BASIC;
-            else if(log_level_arg.getValue() == "basic")     log_level = LOG_BASIC;
-            else if(log_level_arg.getValue() == "detailed")  log_level = LOG_DETAILED;
-            else if(log_level_arg.getValue() == "extensive") log_level = LOG_EXTENSIVE;
-            else throw string("Illegal value for --log-level");
-
-            default_logger = move(unique_ptr<H5Logger>(new H5Logger(config, "output", log_level)));
-        }
-        write_string_attribute(config.get(), "output", "invocation", invocation);
-
-        auto pos_shape = get_dset_size(3, config.get(), "/input/pos");
-        int  n_atom   = pos_shape[0];
-        int  n_system = pos_shape[2];
-        if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
-
-        #if defined(_OPENMP)
-        // current we only use OpenMP parallelism over systems
-        if(n_system < omp_get_max_threads()) omp_set_num_threads(n_system);
-        if(omp_get_max_threads() > 1) 
-            printf("Multi-threaded execution with %i threads\n\n", omp_get_max_threads());
-        else
-            printf("Single-threaded execution\n\n");
-        #endif
-
-        auto potential_group = open_group(config.get(), "/input/potential");
-        auto engine = initialize_engine_from_hdf5(n_atom, n_system, potential_group.get());
-        traverse_dset<3,float>(config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
-                engine.pos->coords().value[ns](d,na) = x;});
-        printf("\nn_atom %i\nn_system %i\n", engine.pos->n_atom, engine.pos->n_system);
-
-        engine.compute(PotentialAndDerivMode);
-        printf("Initial potential energy:");
-        for(float e: engine.potential) printf(" %.2f", e);
-        printf("\n");
-
-        deriv_matching(config.get(), engine, generate_expected_deriv_arg.getValue());
-        if(potential_deriv_agreement_arg.getValue()){
-            if(n_system>1) throw string("Testing code does not support n_system > 1");
-            printf("Initial agreement:\n");
-            for(auto &n: engine.nodes)
-                printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
-            printf("\n");
-
-            auto relative_error = potential_deriv_agreement(engine);
-            printf("overall potential relative error: ");
-            for(auto r: relative_error) printf(" %.5f", r);
-            printf("\n");
-        }
+        printf("invocation:");
+        std::string invocation(argv[0]);
+        for(auto arg=argv+1; arg!=argv+argc; ++arg) invocation += string(" ") + *arg;
+        printf("%s\n", invocation.c_str());
 
         float dt = time_step_arg.getValue();
         double duration = duration_arg.getValue();
@@ -288,82 +228,18 @@ try {
         int frame_interval = max(1.,round(frame_interval_arg.getValue() / (3*dt)));
 
         unsigned long big_prime = 4294967291ul;  // largest prime smaller than 2^32
-        uint32_t random_seed = uint32_t(seed_arg.getValue() % big_prime);
+        uint32_t base_random_seed = uint32_t(seed_arg.getValue() % big_prime);
 
-        int pivot_interval = pivot_interval_arg.getValue() > 0. 
-            ? max(1,int(pivot_interval_arg.getValue()/(3*dt)))
-            : 0;
+        // initialize thermostat and thermalize momentum
+        printf("random seed: %lu\n", (unsigned long)(base_random_seed));
 
-        PivotSampler pivot_sampler;
-        if(pivot_interval) {
-            pivot_sampler = PivotSampler{open_group(config.get(), "/input/pivot_moves").get(), n_system};
-            default_logger->add_logger<int>("pivot_stats", {n_system,2}, [&](int* stats_buffer) {
-                    for(int ns=0; ns<n_system; ++ns) {
-                        stats_buffer[2*ns+0] = pivot_sampler.pivot_stats[ns].n_success;
-                        stats_buffer[2*ns+1] = pivot_sampler.pivot_stats[ns].n_attempt;
-                        pivot_sampler.pivot_stats[ns].reset();
-                    }});
-        }
-
-        vector<float> temperature(n_system);
         float max_temp = max_temperature_arg.getValue();
         float min_temp = temperature_arg.getValue();
         if(max_temp == -1.) max_temp = min_temp;
 
-        if(max_temp != min_temp && n_system == 1) 
-            throw string("--max-temperature cannot be specified for only a single system");
-        if(n_system==1) {
-            temperature[0] = temperature_arg.getValue();
-        } else {
-            // system 0 is the minimum temperature
-            // tighter spacing at the low end of temperatures because the variance is decreasing
-            for(int ns=0; ns<n_system; ++ns) 
-                temperature[ns] = sqr((sqrt(min_temp)*(n_system-1-ns) + sqrt(max_temp)*ns)/(n_system-1));
-        }
-
-        printf("\n");
-        for(int ns: range(n_system))
-            printf("temperature %2i: %.3f\n", ns, temperature[ns]);
-        printf("\n");
-
-        default_logger->log_once<double>("temperature", {n_system}, [&](double* temperature_buffer) {
-                for(int ns=0; ns<n_system; ++ns) temperature_buffer[ns] = temperature[ns];});
-
-        float equil_duration = equilibration_duration_arg.getValue();
-        // equilibration_max_force is set so that the change in momentum should not be more than
-        // 20% of the equilibration magnitude over a single dt interval
-        float equil_avg_mom   = sqrtf(temperature[n_system-1]/1.5f);  // all particles have mass == 1.
-        float equil_max_force = 0.8f*equil_avg_mom/dt;
-
-        // initialize thermostat and thermalize momentum
-        vector<float> mom(n_atom*n_system*3, 0.f);
-        SysArray mom_sys(mom.data(), n_atom*3, n_atom);
-
-        printf("random seed: %lu\n", (unsigned long)(random_seed));
-        auto thermostat = OrnsteinUhlenbeckThermostat(
-                random_seed,
-                thermostat_timescale_arg.getValue(),
-                temperature,
-                1e8);
-        thermostat.apply(mom_sys, n_atom); // initial thermalization
-        thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
-
-        default_logger->add_logger<float>("pos", {n_system, n_atom, 3}, [&](float* pos_buffer) {
-                SysArray pos_array = engine.pos->coords().value;
-                for(int ns=0; ns<n_system; ++ns)
-                    for(int na=0; na<n_atom; ++na) 
-                        for(int d=0; d<3; ++d) 
-                            pos_buffer[ns*n_atom*3 + na*3 + d] = pos_array[ns](d,na);
-            });
-        default_logger->add_logger<double>("kinetic", {n_system}, [&](double* kin_buffer) {
-            for(int ns=0; ns<n_system; ++ns) {
-                double sum_kin = 0.f;
-                for(int na=0; na<n_atom; ++na) sum_kin += mag2(StaticCoord<3>(mom_sys, ns, na).f3());
-                kin_buffer[ns] = (0.5/n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
-            }});
-        default_logger->add_logger<double>("potential", {n_system}, [&](double* pot_buffer) {
-                engine.compute(PotentialAndDerivMode);
-                for(int ns=0; ns<n_system; ++ns) pot_buffer[ns] = engine.potential[ns];});
+        int pivot_interval = pivot_interval_arg.getValue() > 0. 
+            ? max(1,int(pivot_interval_arg.getValue()/(3*dt)))
+            : 0;
 
         int duration_print_width = ceil(log(1+duration)/log(10));
 
@@ -371,131 +247,222 @@ try {
         if(replica_interval_arg.getValue())
             replica_interval = max(1.,replica_interval_arg.getValue()/(3*dt));
 
-        vector<int> coord_indices; 
-        for(int ns=0; ns<n_system; ++ns) coord_indices.push_back(ns);
-        default_logger->add_logger<int>("coord_indices", {n_system}, [&](int* indices_buffer) {
-                copy_n(begin(coord_indices), n_system, indices_buffer);});
-
         bool do_recenter = !disable_recenter_arg.getValue();
         bool xy_recenter_only = do_recenter && disable_z_recenter_arg.getValue();
 
-        // quick hack of a check for z-centering and membrane potential
-        if(do_recenter && !xy_recenter_only) {
-            for(auto &n: engine.nodes) {
-                if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom"))
-                    throw string("You have z-centering and a z-dependent potential turned on.  "
-                            "This is not what you want.  Consider --disable-z-recentering "
-                            "or --disable-recentering.");
-            }
-        }
+        h5_noerr(H5Eset_auto(H5E_DEFAULT, nullptr, nullptr));
+        vector<string> config_paths = config_args.getValue();
+        vector<System> systems(config_paths.size());
 
-        if(do_recenter) {
-            for(auto &n: engine.nodes) {
-                if(is_prefix(n.name, "cavity_radial") || is_prefix(n.name, "tension"))
-                    throw string("You have re-centering and a position-dependent potential turned on.  "
-                            "This is not what you want.  Consider --disable-recentering.");
-            }
-        }
+        for(int ns=0; ns<int(systems.size()); ++ns) {
+            System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
+            sys->random_seed = base_random_seed + ns;
 
-        double physical_time = 0.;
-        default_logger->add_logger<double>("time", {}, [&](double* time_buffer) {*time_buffer=physical_time;});
-
-        if(re_energize_arg.getValue() != "") {
-            H5Obj coord_config;
             try {
-                coord_config = h5_obj(H5Fclose, H5Fopen(re_energize_arg.getValue().c_str(), 
-                            H5F_ACC_RDWR, H5P_DEFAULT));
+                sys->config = move(h5_obj(H5Fclose, H5Fopen(config_paths[ns].c_str(), H5F_ACC_RDWR, H5P_DEFAULT)));
             } catch(string &s) {
-                throw string("Unable to open configuration file at ") + config_arg.getValue();
+                throw string("Unable to open configuration file at ") + config_paths[ns];
             }
 
-            int n_frame = get_dset_size(1, coord_config.get(), "/output/time")[0];
-            printf("number of frames to re-energize %i\n", n_frame);
-            check_size(coord_config.get(), "/output/time", n_frame);
-            check_size(coord_config.get(), "/output/pos",  n_frame, n_system, n_atom, 3);
-
-            // first read the physical times
-            vector<double> all_times(n_frame);
-            traverse_dset<1,double>(coord_config.get(), "/output/time", [&](size_t nf, double x) {
-                    all_times.push_back(x);});
-
-            // now load the coordinate information, processing a frame as soon as it is ready
-            SysArray pos_sys = engine.pos->coords().value;
-            printf("processing");
-            traverse_dset<4,float>(coord_config.get(), "/output/pos", 
-                    [&](size_t nf, size_t ns, size_t na, size_t d, float x) {
-                    pos_sys[ns](d,na) = x;
-                    if(int(ns)==n_system-1 && int(na)==n_atom-1 && int(d)==2) { 
-                         // we are done loading a frame, so process it
-                         physical_time = all_times[nf];
-                         printf(" %lu", nf); fflush(stdout);
-                         engine.compute(PotentialAndDerivMode);
-                         default_logger->collect_samples();
-                    }});
-            printf("\n");
-
-            if(h5_exists(coord_config.get(), "/output/potential")) {
-                check_size(coord_config.get(), "/output/potential", n_frame, n_system);
-                vector<double> old_potential(n_frame*n_system);
-                traverse_dset<2,double>(coord_config.get(), "/output/potential", [&](int nf, int ns, double x){
-                        old_potential[nf*n_system + ns] = x;});
-
-                default_logger->log_once<double>("old_potential", {n_frame, n_system}, 
-                        [&](double* buffer) {for(int i=0; i<n_frame*n_system; ++i) buffer[i] = old_potential[i];});
+            if(h5_exists(sys->config.get(), "/output", false)) {
+                // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
+                // datasets or groups.  Subsequent h5repack will reclaim space, however.
+                if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(sys->config.get(), "/output", H5P_DEFAULT));
+                else throw string("/output already exists and --overwrite-output was not specified");
             }
 
-            // make sure logger is cleaned up before H5File is
-            default_logger.reset(0);
-            return 0; // do not run dynamics
-        }
+            LogLevel log_level;
+            if     (log_level_arg.getValue() == "")          log_level = LOG_BASIC;
+            else if(log_level_arg.getValue() == "basic")     log_level = LOG_BASIC;
+            else if(log_level_arg.getValue() == "detailed")  log_level = LOG_DETAILED;
+            else if(log_level_arg.getValue() == "extensive") log_level = LOG_EXTENSIVE;
+            else throw string("Illegal value for --log-level");
 
-        auto tstart = chrono::high_resolution_clock::now();
-        for(uint64_t nr=0; nr<n_round; ++nr) {
-            physical_time = nr*3*double(dt);
+            sys->logger = make_shared<H5Logger>(sys->config, "output", log_level);
+            default_logger = sys->logger;  // FIXME kind of a hack for the ugly global variable
 
-            if(pivot_interval && !(nr%pivot_interval)) 
-                pivot_sampler.pivot_monte_carlo_step(random_seed, nr, temperature, engine);
+            write_string_attribute(sys->config.get(), "output", "invocation", invocation);
 
-            if(replica_interval && !(nr%replica_interval))
-                parallel_tempering_step(random_seed, nr, coord_indices, temperature, engine);
+            auto pos_shape = get_dset_size(3, sys->config.get(), "/input/pos");
+            sys->n_atom = pos_shape[0];
+            sys->mom.reset(1, 3, sys->n_atom);
+            for(int d: range(3)) for(int na: range(sys->n_atom)) sys->mom[0](d,na) = 0.f;
 
-            if(!frame_interval || !(nr%frame_interval)) {
-                if(do_recenter) recenter(engine.pos->coords().value, xy_recenter_only, n_atom, n_system);
-                engine.compute(PotentialAndDerivMode);
-                default_logger->collect_samples();
+            if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
+            if(pos_shape[2]!=1) throw string("must have n_system 1 from config");
 
-                double Rg = 0.f;
-                for(int ns=0; ns<n_system; ++ns) {
-                    float3 com = make_vec3(0.f, 0.f, 0.f);
-                    for(int na=0; na<n_atom; ++na)
-                        com += StaticCoord<3>(engine.pos->coords().value, ns, na).f3();;
-                    com *= 1.f/n_atom;
+            auto potential_group = open_group(sys->config.get(), "/input/potential");
+            sys->engine = initialize_engine_from_hdf5(sys->n_atom, 1, potential_group.get());
 
-                    for(int na=0; na<n_atom; ++na) 
-                        Rg += mag2(StaticCoord<3>(engine.pos->coords().value, ns, na).f3()-com);
-                }
-                Rg = sqrt(Rg/(n_atom*n_system));
+            traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
+                    sys->engine.pos->coords().value[ns](d,na) = x;});
+            printf("\nn_atom %i\n", sys->n_atom);
 
-                printf("%*.0f / %*.0f elapsed %5.1f hbonds, Rg %5.1f A, potential", 
-                        duration_print_width, physical_time, 
-                        duration_print_width, duration, 
-                        get_n_hbond(engine)/n_system, Rg);
-                for(float e: engine.potential) printf(" % 8.2f", e);
+            deriv_matching(sys->config.get(), sys->engine, generate_expected_deriv_arg.getValue());
+            if(potential_deriv_agreement_arg.getValue()){
+                // if(n_system>1) throw string("Testing code does not support n_system > 1");
+                printf("Initial agreement:\n");
+                for(auto &n: sys->engine.nodes)
+                    printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
                 printf("\n");
-                fflush(stdout);
+
+                auto relative_error = potential_deriv_agreement(sys->engine);
+                printf("overall potential relative error: ");
+                for(auto r: relative_error) printf(" %.5f", r);
+                printf("\n");
             }
-            // To be cautious, apply the thermostat more often if in the equilibration phase
-            bool in_equil = nr*3*dt < equil_duration;
-            if(!(nr%thermostat_interval) || in_equil) 
-                thermostat.apply(mom_sys, n_atom);
-            engine.integration_cycle(mom_sys, dt, (in_equil ? equil_max_force : 0.f), DerivEngine::Verlet);
+
+            if(max_temp != min_temp && systems.size() == 1u) 
+                throw string("--max-temperature cannot be specified for only a single system");
+            if(systems.size()==1u) {
+                systems.front().temperature = temperature_arg.getValue();
+            } else {
+                // system 0 is the minimum temperature
+                // tighter spacing at the low end of temperatures because the variance is decreasing
+                int n_system = systems.size();
+                sys->temperature = sqr((sqrt(min_temp)*(n_system-1-ns) + sqrt(max_temp)*ns)/(n_system-1));
+            }
+
+            sys->thermostat = OrnsteinUhlenbeckThermostat(
+                    sys->random_seed,
+                    thermostat_timescale_arg.getValue(),
+                    vector<float>(1,sys->temperature),
+                    1e8);
+
+            sys->thermostat.apply(sys->mom.array(), sys->n_atom); // initial thermalization
+            sys->thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
+
+            // we must capture the sys pointer by value here so that it is available later
+            sys->logger->add_logger<float>("pos", {1, sys->n_atom, 3}, [sys](float* pos_buffer) {
+                    SysArray pos_array = sys->engine.pos->coords().value;
+                    for(int na=0; na<sys->n_atom; ++na) 
+                    for(int d=0; d<3; ++d) 
+                    pos_buffer[na*3 + d] = pos_array[0](d,na);
+                    });
+            sys->logger->add_logger<double>("kinetic", {1}, [sys](double* kin_buffer) {
+                    double sum_kin = 0.f;
+                    for(int na=0; na<sys->n_atom; ++na) sum_kin += mag2(load_vec<3>(sys->mom[0],na));
+                    kin_buffer[0] = (0.5/sys->n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
+                    });
+            sys->logger->add_logger<double>("potential", {1}, [sys](double* pot_buffer) {
+                    sys->engine.compute(PotentialAndDerivMode);
+                    pot_buffer[0] = sys->engine.potential[0];});
+            sys->logger->add_logger<double>("time", {}, [sys,dt](double* time_buffer) {
+                    *time_buffer=3*dt*sys->round_num;});
+
+            if(pivot_interval) {
+                sys->pivot_sampler = PivotSampler{open_group(sys->config.get(), "/input/pivot_moves").get()};
+
+                sys->logger->add_logger<int>("pivot_stats", {2}, [ns,sys](int* stats_buffer) {
+                        stats_buffer[0] = sys->pivot_sampler.pivot_stats.n_success;
+                        stats_buffer[1] = sys->pivot_sampler.pivot_stats.n_attempt;
+                        sys->pivot_sampler.pivot_stats.reset();
+                        });
+            }
+
+            // quick hack of a check for z-centering and membrane potential
+            if(do_recenter && !xy_recenter_only) {
+                for(auto &n: sys->engine.nodes) {
+                    if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom") || is_prefix(n.name, "tension"))
+                        throw string("You have z-centering and a z-dependent potential turned on.  "
+                                "This is not what you want.  Consider --disable-z-recentering "
+                                "or --disable-recentering.");
+                }
+            }
+
+            if(do_recenter) {
+                for(auto &n: sys->engine.nodes) {
+                    if(is_prefix(n.name, "cavity_radial"))
+                        throw string("You have re-centering and a radial potential turned on.  "
+                                "This is not what you want.  Consider --disable-recentering.");
+                }
+            }
         }
-        default_logger->flush();
+
+        if(replica_interval) {
+            int n_atom = systems[0].n_atom;
+            for(System& sys: systems) 
+                if(sys.n_atom != n_atom) 
+                    throw string("Replica exchange requires all systems have the same number of atoms");
+        }
+
+        // #if defined(_OPENMP)
+        // // current we only use OpenMP parallelism over systems
+        // if(n_system < omp_get_max_threads()) omp_set_num_threads(n_system);
+        // if(omp_get_max_threads() > 1) 
+        //     printf("Multi-threaded execution with %i threads\n\n", omp_get_max_threads());
+        // else
+        //     printf("Single-threaded execution\n\n");
+        // #endif
+
+        printf("\n");
+        for(int ns: range(systems.size())) {
+            printf("temperature %2i: %.3f\n", ns, systems[ns].temperature);
+            systems[ns].logger->log_once<double>("temperature", {1}, [&](double* temperature_buffer) {
+                    temperature_buffer[0] = systems[ns].temperature;});
+        }
+        printf("\n");
+
+        printf("Initial potential energy:");
+        for(System& sys: systems) {
+            sys.engine.compute(PotentialAndDerivMode);
+            printf(" %.2f", sys.engine.potential[0]);
+        }
+        printf("\n");
+
+        // we need to run everyone until the next synchronization event
+        // a little care is needed if we are multiplexing the events
+        auto tstart = chrono::high_resolution_clock::now();
+        while(systems[0].round_num < n_round) {
+            int last_start = systems[0].round_num;
+            #pragma omp parallel for schedule(static,1)
+            for(int ns=0; ns<int(systems.size()); ++ns) {
+                System& sys = systems[ns];
+                for(; sys.round_num<n_round; ++sys.round_num) {
+                    int nr = sys.round_num;
+                    if(pivot_interval && !(nr%pivot_interval)) 
+                        sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
+
+                    if(!frame_interval || !(nr%frame_interval)) {
+                        if(do_recenter) recenter(sys.engine.pos->coords().value, xy_recenter_only, sys.n_atom, 1);
+                        sys.engine.compute(PotentialAndDerivMode);
+                        sys.logger->collect_samples();
+
+                        double Rg = 0.f;
+                        float3 com = make_vec3(0.f, 0.f, 0.f);
+                        for(int na=0; na<sys.n_atom; ++na)
+                            com += load_vec<3>(sys.engine.pos->coords().value[0], na);
+                        com *= 1.f/sys.n_atom;
+
+                        for(int na=0; na<sys.n_atom; ++na) 
+                            Rg += mag2(load_vec<3>(sys.engine.pos->coords().value[0],na)-com);
+                        Rg = sqrtf(Rg/sys.n_atom);
+
+                        printf("%*.0f / %*.0f elapsed %2i system %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
+                                duration_print_width, nr*3*double(dt), 
+                                duration_print_width, duration, 
+                                ns,
+                                get_n_hbond(sys.engine), Rg, sys.engine.potential[0]);
+                        fflush(stdout);
+                    }
+                    if(!(nr%thermostat_interval)) 
+                        sys.thermostat.apply(sys.mom.array(), sys.n_atom);
+                    sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
+
+                    if(nr>last_start && replica_interval && !(nr%replica_interval)) break;
+                }
+            }
+
+            if(replica_interval && !(systems[0].round_num % replica_interval))
+                parallel_tempering_step(base_random_seed, systems[0].round_num, systems);
+        }
+        for(auto& sys: systems) sys.logger->flush();
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
         printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.4f seconds/simulation_time_unit)\n",
-                elapsed, elapsed*1e6/n_system/n_round/3, elapsed/duration_arg.getValue());
+                elapsed, elapsed*1e6/systems.size()/n_round/3, elapsed/duration_arg.getValue());
 
+        /*
         {
             auto sum_kin = vector<double>(n_system, 0.);
             auto n_kin   = vector<long>  (n_system, 0);
@@ -506,21 +473,26 @@ try {
             for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns] / (1.5*temperature[ns]));
             printf("\n");
         }
+        */
 
         if(pivot_interval) {
-            std::vector<int64_t> ps(2*n_system);
-            traverse_dset<3,int>(config.get(), "/output/pivot_stats", [&](size_t nf, size_t ns, int d, int x) {
-                    ps[2*ns+d] += x;});
             printf("pivot_success:");
-            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", double(ps[2*ns+0])/double(ps[2*ns+1]));
+            for(auto& sys: systems) {
+                std::vector<int64_t> ps(2,0);
+                traverse_dset<2,int>(sys.config.get(), "/output/pivot_stats", [&](size_t nf, int d, int x) {
+                        ps[d] += x;});
+                printf(" % .4f", double(ps[0])/double(ps[1]));
+            }
             printf("\n");
         }
 
+        /*
         printf("\n");
         global_time_keeper.print_report(3*n_round+1);
         printf("\n");
 
-        default_logger.reset(nullptr);
+        for(auto& sys: systems) sys.logger->reset(nullptr);
+        */
     } catch(const string &e) {
         fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
         return 1;
