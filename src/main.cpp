@@ -418,7 +418,7 @@ try {
             #pragma omp parallel for schedule(static,1)
             for(int ns=0; ns<int(systems.size()); ++ns) {
                 System& sys = systems[ns];
-                for(; sys.round_num<n_round; ++sys.round_num) {
+                for(bool do_break=false; (!do_break) && (sys.round_num<n_round); ++sys.round_num) {
                     int nr = sys.round_num;
                     if(pivot_interval && !(nr%pivot_interval)) 
                         sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
@@ -449,7 +449,7 @@ try {
                         sys.thermostat.apply(sys.mom.array(), sys.n_atom);
                     sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
 
-                    if(nr>last_start && replica_interval && !(nr%replica_interval)) break;
+                    do_break = nr>last_start && replica_interval && !(nr%replica_interval);
                 }
             }
 
