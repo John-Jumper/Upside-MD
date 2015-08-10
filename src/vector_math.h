@@ -519,15 +519,9 @@ S max(Vec<D,S> y) {
 //! Value of function is 1/(1+exp(x)) and the derivative is 
 //! exp(x)/(1+exp(x))^2
 inline float2 sigmoid(float x) {
-#ifdef APPROX_SIGMOID
-    float z = rsqrt(4.f+x*x);
-    return make_vec2(0.5f*(1.f + x*z), (2.f*z)*(z*z));
-#else
-    //return make_vec2(0.5f*(tanh(0.5f*x) + 1.f), 0.5f / (1.f + cosh(x)));
     float z = expf(-x);
     float w = 1.f/(1.f+z);
     return make_vec2(w, z*w*w);
-#endif
 }
 
 
@@ -535,11 +529,26 @@ inline float2 sigmoid(float x) {
 // This function is 1 for large negative values and 0 for large positive values
 template <typename S>
 inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
+    // FIXME this sigmoid is both narrower and reversed direction from a normal sigmoid
+#ifdef NONCOMPACT_SIGMOID
+    // factor of three makes the slopes even at the origin
+    auto z = sigmoid(-3.f*x*sharpness);
+    return make_vec2(z.x(), -3.f*z.y()*sharpness);
+#else
     S y = x*sharpness;
     Vec<2,S> z = make_vec2(S(0.25f)*(y+S(2.f))*(y-S(1.f))*(y-one<S>()), (sharpness*S(0.75f))*(sqr(y)-one<S>()));
     z = blendv((y>S( 1.f)), make_vec2(zero<S>(), zero<S>()), z);
     z = blendv((y<S(-1.f)), make_vec2(one <S>(), zero<S>()), z);
     return z;
+#endif
+}
+
+inline float compact_sigmoid_cutoff(float sharpness) {
+#ifdef NONCOMPACT_SIGMOID
+    return 2.f/sharpness;  // 0.002
+#else
+    return 1.f/sharpness;  // exactly 0.
+#endif
 }
 
 

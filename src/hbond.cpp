@@ -299,7 +299,7 @@ namespace {
         constexpr static const int n_param=6, n_dim1=7, n_dim2=3, n_deriv=7;
 
         static float cutoff(const Vec<n_param> &p) {
-            return p[0] + 1.f/p[1];
+            return p[0] + compact_sigmoid_cutoff(p[1]);
         }
 
         static bool exclude_by_id(unsigned id1, unsigned id2) { 

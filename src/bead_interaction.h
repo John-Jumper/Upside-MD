@@ -12,8 +12,8 @@ namespace {
         constexpr static const int n_param=6, n_dim=3, n_deriv=3;
 
         static float cutoff(const Vec<n_param> &p) {
-            float radius_i=p[1], scale_i=p[2]; float cutoff_i = radius_i + 1.f/scale_i;
-            float radius_o=p[4], scale_o=p[5]; float cutoff_o = radius_o + 1.f/scale_o;
+            float radius_i=p[1], scale_i=p[2]; float cutoff_i = radius_i + compact_sigmoid_cutoff(scale_i);
+            float radius_o=p[4], scale_o=p[5]; float cutoff_o = radius_o + compact_sigmoid_cutoff(scale_o);
             return cutoff_i<cutoff_o? cutoff_o: cutoff_i;
         }
 
@@ -85,7 +85,7 @@ namespace {
             auto p = ParamInterpret(param);
             auto maxf = [](float a, float b) {return a>b ? a : b;};
             float gauss_cutoff  = p.dist_loc_gauss + 3.f*sqrtf(0.5f/p.dist_scale_gauss);  // 3 sigma cutoff
-            float steric_cutoff = p.dist_loc_steric + 1.f/p.dist_scale_steric +
+            float steric_cutoff = p.dist_loc_steric + compact_sigmoid_cutoff(p.dist_scale_steric) +
                                   maxf(0.f,p.dp1_shift_steric) + maxf(0.f,p.dp2_shift_steric);
             return maxf(steric_cutoff, gauss_cutoff);
         }
