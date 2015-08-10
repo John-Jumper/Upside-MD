@@ -70,15 +70,15 @@ struct H5Logger {
     h5::H5Obj config;
     h5::H5Obj logging_group;
     std::vector<std::unique_ptr<SingleLogger>> state_loggers;
-    size_t n_samples_collected;
+    size_t n_samples_buffered;
 
-    // H5Logger(): level(LOG_BASIC), config(0u), logging_group(0u), n_samples_collected(0u) {}
+    // H5Logger(): level(LOG_BASIC), config(0u), logging_group(0u), n_samples_buffered(0u) {}
 
     H5Logger(h5::H5Obj& config_, const char* loc, LogLevel level_): 
         level(level_),
         config(h5::duplicate_obj(config_)),
         logging_group(h5::ensure_group(config.get(), loc)),
-        n_samples_collected(0u)
+        n_samples_buffered(0u)
     {}
 
     void collect_samples() {
@@ -86,17 +86,20 @@ struct H5Logger {
         for(auto &sl: state_loggers) 
             sl->collect_samples();
 
-        n_samples_collected++;
-        if(!(n_samples_collected % 100)) flush();
+        n_samples_buffered++;
+        if(!(n_samples_buffered % 100)) flush();
     }
 
     void flush() {
         // HDF5 is often built non-thread-safe, so we must serialize access with a OpenMP critical section
         #pragma omp critical (hdf5_write_access)
         {
-            for(auto &sl: state_loggers) 
-                sl->dump_samples();
-            H5Fflush(config.get(), H5F_SCOPE_LOCAL);
+            if(!n_samples_buffered) {
+                for(auto &sl: state_loggers) 
+                    sl->dump_samples();
+                n_samples_buffered = 0u;
+                H5Fflush(config.get(), H5F_SCOPE_LOCAL);
+            }
         }
     }
 
