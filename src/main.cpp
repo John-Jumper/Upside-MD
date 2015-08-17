@@ -378,6 +378,7 @@ try {
                 }
             }
         }
+        default_logger = shared_ptr<H5Logger>();  // FIXME kind of a hack for the ugly global variable
 
         if(replica_interval) {
             int n_atom = systems[0].n_atom;
@@ -456,7 +457,7 @@ try {
             if(replica_interval && !(systems[0].round_num % replica_interval))
                 parallel_tempering_step(base_random_seed, systems[0].round_num, systems);
         }
-        for(auto& sys: systems) sys.logger->flush();
+        for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
         printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.4f seconds/simulation_time_unit)\n",
@@ -486,13 +487,11 @@ try {
             printf("\n");
         }
 
-        /*
+#ifdef COLLECT_PROFILE
         printf("\n");
         global_time_keeper.print_report(3*n_round+1);
         printf("\n");
-
-        for(auto& sys: systems) sys.logger->reset(nullptr);
-        */
+#endif
     } catch(const string &e) {
         fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
         return 1;

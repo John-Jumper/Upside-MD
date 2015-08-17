@@ -200,7 +200,9 @@ struct DerivEngine
 
     template <typename T>
     T& get_computation(const std::string& name) {
-        return dynamic_cast<T&>(*get(name).computation.get());
+        auto computation = get(name).computation.get();
+        if(!computation) throw std::string("impossible pointer value");
+        return dynamic_cast<T&>(*computation);
     }
 
     void compute(ComputeMode mode);

@@ -446,6 +446,17 @@ inline S sum(const Vec<D,S>& a) {
     return m;
 }
 
+// derivative of (v/v_mag), which is otherwise know as a hat vector
+inline void
+hat_deriv(
+        float3 v_hat, float v_invmag, 
+        float3 &col0, float3 &col1, float3 &col2) // matrix is symmetric, so these are rows or cols
+{
+    float s = v_invmag;
+    col0 = make_vec3(s*(1.f-v_hat.x()*v_hat.x()), s*    -v_hat.y()*v_hat.x() , s*    -v_hat.z()*v_hat.x() );
+    col1 = make_vec3(s*    -v_hat.x()*v_hat.y() , s*(1.f-v_hat.y()*v_hat.y()), s*    -v_hat.z()*v_hat.y() );
+    col2 = make_vec3(s*    -v_hat.x()*v_hat.z() , s*    -v_hat.y()*v_hat.z() , s*(1.f-v_hat.z()*v_hat.z()));
+}
 
 
 //! cross-product of the vectors a and b

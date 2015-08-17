@@ -54,6 +54,7 @@ struct WithinInteractionGraph {
 #endif
     {
         using namespace h5;
+        check_elem_width(pos_node, IType::n_dim);
 
         check_size(grp, "interaction_param", n_type, n_type, IType::n_param);
         traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {
@@ -275,6 +276,8 @@ struct BetweenInteractionGraph {
 #endif
     {
         using namespace h5;
+        check_elem_width(pos_node1, IType::n_dim1);
+        check_elem_width(pos_node2, IType::n_dim2);
 
         check_size(grp, "interaction_param", n_type1, n_type2, IType::n_param);
         traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {

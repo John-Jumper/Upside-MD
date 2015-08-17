@@ -64,6 +64,63 @@ namespace {
     };
 
 
+    struct PosDistInteraction6 {
+        // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
+        constexpr static const int n_param=6, n_dim=6, n_deriv=3;
+
+        static float cutoff(const Vec<n_param> &p) {
+            float radius_i=p[1], scale_i=p[2]; float cutoff_i = radius_i + compact_sigmoid_cutoff(scale_i);
+            float radius_o=p[4], scale_o=p[5]; float cutoff_o = radius_o + compact_sigmoid_cutoff(scale_o);
+            return cutoff_i<cutoff_o? cutoff_o: cutoff_i;
+        }
+
+        static bool is_compatible(const Vec<n_param> &p1, const Vec<n_param> &p2) {
+            for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
+            return true;
+        }
+
+        static bool exclude_by_id(unsigned id1, unsigned id2) { 
+            return exclude_by_id_base(id1,id2);
+        }
+
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
+            auto disp      = extract<0,3>(x1)-extract<0,3>(x2);
+            auto dist2     = mag2(disp);
+            auto inv_dist  = rsqrt(dist2);
+            auto dist      = dist2*inv_dist;
+
+            auto en = p[0]*compact_sigmoid(dist-p[1], p[2])
+                    + p[3]*compact_sigmoid(dist-p[4], p[5]);
+
+            d_base = en.y() * (disp*inv_dist);
+            return en.x();
+        }
+
+        static void expand_deriv(Vec<n_dim> &d1, Vec<n_dim> &d2, const Vec<n_deriv> &d_base) {
+            store<0,3>(d1, d_base); store<3,6>(d1, make_zero<3>());
+            store<0,3>(d2,-d_base); store<3,6>(d2, make_zero<3>());
+        }
+
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
+                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
+            auto dist = mag(extract<0,3>(x1)-extract<0,3>(x2));
+            for(int i: range(2)) {
+                int off = 3*i;
+                auto sig = compact_sigmoid(dist-p[off+1], p[off+2]);
+
+                // I need the derivative with respect to the scale, but
+                // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
+                float2 sig_s = compact_sigmoid((dist-p[off+1]) * p[off+2], 1.f);
+
+                d_param[off+0] =  sig  .x();  // energy
+                d_param[off+1] = -sig  .y() * p[off+0];  // radius
+                d_param[off+2] =  sig_s.y() * (dist-p[off+1]) * p[off+0];  // scale
+            }
+        }
+    };
+
+
     struct PosDistDirInteraction {
         constexpr static const int n_param=6+6, n_dim=6, n_deriv=9;
 
@@ -108,8 +165,8 @@ namespace {
             auto dist      = dist2*inv_dist;
             auto disp_dir  = disp*inv_dist;
 
-            auto dp1 = (dot(extract<3,6>(x1),  disp_dir));
-            auto dp2 = (dot(extract<3,6>(x2), -disp_dir));
+            auto dp1 = dot(extract<3,6>(x1),  disp_dir);
+            auto dp2 = dot(extract<3,6>(x2), -disp_dir);
 
             auto p = ParamInterpret(param);
             auto eff_dist_loc_steric = p.dist_loc_steric + dp1*p.dp1_shift_steric + dp2*p.dp2_shift_steric;
@@ -173,6 +230,6 @@ namespace {
     };
 }
 
-typedef PosDistInteraction preferred_bead_type;
+typedef PosDistInteraction6 preferred_bead_type;
 
 #endif

@@ -94,7 +94,7 @@ struct H5Logger {
         // HDF5 is often built non-thread-safe, so we must serialize access with a OpenMP critical section
         #pragma omp critical (hdf5_write_access)
         {
-            if(!n_samples_buffered) {
+            if(n_samples_buffered) {
                 for(auto &sl: state_loggers) 
                     sl->dump_samples();
                 n_samples_buffered = 0u;

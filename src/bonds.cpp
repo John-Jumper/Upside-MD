@@ -726,5 +726,30 @@ struct ConstantCoord : public CoordNode
 
     virtual void propagate_deriv() {}
     double test_value_deriv_agreement() { return 0.f; }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {
+        vector<float> p; p.reserve(n_system*n_elem*elem_width);
+        for(int ns: range(n_system)) {
+            auto v = value[ns];
+            for(int ne: range(n_elem))
+                for(int d: range(elem_width))
+                    p.push_back(v(d,ne));
+        }
+        return p;
+    }
+
+    // FIXME I could support get_param_deriv here if I had a non-trivial propagate_deriv
+
+    virtual void set_param(const std::vector<float>& new_param) {
+        for(int ns: range(n_system)) {
+            auto v = value[ns];
+            for(int ne: range(n_elem))
+                for(int d: range(elem_width))
+                    v(d,ne) = new_param[ne*elem_width + d];
+        }
+    }
+#endif
+
 };
 static RegisterNodeType<ConstantCoord,0> constant_coord_node("constant");

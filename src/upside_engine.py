@@ -29,6 +29,9 @@ calc.get_param.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 calc.get_output_dims.restype  = ct.c_int
 calc.get_output_dims.argtypes = [ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 
+calc.get_output.restype  = ct.c_int
+calc.get_output.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
+
 class Upside(object):
     def __init__(self, n_atom, config_file_path, quiet=True):
         self.config_file_path = str(config_file_path)

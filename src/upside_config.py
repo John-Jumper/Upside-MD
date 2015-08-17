@@ -147,6 +147,7 @@ def write_backbone_pair(fasta):
     create_array(grp, 'ref_pos', obj=ref_pos)
     create_array(grp, 'n_atom',  obj=np.isfinite(grp.ref_pos[:].sum(axis=-1)).sum(axis=-1))
 
+
 def write_affine_alignment(n_res):
     grp = t.create_group(potential, 'affine_alignment')
     grp._v_attrs.arguments = np.array(['pos'])
@@ -193,6 +194,32 @@ def write_infer_H_O(fasta, excluded_residues):
     create_array(donors,    'id', obj=np.array((-1,0,1))[None,:] + 3*donor_residues   [:,None])
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
+
+def write_environment(fasta, environment_library):
+    cgrp = t.create_group(potential, 'environment_vector')
+    cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
+
+    with tb.open_file(environment_library) as data:
+         # FIXME put in restype order checking
+         restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
+         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
+
+    # group1 is the source sidechain rotamer
+    rot_grp = t.root.input.potential.placement_rotamer
+    create_array(cgrp, 'index1', np.arange(len(rot_grp.restype_seq[:])))
+    create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+    create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
+
+    # group 2 is the weighted points to interact with
+    w_grp = t.root.input.potential.placement4_weighted
+    create_array(cgrp, 'index2', np.arange(len(w_grp.restype_seq[:])))
+    create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.restype_seq[:]]))
+    create_array(cgrp, 'id2',    w_grp.affine_residue[:])
+
+    egrp = t.create_group(potential, 'constant_environment_energy')
+    egrp._v_attrs.arguments = np.array([]) ; print 'WARNING environment energy is constant'
+
+    create_array(egrp, 'value', obj=np.zeros((1,rot_grp.restype_seq.shape[0],1)))
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library):
@@ -888,6 +915,8 @@ def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
     create_array(grp, 'angle_range', obj=angle_range)
     create_array(grp, 'scale',       obj=scale)
     create_array(grp, 'energy',      obj=energy)
+
+
 def write_contact_energies(parser, fasta, contact_table):
     fields = [ln.split() for ln in open(contact_table,'U')]
     if [x.lower() for x in fields[0]] != 'residue1 residue2 r0 width energy'.split():
@@ -983,8 +1012,42 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
         create_array(g, 'interaction_param', obj=p)
 
 
+def write_weighted_placement(fasta, placement_library):
+    with tb.open_file(placement_library) as data:
+        restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
+        placement_pos  = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
+        placement_prob = data.root.rotamer_prob  [:].transpose((2,0,1))[...,None]
+        start_stop = data.root.rotamer_start_stop[:]
+
+    # truncate to only take the first point from the pos
+    placement_data = np.concatenate((placement_pos[...,:3], placement_prob), axis=-1)
+
+    rama_residue = []
+    affine_residue = []
+    layer_index = []
+    restype_seq = []
+
+    for rnum,aa in enumerate(fasta):
+        restype = restype_num[aa]
+        start,stop = start_stop[restype]
+        n_rot = stop-start
+
+        rama_residue  .extend([rnum]*n_rot)
+        affine_residue.extend([rnum]*n_rot)
+        layer_index   .extend(np.arange(start,stop))
+        restype_seq   .extend([aa]*n_rot)
+
+    grp = t.create_group(potential, 'placement4_weighted')
+    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    create_array(grp, 'signature',       np.array(['point','scalar']))
+    create_array(grp, 'rama_residue',    rama_residue)
+    create_array(grp, 'affine_residue',  affine_residue)
+    create_array(grp, 'layer_index',     layer_index)
+    create_array(grp, 'placement_data',  placement_data)
+    create_array(grp, 'restype_seq',     restype_seq)
+
+
 def write_rotamer_placement(fasta, placement_library, fix_rotamer):
-    # FIXME handle fix-rotamer to fix all or some of the rotamers
     with tb.open_file(placement_library) as data:
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
         placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
@@ -1002,7 +1065,10 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
                     %(header," ".join(actual_header)))
 
         for residue, restype, rotamer in fields[1:]:
-            if fasta[int(residue)] != restype: raise RuntimeError("fix-rotamer files does not match FASTA")
+            if fasta[int(residue)] != (restype if restype != 'CPR' else 'PRO'): 
+                raise RuntimeError("fix-rotamer file does not match FASTA"
+                    + ", residue %i should be %s but fix-rotamer file has %s"%(
+                        int(residue), fasta[int(residue)], restype))
             fix[int(residue)] = int(rotamer)
 
     rama_residue = []
@@ -1038,13 +1104,13 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
-    create_array(grp, 'signature',       np.array(['point']))
+    create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_pos)
     create_array(grp, 'restype_seq',     restype_seq)
-    create_array(grp, 'id_seq',       np.array(id_seq))
+    create_array(grp, 'id_seq',          np.array(id_seq))
 
     grp = t.create_group(potential, 'placement_scalar')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -1058,7 +1124,9 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
     g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'] + 
-            (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []))
+            (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []) +
+            (['constant_environment_energy'] if 'constant_environment_energy' in t.root.input.potential else [])
+            )
     g._v_attrs.max_iter = 10000
     g._v_attrs.tol      = 1e-4
     g._v_attrs.damping  = damping
@@ -1318,6 +1386,8 @@ def main():
             'space separated values.  The form of the interaction is '+
             'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
             'sidechain, typically a few angstroms above the CB.')
+    parser.add_argument('--environment-potential', default='',
+            help='Path to many-body environment potential')
     parser.add_argument('--reference-state-rama', default='',
             help='Do not use this unless you know what you are doing.')
     parser.add_argument('--membrane-thickness', default=None, type=float,
@@ -1400,6 +1470,12 @@ def main():
         require_rama = True
         require_affine = True
         write_rotamer_placement(fasta_seq, args.rotamer_placement,args.fix_rotamer)
+
+    if args.environment_potential:
+        if args.rotamer_placement is None:
+            parser.error('--rotamer_placement is required, based on other options.')
+        write_weighted_placement(fasta_seq, args.rotamer_placement)
+        write_environment(fasta_seq, args.environment_potential)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)

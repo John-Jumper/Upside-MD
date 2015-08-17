@@ -24,17 +24,6 @@ struct NH_CO_Params {
 
 namespace {
 
-inline void
-hat_deriv(
-        float3 v_hat, float v_invmag, 
-        float3 &col0, float3 &col1, float3 &col2) // matrix is symmetric, so these are rows or cols
-{
-    float s = v_invmag;
-    col0 = make_vec3(s*(1.f-v_hat.x()*v_hat.x()), s*    -v_hat.y()*v_hat.x() , s*    -v_hat.z()*v_hat.x() );
-    col1 = make_vec3(s*    -v_hat.x()*v_hat.y() , s*(1.f-v_hat.y()*v_hat.y()), s*    -v_hat.z()*v_hat.y() );
-    col2 = make_vec3(s*    -v_hat.x()*v_hat.z() , s*    -v_hat.y()*v_hat.z() , s*(1.f-v_hat.z()*v_hat.z()));
-}
-
 template <typename MutableCoordT, typename CoordT>
 void infer_x_body(
         MutableCoordT &hbond_pos,
@@ -296,7 +285,7 @@ namespace {
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_param=6, n_dim1=7, n_dim2=3, n_deriv=7;
+        constexpr static const int n_param=6, n_dim1=7, n_dim2=6, n_deriv=7;
 
         static float cutoff(const Vec<n_param> &p) {
             return p[0] + compact_sigmoid_cutoff(p[1]);
@@ -309,7 +298,7 @@ namespace {
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
 
-            float3 displace = sc_pos-extract<0,3>(hb_pos);
+            float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
             float  dist2 = mag2(displace);
             float  inv_dist = rsqrt(dist2);
@@ -344,11 +333,12 @@ namespace {
             store<3,6>(d_hb,  extract<3,6>(d_base));
             d_hb[6] = d_base[6];
             store<0,3>(d_sc,  extract<0,3>(d_base));
+            store<3,6>(d_sc,  make_zero<3>());
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
-            float3 displace = sc_pos-extract<0,3>(hb_pos);
+            float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
 
             float  dist2 = mag2(displace);

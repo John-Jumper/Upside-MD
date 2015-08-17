@@ -23,6 +23,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
+    environment.cpp
     hbond.cpp 
     rotamer.cpp
     placement.cpp
