@@ -10,8 +10,6 @@ import scipy.optimize as opt
 import threading
 import concurrent.futures
 
-executor = concurrent.futures.ThreadPoolExecutor(8)
-
 n_restype = 20
 
 lparam = T.dvector('lparam')
@@ -76,7 +74,6 @@ def pack_param(loose_rot,loose_cov, check_accuracy=True):
 def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
     energy = np.zeros(2)
     deriv = [np.zeros((2,)+pm.shape) for pm in param_matrices]
-    update_lock = threading.Lock()
 
     def f(x):
         pos, fix, free = x
@@ -90,16 +87,14 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
         this_deriv = [(fix .get_param_deriv(d[0].shape, nm),
                        free.get_param_deriv(d[0].shape, nm)) for d,nm in zip(deriv,node_names)]
 
-        # must take a lock since numpy updates may not be atomic
-        with update_lock:
-            energy[0] += en0
-            energy[1] += en1
+        energy[0] += en0
+        energy[1] += en1
 
-            for d,(d0,d1) in zip(deriv, this_deriv):
-                d[0] += d0
-                d[1] += d1
+        for d,(d0,d1) in zip(deriv, this_deriv):
+            d[0] += d0
+            d[1] += d1
 
-    list(executor.map(f, pos_fix_free))
+    list(map(f, pos_fix_free))
     return energy, deriv
 
 
@@ -152,4 +147,13 @@ def sgd_sweep(state, mom, mu, eps, minibatches, change_batch_function, d_obj, ne
     for mb in minibatches:
         change_batch_function(mb)
         state, mom = state + mom, mu*mom - eps*d_obj(state+mu*mom if nesterov else state)
+    return state, mom
+
+
+def rmsprop_sweep(state, mom, minibatches, change_batch_function, d_obj, lr=0.001, rho=0.9, epsilon=1e-6):
+    for mb in minibatches:
+        change_batch_function(mb)
+        grad = d_obj(state)
+        mom = rho*mom + (1-rho) * grad**2
+        state = state - lr*grad/np.sqrt(mom+epsilon)
     return state, mom

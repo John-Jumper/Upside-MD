@@ -742,6 +742,7 @@ struct ConstantCoord : public CoordNode
     // FIXME I could support get_param_deriv here if I had a non-trivial propagate_deriv
 
     virtual void set_param(const std::vector<float>& new_param) {
+        if(new_param.size() != size_t(n_system)*n_elem*elem_width) throw string("invalid size to set_param");
         for(int ns: range(n_system)) {
             auto v = value[ns];
             for(int ne: range(n_elem))
