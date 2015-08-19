@@ -130,15 +130,21 @@ struct RigidPlacementNode: public CoordNode {
                             break;
                         case PlaceType::VECTOR:
                         case PlaceType::POINT:
-                            // point and vector differ only in shifting the final output
-                            store_vec(phi_d.shifted(j), ne, scale_x * apply_rotation(U, READ3(j,0)));
-                            store_vec(psi_d.shifted(j), ne, scale_y * apply_rotation(U, READ3(j,1)));
+                            // This if-statement is strictly not necessary as we already checked that n_pos_dim >= 3
+                            // when we verified that the signature was consistent with n_pos_dim.  That being said,
+                            // the if statement will be optimized out at compile time and it suppresses some warnings 
+                            // from GCC at the time of writing.
+                            if(n_pos_dim >= 3) { 
+                                // point and vector differ only in shifting the final output
+                                store_vec(phi_d.shifted(j), ne, scale_x * apply_rotation(U, READ3(j,0)));
+                                store_vec(psi_d.shifted(j), ne, scale_y * apply_rotation(U, READ3(j,1)));
 
-                            store_vec(pos.shifted(j), ne, (type==PlaceType::POINT
-                                     ? apply_affine  (U,t, READ3(j,2))
-                                     : apply_rotation(U,   READ3(j,2))));
-                            
-                            j += 3;
+                                store_vec(pos.shifted(j), ne, (type==PlaceType::POINT
+                                            ? apply_affine  (U,t, READ3(j,2))
+                                            : apply_rotation(U,   READ3(j,2))));
+
+                                j += 3;
+                            }
                             break;
                     }
                 }
@@ -189,16 +195,19 @@ struct RigidPlacementNode: public CoordNode {
                            break;
                        case PlaceType::VECTOR:
                        case PlaceType::POINT:
-                           auto x  = load_vec<3>(pos.shifted(j), ne);
-                           auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
+                           // see note in compute_value for why this if-statement is unnecessary but harmless
+                           if(n_pos_dim >= 3) { 
+                               auto x  = load_vec<3>(pos.shifted(j), ne);
+                               auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
 
-                           // torque relative to the residue center
-                           auto tq = cross((type==PlaceType::POINT?x-t:x), dx);
+                               // torque relative to the residue center
+                               auto tq = cross((type==PlaceType::POINT?x-t:x), dx);
 
-                           // only points, not vectors, contribute to the CoM derivative
-                           if(type==PlaceType::POINT) { z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2]; }
-                           z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
-                           j += 3;
+                               // only points, not vectors, contribute to the CoM derivative
+                               if(type==PlaceType::POINT) { z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2]; }
+                               z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
+                               j += 3;
+                           }
                            break;
                    }
                }
