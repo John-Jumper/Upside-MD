@@ -200,7 +200,6 @@ def write_environment(fasta, environment_library):
     cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
 
     with tb.open_file(environment_library) as data:
-         # FIXME put in restype order checking
          restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
@@ -216,10 +215,22 @@ def write_environment(fasta, environment_library):
     create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.restype_seq[:]]))
     create_array(cgrp, 'id2',    w_grp.affine_residue[:])
 
-    egrp = t.create_group(potential, 'constant_environment_energy')
-    egrp._v_attrs.arguments = np.array([]) ; print 'WARNING environment energy is constant'
+    # egrp = t.create_group(potential, 'constant_environment_energy')
+    # egrp._v_attrs.arguments = np.array([]) ; print 'WARNING environment energy is constant'
 
-    create_array(egrp, 'value', obj=np.zeros((1,rot_grp.restype_seq.shape[0],1)))
+    # create_array(egrp, 'value', obj=np.zeros((1,rot_grp.restype_seq.shape[0],1)))
+
+    egrp = t.create_group(potential, 'environment_energy')
+    egrp._v_attrs.arguments = np.array(['environment_vector'])
+
+    with tb.open_file(environment_library) as data:
+         restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
+         create_array(egrp, "linear_weight0", obj=data.root.linear_weight0[:])
+         create_array(egrp, "linear_shift0",  obj=data.root.linear_shift0 [:])
+         create_array(egrp, "linear_weight1", obj=data.root.linear_weight1[:])
+         create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
+    create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library):
@@ -1125,7 +1136,7 @@ def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
     g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'] + 
             (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []) +
-            (['constant_environment_energy'] if 'constant_environment_energy' in t.root.input.potential else [])
+            (['environment_energy'] if 'environment_energy' in t.root.input.potential else [])
             )
     g._v_attrs.max_iter = 10000
     g._v_attrs.tol      = 1e-4

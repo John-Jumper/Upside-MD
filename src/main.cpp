@@ -88,7 +88,7 @@ void parallel_tempering_step(
 }
 
 
-void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-3) {
+void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-4) {
     auto &pos = *engine.pos;
     if(generate) {
         auto group = ensure_group(config, "/testing");
@@ -146,7 +146,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
         }
         printf("\n\n");
 
-        auto central_diff_jac = central_difference_deriviative(do_compute, input, output);
+        auto central_diff_jac = central_difference_deriviative(do_compute, input, output, 1e-3);
         vector<float> deriv_array;
         for(int na=0; na<n_atom; ++na)
             for(int d=0; d<3; ++d)

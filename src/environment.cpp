@@ -2,9 +2,11 @@
 #include "timing.h"
 #include "state_logger.h"
 #include "interaction_graph.h"
+#include <Eigen/Dense>
 
 using namespace std;
 using namespace h5;
+using namespace Eigen;
 
 namespace {
     struct EnvironmentCoverageInteraction {
@@ -100,10 +102,17 @@ struct EnvironmentCoverage : public CoordNode {
                 get_dset_size(3,grp,"interaction_param")[1]),
         igraph(grp, rotamer_sidechains_, weighted_sidechains_),
         n_restype(elem_width)
-    {}
+    {
+        if(logging(LOG_EXTENSIVE)) {
+            default_logger->add_logger<float>("environment_vector", {n_elem, n_restype}, [&](float* buffer) {
+                    for(int ne: range(n_elem))
+                        for(int rt: range(n_restype))
+                            buffer[ne*n_restype+rt] = coords().value[0](rt,ne);});
+        }
+    }
 
     virtual void compute_value(ComputeMode mode) {
-        Timer timer(string("environment"));
+        Timer timer(string("environment_vector"));
         for(int ns=0; ns<n_system; ++ns) {
             VecArray env = coords().value[ns];
             fill(env, n_restype, n_elem, 0.f);
@@ -117,7 +126,7 @@ struct EnvironmentCoverage : public CoordNode {
     }
 
     virtual void propagate_deriv() {
-        Timer timer(string("environment_deriv"));
+        Timer timer(string("environment_vector_deriv"));
         for(int ns=0; ns<n_system; ++ns) {
             vector<float> sens(n_elem*n_restype, 0.f);
             VecArray accum = slot_machine.accum_array()[ns];
@@ -129,9 +138,11 @@ struct EnvironmentCoverage : public CoordNode {
 
             // Push coverage derivatives
             for(int ned: range(igraph.n_edge[ns])) {
-                int sc_num = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 0];
-                int sc_idx = igraph.param2[sc_num].index;
-                igraph.use_derivative(ns, ned, sens[sc_idx]);
+                int sc_num0 = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 0];
+                int sc_num1 = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 1];
+                int sc_idx0 = igraph.param1[sc_num0].index;
+                int sc_type1= igraph.types2[sc_num1];
+                igraph.use_derivative(ns, ned, sens[sc_idx0*n_restype+sc_type1]);
             }
             igraph.propagate_derivatives(ns);
         }
@@ -143,4 +154,139 @@ struct EnvironmentCoverage : public CoordNode {
     virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
 #endif
 };
-static RegisterNodeType<EnvironmentCoverage,2> environment_coverage_node("environment");
+static RegisterNodeType<EnvironmentCoverage,2> environment_coverage_node("environment_vector");
+
+
+struct EnvironmentEnergy : public CoordNode {
+    CoordNode &env_vector;
+
+    int n_hidden;
+    int n_restype;
+
+    MatrixXf weight0;
+    MatrixXf weight1;
+
+    RowVectorXf shift0;
+    RowVectorXf shift1;
+
+    MatrixXf input;
+    MatrixXf layer1;
+    MatrixXf output;   // output probabilities
+    MatrixXf all_prob;   // softmax probabilites on output
+
+    vector<int> output_restype;
+
+    VectorXf sens;
+    vector<slot_t> slots;
+
+    EnvironmentEnergy(hid_t grp, CoordNode &env_vector_):
+        CoordNode (env_vector_.n_system, env_vector_.n_elem, 1),
+        env_vector(env_vector_),
+
+        n_hidden(get_dset_size(1, grp, "linear_shift0")[0]),
+        n_restype(env_vector.elem_width),
+
+        weight0(n_restype, n_hidden),
+        weight1(n_hidden,  n_restype),
+
+        shift0(n_hidden),
+        shift1(n_restype),
+
+        input (n_elem,    n_restype),
+        layer1(n_elem,    n_hidden),
+        output(n_elem,    n_restype),
+        all_prob(n_elem,  n_restype),
+
+        sens(n_elem)
+    {
+        check_size(grp, "linear_weight0",  n_restype, n_hidden);
+        check_size(grp, "linear_weight1",  n_hidden,  n_restype);
+        check_size(grp, "linear_shift0",  n_hidden);
+        check_size(grp, "linear_shift1",  n_restype);  // this is actually not needed
+        check_size(grp, "output_restype", n_elem);
+
+        traverse_dset<2,float>(grp, "linear_weight0", [&](size_t i, size_t j, float x) {weight0(i,j) = x;});
+        traverse_dset<2,float>(grp, "linear_weight1", [&](size_t i, size_t j, float x) {weight1(i,j) = x;});
+        traverse_dset<1,float>(grp, "linear_shift0",  [&](size_t i, float x) {shift0[i] = x;});
+        traverse_dset<1,float>(grp, "linear_shift1",  [&](size_t i, float x) {shift1[i] = x;});
+        traverse_dset<1,int>  (grp, "output_restype", [&](size_t ne, int x) {output_restype.push_back(x);});
+
+        for(CoordPair p(0u,0u); p.index<unsigned(n_elem); ++p.index) {
+            env_vector.slot_machine.add_request(1, p);
+            slots.push_back(p.slot);
+        }
+    }
+
+    
+    virtual void compute_value(ComputeMode mode) override {
+        Timer timer(string("environment_energy"));
+
+        VecArray v = env_vector.coords().value[0];  // only support 1 system
+        VecArray e = coords().value[0];
+
+        for(int ne: range(n_elem)) for(int d: range(n_restype)) input(ne,d) = v(d,ne);
+
+        // apply first linear layer
+        layer1.noalias() = (input*weight0).rowwise() + shift0;
+
+        // apply relu
+        for(int ne: range(n_elem)) for(int d: range(n_hidden)) layer1(ne,d) = max(0.f, layer1(ne,d));
+
+        // apply second linear layer
+        output.noalias() = (layer1*weight1).rowwise() + shift1;
+
+        // apply negative log-softmax
+        // -log(softmax) = -log(exp(x_j) / sum_k(exp(x_k))) 
+
+        // FIXME most of my runtime is in the exponentials being calculated
+        all_prob = (output.colwise()-output.rowwise().maxCoeff()).array().exp();
+        all_prob.array().colwise() *= 1.f/all_prob.rowwise().sum().array();
+
+        // to center the numbers near 0., let's subtract the naive guess of log(n_restype)
+        const float offset = -logf(n_restype);
+
+        for(int ne: range(n_elem))
+            e(0,ne) = -logf(all_prob(ne, output_restype[ne])) + offset;
+    }
+
+
+    virtual void propagate_deriv() override {
+        Timer timer(string("environment_energy_deriv"));
+
+        sens = VectorXf::Zero(n_elem);
+        VecArray accum = slot_machine.accum_array()[0];
+
+        for(auto tape_elem: slot_machine.deriv_tape)
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
+
+        // now let's run the backpropagation (the sensitivity will be used at the end)
+        output.noalias() = all_prob;
+
+        for(int ne: range(n_elem))
+            output(ne, output_restype[ne]) -= 1.f;
+
+        // also handle the relu
+        layer1 = (layer1.array()>0.f).cast<float>().array() * (output * weight1.transpose()).array();
+
+        input = layer1 * weight0.transpose();
+
+        VecArray vec_accum = env_vector.coords().deriv[0];
+        for(int ne: range(n_elem))
+            for(int rt: range(n_restype))
+                vec_accum(rt,slots[ne]) = sens[ne] * input(ne,rt);
+    }
+
+#ifdef PARAM_DERIV
+    virtual vector<float> get_param() const override {
+        // FIXME fake version just to extract the derivative
+        vector<float> result(n_elem*n_restype);
+        for(int ne: range(n_elem))
+            for(int rt: range(n_restype))
+                result[ne*n_restype + rt] = input(ne,rt);
+        return result;
+    }
+#endif
+
+};
+static RegisterNodeType<EnvironmentEnergy,1> environment_energy_node("environment_energy");

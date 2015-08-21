@@ -14,7 +14,7 @@ else()
 endif()
 
 set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
-set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__") # -DNDEBUG")
+set (DEFINES "-DNDEBUG -DR123_NO_SINCOS -Drestrict=__restrict__")
 set (OPT     "-O3 -ffast-math -fno-finite-math-only -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
 

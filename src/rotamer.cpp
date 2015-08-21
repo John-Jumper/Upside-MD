@@ -373,7 +373,7 @@ struct RotamerSidechain: public PotentialNode {
             }
         }
 
-        if(default_logger) {
+        if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem}, 
                     [&](float* buffer) {
                        auto en = residue_free_energies();

@@ -268,7 +268,7 @@ struct RamaCoord : public CoordNode
                 slot_machine.deriv_tape.size(), 
                 n_elem, pos.n_system);
     }
-    double test_value_deriv_agreement() {
+    virtual double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
     }
 };
