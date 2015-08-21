@@ -5,6 +5,8 @@
 #include "deriv_engine.h"
 #include "vector_math.h"
 #include "h5_support.h"
+#include "timing.h"
+#include <algorithm>
 
 template <typename IType>
 struct WithinInteractionGraph {
@@ -310,34 +312,82 @@ struct BetweenInteractionGraph {
         fill(pos_deriv1[ns], IType::n_dim1, n_elem1, 0.f);
         fill(pos_deriv2[ns], IType::n_dim2, n_elem2, 0.f);
 
-
         #ifdef PARAM_DERIV
         fill(interaction_param_deriv[ns], IType::n_param, n_type1*n_type2, 0.f);
         #endif
 
-        int ne = 0;
-        for(int i1: range(n_elem1)) {
-            auto index1 = param1[i1].index;
-            auto coord1 = load_vec<IType::n_dim1>(pos1, index1);
-            auto x1     = extract<0,3>(coord1);
-            auto type1  = types1[i1];
-            auto my_id1    = id1[i1];
+        struct Rec {
+            Vec<3> pos;
+            unsigned type;
+        };
 
-            for(int i2: range(n_elem2)) {
+        std::vector<Rec> recs(n_elem2);
+        for(int i2: range(n_elem2)) {
+            auto index2 = param2[i2].index;
+            recs[i2].pos = load_vec<3>(pos2, index2);
+            recs[i2].type = types2[i2];
+        }
+
+        // First find all the edges
+        {
+            Timer timer(std::string("edge_finder"));
+            int ne = 0;
+            for(int i1: range(n_elem1)) {
+                auto index1 = param1[i1].index;
+                auto x1     = load_vec<3>(pos1, index1);
+                auto type1  = types1[i1];
+                auto my_id1 = id1[i1];
+
+                for(int i2: range(n_elem2)) {
+                    auto rec = recs[i2];
+                    int interaction_type = type1*n_type2 + rec.type;
+                    if(mag2(x1-rec.pos) >= cutoff2[interaction_type]) continue;
+
+                    auto my_id2 = id2[i2];
+                    if(IType::exclude_by_id(my_id1,my_id2)) continue;  // avoid self-interaction in user defined way
+
+                    edge_indices[ns*2*max_n_edge + 2*ne + 0] = i1;
+                    edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;
+
+                    ++ne;
+                }
+            }
+            n_edge[ns] = ne;
+        }
+
+        // First find all the edges
+        {
+            Timer timer(std::string("edge_computation"));
+
+            for(int ne: range(n_edge[ns])) {
+                int i1 = edge_indices[ns*2*max_n_edge + 2*ne + 0];
+                int i2 = edge_indices[ns*2*max_n_edge + 2*ne + 1];
+
+                auto index1 = param1[i1].index;
+                auto coord1 = load_vec<IType::n_dim1>(pos1, index1);
+                auto type1  = types1[i1];
+                auto my_id1 = id1[i1];
+
                 auto index2 = param2[i2].index;
-                auto x2 = load_vec<3>(pos2, index2);
-                auto type2 = types2[i2];
+                auto coord2 = load_vec<IType::n_dim2>(pos2, index2);
+                auto type2  = types2[i2];
+                auto my_id2 = id2[i2];
 
                 int interaction_type = type1*n_type2 + type2;
 
-                if(!(mag2(x1-x2) < cutoff2[interaction_type])) continue;
-
-                auto my_id2 = id2[i2];
-                if(IType::exclude_by_id(my_id1,my_id2)) continue;  // avoid self-interaction in a user defined way
-                auto coord2 = load_vec<IType::n_dim2>(pos2, index2);
-
                 Vec<IType::n_deriv> deriv;
                 auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
+                store_vec(edge_deriv[ns], ne, deriv);
+                f(ne, value, index1,type1,my_id1, index2,type2,my_id2);
+
+                #ifdef PARAM_DERIV
+                Vec<IType::n_param> dp;
+                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
+                store_vec(edge_param_deriv[ns], ne, dp);
+                #endif
+            }
+        }
+    }
 
                 // // compute finite difference deriv to check
                 // if(IType::n_dim1==7 && IType::n_dim2==3) {
@@ -373,24 +423,6 @@ struct BetweenInteractionGraph {
                 //     for(int i: range(IType::n_dim2)) printf(" % .2f", actual_deriv2[i]);
                 //     printf("\n\n");
                 // }
-
-                store_vec(edge_deriv[ns], ne, deriv);
-                edge_indices[ns*2*max_n_edge + 2*ne + 0] = i1;
-                edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;
-
-                f(ne, value, index1,type1,my_id1, index2,type2,my_id2);
-
-                #ifdef PARAM_DERIV
-                Vec<IType::n_param> dp;
-                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_param_deriv[ns], ne, dp);
-                #endif
-
-                ++ne;
-            }
-        }
-        n_edge[ns] = ne;
-    }
 
     void use_derivative(int ns, int edge_idx, float sensitivity) {
         auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv[ns], edge_idx);
