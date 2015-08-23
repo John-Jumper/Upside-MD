@@ -5,6 +5,27 @@
 #include <type_traits>
 #include <memory>
 #include <cstdio>
+#include <cassert>
+#include <algorithm>
+
+struct VArray {
+    const int n_elem;
+    const int elem_width;
+    std::unique_ptr<float[]> x;
+
+    VArray(int elem_width_, int n_elem_):
+        n_elem(n_elem_), elem_width(elem_width_),
+        x(new float[n_elem*elem_width]) {}
+
+    float& operator()(int i_comp, int i_elem) {
+        return x[i_elem*elem_width + i_comp];
+    }
+
+    const float& operator()(int i_comp, int i_elem) const {
+        return x[i_elem*elem_width + i_comp];
+    }
+};
+
 
 struct VecArray {
     float* v;
@@ -25,6 +46,13 @@ struct VecArray {
         return v[i_comp*component_offset + i_elem];
     }
 };
+
+
+inline void swap(VArray& a, VArray& b) {
+    assert(a.n_elem==b.n_elem);
+    assert(a.elem_width==b.elem_width);
+    a.x.swap(b.x);
+}
 
 
 inline void swap(VecArray &a, VecArray &b) {
@@ -87,6 +115,16 @@ struct SysArrayStorage {
     const VecArray operator[](int ns) const {return array()[ns];}
 };
 
+
+static void copy(VArray& v_src, VArray& v_dst) {
+    assert(v_src.n_elem==v_dst.n_elem);
+    assert(v_src.elem_width==v_dst.elem_width);
+    std::copy_n(v_src.x.get(), v_src.n_elem*v_src.elem_width, v_dst.x.get()); 
+}
+
+static void fill(VArray& v, float fill_value) {
+    std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
+}
 
 static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
     for(int d=0; d<n_dim; ++d) 
@@ -161,6 +199,14 @@ inline Vec<D,float> load_vec(const VecArray& a, int idx) {
     return r;
 }
 
+template <int D>
+inline Vec<D,float> load_vec(const VArray& a, int idx) {
+    Vec<D,float> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = a(d,idx);
+    return r;
+}
+
 
 template <int D>
 inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
@@ -169,7 +215,18 @@ inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
 }
 
 template <int D>
+inline void store_vec(VArray& a, int idx, const Vec<D,float>& r) {
+    #pragma unroll
+    for(int d=0; d<D; ++d) a(d,idx) = r[d];
+}
+
+template <int D>
 inline void update_vec(VecArray a, int idx, const Vec<D> &r) {
+    store_vec(a,idx, load_vec<D>(a,idx) + r);
+}
+
+template <int D>
+inline void update_vec(VArray& a, int idx, const Vec<D> &r) {
     store_vec(a,idx, load_vec<D>(a,idx) + r);
 }
 

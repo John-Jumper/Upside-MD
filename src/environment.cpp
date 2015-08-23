@@ -199,6 +199,7 @@ struct EnvironmentEnergy : public CoordNode {
 
         sens(n_elem)
     {
+        setNbThreads(1); // disable Eigen threading
         check_size(grp, "linear_weight0",  n_restype, n_hidden);
         check_size(grp, "linear_weight1",  n_hidden,  n_restype);
         check_size(grp, "linear_shift0",  n_hidden);

@@ -277,7 +277,7 @@ namespace {
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            for(int np: range(n_param)) d_param[np] = nanf("");
+            for(int np: range(n_param)) d_param[np] = -1.f;
         }
     };
 
