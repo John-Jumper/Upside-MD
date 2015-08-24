@@ -450,12 +450,13 @@ try {
                         sys.thermostat.apply(sys.mom.array(), sys.n_atom);
                     sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
 
-                    do_break = nr>last_start && replica_interval && !(nr%replica_interval);
+                    do_break = nr>last_start && replica_interval && !((nr+1)%replica_interval);
                 }
             }
 
-            if(replica_interval && !(systems[0].round_num % replica_interval))
+            if(replica_interval && !(systems[0].round_num % replica_interval)) {
                 parallel_tempering_step(base_random_seed, systems[0].round_num, systems);
+            }
         }
         for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr
 
