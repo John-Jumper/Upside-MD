@@ -2,8 +2,9 @@ import numpy as np
 import ctypes as ct
 import shutil
 import tables as tb
+import os
 
-calc = ct.cdll.LoadLibrary('/home/jumper/Dropbox/code/upside/obj/libupside_calculation.so')
+calc = ct.cdll.LoadLibrary(os.expanduser('~/upside/obj/libupside_calculation.so'))
 
 calc.construct_deriv_engine.restype  = ct.c_void_p
 calc.construct_deriv_engine.argtypes = [ct.c_int, ct.c_char_p, ct.c_bool]

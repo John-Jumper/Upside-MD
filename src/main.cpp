@@ -172,9 +172,6 @@ try {
             true, -1., "float", cmd);
     ValueArg<unsigned long> seed_arg("", "seed", "random seed (default 42)", 
             false, 42l, "int", cmd);
-    SwitchArg overwrite_output_arg("", "overwrite-output", 
-            "overwrite the output group of the system file if present (default false)", 
-            cmd, false);
     ValueArg<double> temperature_arg("", "temperature", "thermostat temperature (default 1.0)", 
             false, 1., "float", cmd);
     ValueArg<double> max_temperature_arg("", "max-temperature", "maximum thermostat temperature (useful for parallel tempering)", 
@@ -254,6 +251,7 @@ try {
         vector<string> config_paths = config_args.getValue();
         vector<System> systems(config_paths.size());
 
+        #pragma omp critical
         for(int ns=0; ns<int(systems.size()); ++ns) {
             System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
             sys->random_seed = base_random_seed + ns;
@@ -267,8 +265,7 @@ try {
             if(h5_exists(sys->config.get(), "/output", false)) {
                 // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
                 // datasets or groups.  Subsequent h5repack will reclaim space, however.
-                if(overwrite_output_arg.getValue()) h5_noerr(H5Ldelete(sys->config.get(), "/output", H5P_DEFAULT));
-                else throw string("/output already exists and --overwrite-output was not specified");
+                h5_noerr(H5Ldelete(sys->config.get(), "/output", H5P_DEFAULT));
             }
 
             LogLevel log_level;
@@ -301,6 +298,7 @@ try {
             deriv_matching(sys->config.get(), sys->engine, generate_expected_deriv_arg.getValue());
             if(potential_deriv_agreement_arg.getValue()){
                 // if(n_system>1) throw string("Testing code does not support n_system > 1");
+                sys->engine.compute(PotentialAndDerivMode);
                 printf("Initial agreement:\n");
                 for(auto &n: sys->engine.nodes)
                     printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
