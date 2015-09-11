@@ -103,7 +103,7 @@ struct EnvironmentCoverage : public CoordNode {
         igraph(grp, rotamer_sidechains_, weighted_sidechains_),
         n_restype(elem_width)
     {
-        if(logging(LOG_EXTENSIVE)) {
+        if(logging(LOG_DETAILED)) {  // FIXME this should be LOG_EXTENSIVE but I am debugging
             default_logger->add_logger<float>("environment_vector", {n_elem, n_restype}, [&](float* buffer) {
                     for(int ne: range(n_elem))
                         for(int rt: range(n_restype))
@@ -155,6 +155,63 @@ struct EnvironmentCoverage : public CoordNode {
 #endif
 };
 static RegisterNodeType<EnvironmentCoverage,2> environment_coverage_node("environment_vector");
+
+
+struct SimpleEnvironmentEnergy : public PotentialNode {
+    CoordNode &env_vector;
+
+    int n_elem;
+    int n_restype;
+
+    vector<float> coeff;  // size (n_elem, n_restype)
+    vector<slot_t> slots;
+
+    SimpleEnvironmentEnergy(hid_t grp, CoordNode& env_vector_):
+        PotentialNode(env_vector_.n_system),
+        env_vector(env_vector_),
+        n_elem(env_vector.n_elem),
+        n_restype(env_vector.elem_width),
+        coeff(n_elem*n_restype) 
+    {
+        if(n_system!=1) throw string("impossible");
+        check_size(grp, "coefficients", n_elem , n_restype);
+        traverse_dset<2,float>(grp, "coefficients", [&](size_t ne, size_t rt, float x) {coeff[ne*n_restype+rt]=x;});
+
+        for(CoordPair p(0u,0u); p.index<unsigned(n_elem); ++p.index) {
+            env_vector.slot_machine.add_request(1, p);
+            slots.push_back(p.slot);
+        }
+
+        if(logging(LOG_DETAILED))
+            default_logger->add_logger<float>("simple_environment_potential", {n_elem}, [&](float* buffer) {
+                VecArray ev = env_vector.coords().value[0];
+                for(int ne: range(n_elem)) {
+                    buffer[ne] = 0.f;
+                    for(int rt: range(n_restype))
+                        buffer[ne] += coeff[ne*n_restype+rt] * ev(rt,ne);
+                }});
+
+    }
+
+    virtual void compute_value(ComputeMode mode) override {
+        Timer timer("simple_environment");
+
+        if(mode==PotentialAndDerivMode) {
+            VecArray ev = env_vector.coords().value[0];
+            float pot = 0.f;
+            for(int ne: range(n_elem))
+                for(int rt: range(n_restype))
+                    pot += coeff[ne*n_restype+rt] * ev(rt,ne);
+            potential[0] = pot;
+        }
+
+        VecArray vec_accum = env_vector.coords().deriv[0];
+        for(int ne: range(n_elem))
+            for(int rt: range(n_restype))
+                vec_accum(rt,slots[ne]) = coeff[ne*n_restype+rt];
+    }
+};
+static RegisterNodeType<SimpleEnvironmentEnergy,1> simple_environment_node("simple_environment");
 
 
 struct EnvironmentEnergy : public CoordNode {

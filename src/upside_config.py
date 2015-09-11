@@ -197,17 +197,36 @@ def write_infer_H_O(fasta, excluded_residues):
 
 def write_environment(fasta, environment_library):
     cgrp = t.create_group(potential, 'environment_vector')
-    cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
+    cgrp._v_attrs.arguments = np.array(['placement_rotamer_cb_only','placement4_weighted'])
+    # cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
 
     with tb.open_file(environment_library) as data:
          restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
+    grp = t.create_group(potential, 'placement_rotamer_cb_only')
+    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    create_array(grp, 'signature',       np.array(['point','vector']))
+    create_array(grp, 'rama_residue',    np.arange(len(fasta)))
+    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
+    create_array(grp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+
+    CB_placement_pos_and_dir = np.zeros((1,36,36,6), dtype='f4')
+    CB_placement_pos_and_dir[:] = [-0.02366877,  1.51042092,  1.20528042, 
+                                   -0.00227792,  0.61587566, 0.78784013]
+
+    create_array(grp, 'placement_data',  CB_placement_pos_and_dir)
+
     # group1 is the source sidechain rotamer
-    rot_grp = t.root.input.potential.placement_rotamer
-    create_array(cgrp, 'index1', np.arange(len(rot_grp.restype_seq[:])))
-    create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
-    create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
+    create_array(cgrp, 'index1', np.arange(len(fasta)))
+    create_array(cgrp, 'type1',  np.array([restype_order[s] for s in fasta]))
+    create_array(cgrp, 'id1',    np.arange(len(fasta)))
+
+    # # group1 is the source sidechain rotamer
+    # rot_grp = t.root.input.potential.placement_rotamer
+    # create_array(cgrp, 'index1', np.arange(len(rot_grp.restype_seq[:])))
+    # create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+    # create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
 
     # group 2 is the weighted points to interact with
     w_grp = t.root.input.potential.placement4_weighted
@@ -215,22 +234,27 @@ def write_environment(fasta, environment_library):
     create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.restype_seq[:]]))
     create_array(cgrp, 'id2',    w_grp.affine_residue[:])
 
-    # egrp = t.create_group(potential, 'constant_environment_energy')
-    # egrp._v_attrs.arguments = np.array([]) ; print 'WARNING environment energy is constant'
+    # egrp = t.create_group(potential, 'environment_energy')
+    # egrp._v_attrs.arguments = np.array(['environment_vector'])
 
-    # create_array(egrp, 'value', obj=np.zeros((1,rot_grp.restype_seq.shape[0],1)))
+    # with tb.open_file(environment_library) as data:
+    #      restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
+    #      create_array(egrp, "linear_weight0", obj=data.root.linear_weight0[:])
+    #      create_array(egrp, "linear_shift0",  obj=data.root.linear_shift0 [:])
+    #      create_array(egrp, "linear_weight1", obj=data.root.linear_weight1[:])
+    #      create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
+    # create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
 
-    egrp = t.create_group(potential, 'environment_energy')
+
+    egrp = t.create_group(potential, 'simple_environment')
     egrp._v_attrs.arguments = np.array(['environment_vector'])
 
     with tb.open_file(environment_library) as data:
          restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
-         create_array(egrp, "linear_weight0", obj=data.root.linear_weight0[:])
-         create_array(egrp, "linear_shift0",  obj=data.root.linear_shift0 [:])
-         create_array(egrp, "linear_weight1", obj=data.root.linear_weight1[:])
-         create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
-    create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+         restype_coeff = data.root.restype_coeff[:]
 
+    coeff = np.array([restype_coeff[restype_order[s]] for s in fasta])
+    create_array(egrp, 'coefficients', obj=coeff);
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library):
@@ -626,9 +650,9 @@ def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference
     rama_maps -= -np.log(np.exp(-1.0*rama_maps).sum(axis=-1).sum(axis=-1))[...,None,None]
 
     if sheet_library is not None:
-        ts = tb.open_file(sheet_library)
-        srama = ts.root.rama[:]
-        sfrac = ts.root.sheet_fraction[:]
+        with tb.open_file(sheet_library) as ts:
+          srama = ts.root.rama[:]
+          sfrac = ts.root.sheet_fraction[:]
 
         srestype = [x for x in t.root.rama._v_attrs.restype if x not in ('ALL','CPR')]
         sdirtype = t.root.rama._v_attrs.dir
