@@ -67,8 +67,9 @@ def read_residues(chain):
             omega = np.nan
 
         adict   = dict((a.getName(),a.getCoords()) for a in res.iterAtoms())
-        cg_list = [v for k,v in adict.items() if re.match(".G1?$",k)]
-        assert len(cg_list) in (0,1)
+        cg_list = [v for k,v in adict.items() if re.match("[^H]G1?$",k)]
+        if len(cg_list) not in (0,1):
+            raise RuntimeError('CG-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]G1?$",k)],))
 
         r = Residue(
             res.getResnum(),
