@@ -102,5 +102,15 @@ struct RamaMapPot : public PotentialNode
         for(auto &p: params) coord_pairs.back().push_back(p.residue);
         return compute_relative_deviation_for_node<2>(*this, rama, coord_pairs);
     }
+
+#ifdef PARAM_DERIV
+    virtual void set_param(const std::vector<float>& new_param) {
+        auto& r = rama_map_data;
+        vector<double> raw_data(r.n_layer * r.nx * r.ny);
+        if(raw_data.size() != new_param.size()) throw string("wrong number of parameters");
+        for(size_t i=0u; i<size_t(r.n_layer * r.nx * r.ny); ++i) raw_data[i] = new_param[i];
+        r.fit_spline(raw_data.data());
+    }
+#endif
 };
 static RegisterNodeType<RamaMapPot,1> rama_map_pot_node("rama_map_pot");

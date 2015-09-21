@@ -197,14 +197,14 @@ def write_infer_H_O(fasta, excluded_residues):
 
 def write_environment(fasta, environment_library):
     cgrp = t.create_group(potential, 'environment_vector')
-    cgrp._v_attrs.arguments = np.array(['placement_rotamer_cb_only','placement4_weighted'])
+    cgrp._v_attrs.arguments = np.array(['placement_cb_only','placement4_weighted'])
     # cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
 
     with tb.open_file(environment_library) as data:
          restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
-    grp = t.create_group(potential, 'placement_rotamer_cb_only')
+    grp = t.create_group(potential, 'placement_cb_only')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
     create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    np.arange(len(fasta)))
@@ -495,304 +495,101 @@ def basin_cond_prob_fcns(a_phi, a_psi):
     return basin_cond_prob
 
 
+def mixture_potential(weights, potentials):
+    ''' potentials must be normalized to the same value, preferably 1 '''
+    potentials = np.array(potentials)
+    assert len(weights) == len(potentials)
+    weights = np.array(weights)
+    weights = weights / weights.sum(axis=0)
+
+    # ensure that we broadcast correctly against the potential
+    weight_broadcast_shape = weights.shape + (1,)*(len(potentials.shape)-len(weights.shape))
+    weights = weights.reshape(weight_broadcast_shape)
+
+    potentials = potentials - np.log(weights)
+
+    min_pot = potentials.min(axis=0)
+    return min_pot - np.log(np.exp(min_pot-potentials).sum(axis=0))
 
 
-def exact_minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob=10.0):
-    N = row_marginal.shape[0]
-    N = col_marginal.shape[0]
-
-    assert row_marginal.shape == (N,)
-    assert col_marginal.shape == (N,)
-    assert counts.shape == (N,N)
-
-    row_marginal = row_marginal / row_marginal .sum()
-    col_marginal = col_marginal / col_marginal.sum()
-
-    # add pseudocount as in common in such methods
-    # this prevents problems with exact zero counts
-
-    counts = counts + pseudoprob * row_marginal[:,None] * col_marginal[None,:]
-    freq = counts / counts.sum()
-
-    import cvxopt.base
-    matrix = cvxopt.base.matrix
-
-    quadratic_matrix = matrix(np.diag(1./freq.reshape((N*N,))))
-    linear_vector = matrix(-2. * np.ones(N*N))
-
-    def marginal_matrix(n, row_or_col):
-        x = np.zeros((N,N))
-        if row_or_col == 'row':
-            x[n,:] = 1.
-        elif row_or_col == 'col':
-            x[:,n] = 1.
-        else:
-            raise ValueError
-        return x
-
-    # last constraint is redundant, so it is removed
-    constraint_matrix = matrix(np.concatenate((
-            [marginal_matrix(i, 'row').reshape((N*N)) for i in range(N)],
-            [marginal_matrix(j, 'col').reshape((N*N)) for j in range(N)]))[:-1])
-
-    constraint_values = matrix(np.concatenate((row_marginal, col_marginal))[:-1])
-
-    inequality_matrix  = matrix(-np.eye(N*N))  # this is a maximum value constraint
-    inequality_cutoffs = matrix( np.zeros(N*N))
-
-    import cvxopt.solvers
-    cvxopt.solvers.options['show_progress'] = False
-    result = cvxopt.solvers.qp(
-            quadratic_matrix,  linear_vector, 
-            inequality_matrix, inequality_cutoffs, 
-            constraint_matrix, constraint_values)
-    assert result['status'] == 'optimal'
-    joint_prob = np.array(result['x']).reshape((N,N))
-    # FIXME add non-negativity constraints to joint probabilities
-    joint_prob[joint_prob<0.] = 0.
-    return joint_prob
-
-
-def minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob=10.0, tune_pseudoprob=False):
-    # this method is based on Deming and Stephen (1940) 
-    # in this method, p_{ij} = n_{ij}/n * (1 + lambda^r_i + lambda^r_j)
-    # this equation has a symmetry lambda^r_i += alpha, lambda^c_j -= alpha, so the linear system
-    # will be degenerate
-
-    if tune_pseudoprob:
-        # in tuning mode, the pseudoprob is increased until all the probability estimates are positive
-        # this gives an automated way to ensure that the result is a valid probability distribution
-        prob_estimate = minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob)
-        while np.amin(prob_estimate) < 0.:
-            pseudoprob += 1.
-            prob_estimate = minimum_chi_square_fixed_marginal(row_marginal, col_marginal, counts, pseudoprob)
-        # print '%.2f'%(pseudoprob/counts.sum())
-        return prob_estimate
-
-    N = row_marginal.shape[0]
-    N = col_marginal.shape[0]
-
-    assert row_marginal.shape == (N,)
-    assert col_marginal.shape == (N,)
-    assert counts.shape == (N,N)
-
-    row_marginal = row_marginal   / row_marginal .sum()
-    col_marginal = col_marginal / col_marginal.sum()
-
-    # add pseudocount as in common in such methods
-    # this prevents problems with exact zero counts
-
-    counts = counts + pseudoprob * row_marginal[:,None] * col_marginal[None,:]
-    freq = counts / counts.sum()
-    freq_row_marginal = freq.sum(axis=1)
-    freq_col_marginal = freq.sum(axis=0)
-
-    LHS = np.zeros((2*N,2*N))
-    LHS[:N,:N] =  np.diag(freq_row_marginal);  LHS[:N,N:] = freq; 
-    LHS[N:,:N] =  freq.T;                      LHS[N:,N:] = np.diag(freq_col_marginal);
-
-    RHS = np.zeros((2*N,))
-    RHS[:N] = row_marginal - freq_row_marginal
-    RHS[N:] = col_marginal - freq_col_marginal
-
-    # The matrix is small, so we can just explicitly invert.  Due to the
-    # degeneracy, we will use the pseuodoinverse instead of a regular inverse.
-
-    lambd = np.dot(np.linalg.pinv(LHS), RHS)
-    prob = freq * (1. + lambd[:N][:,None] + lambd[N:][None,:])
-
-    # now we have a good estimate for the frequencies, but not perfect, because
-    # some of the frequencies could be negative
-    return prob
-
-
-def make_trans_matrices(seq, monomer_basin_prob, dimer_counts):
-    N = len(seq)
-    trans_matrices = np.zeros((N-1, 5,5))
-    prob_matrices  = np.zeros((N-1, 5,5))
-    count_matrices = np.zeros((N-1, 5,5))
-    assert monomer_basin_prob.shape == (N,5)
-    # normalize basin probabilities
-    monomer_basin_prob = monomer_basin_prob / monomer_basin_prob.sum(axis=1)[:,None]
-
-    for i in range(N-1):
-        count = dimer_counts[(seq[i],seq[i+1])]
-        prob = exact_minimum_chi_square_fixed_marginal(
-                monomer_basin_prob[i], 
-                monomer_basin_prob[i+1], 
-                count, pseudoprob = 0.1)   
-
-        # transition matrix is correlation after factoring out independent component
-        trans_matrices[i] = prob / (monomer_basin_prob[i][:,None] * monomer_basin_prob[i+1][None,:])
-        prob_matrices[i]  = prob
-        count_matrices[i] = count
-
-    return trans_matrices, prob_matrices, count_matrices
-
-
-def populate_rama_maps(seq, rama_library_h5, sheet_library=None, sheet_reference_energy=0.):
-    rama_maps = np.zeros((len(seq), 72,72))
-    t=tb.open_file(rama_library_h5)
-    rama = t.root.rama[:]
-
-    restype = t.root.rama._v_attrs.restype
-    dirtype = t.root.rama._v_attrs.dir
+def read_rama_maps_and_weights(seq, rama_group, mode='mixture'):
+    assert mode in ['mixture', 'product']
+    restype = rama_group._v_attrs.restype
+    dirtype = rama_group._v_attrs.dir
     ridx = dict([(x,i) for i,x in enumerate(restype)])
     didx = dict([(x,i) for i,x in enumerate(dirtype)])
-    rama_maps[0] = rama[ridx[seq[0]], didx['right'], ridx[seq[1]]]
-        
+
+    dimer_pot    = rama_group.dimer_pot[:]
+    dimer_weight = rama_group.dimer_weight[:]
+
+    assert len(seq) >= 3   # avoid bugs
+
     # cis-proline is only CPR when it is the central residue, otherwise just use PRO
-    f = lambda r,d,n: rama[ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
-    for i,l,c,r in zip(range(1,len(seq)-1), seq[:-2], seq[1:-1], seq[2:]):
-        rama_maps[i] = f(c,'left',l) + f(c,'right',r) - f(c,'right','ALL')
+    V = lambda r,d,n: dimer_pot   [ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
+    W = lambda r,d,n: dimer_weight[ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
+
+    pots    = np.zeros((len(seq), dimer_pot.shape[-2], dimer_pot.shape[-1]), dtype='f4')
+    weights = np.zeros((len(seq),),dtype='f4')
+
+    pots   [0] = V(seq[0], 'right', seq[1])
+    weights[0] = W(seq[0], 'right', seq[1])
         
-    rama_maps[len(seq)-1] = f(seq[len(seq)-1], 'left', seq[len(seq)-2])
-    rama_maps -= -np.log(np.exp(-1.0*rama_maps).sum(axis=-1).sum(axis=-1))[...,None,None]
+    for i,l,c,r in zip(range(1,len(seq)-1), seq[:-2], seq[1:-1], seq[2:]):
+        if   mode == 'product':
+            pots[i]    = V(c,'left',l) + V(c,'right',r) - V(c,'right','ALL') 
+            weights[i] = 0.5*(W(c,'left',l) + W(c,'right',r))  # always just average weights
+        elif mode == 'mixture':
+            # it's a little sticky to figure out what the mixing proportions should be
+            # there is basically a one-sided vs two-sided problem (what if we terminate a sheet?)
+            # I am going with one interpretation that may not be right
+            pots[i]    = mixture_potential([W(c,'left',l), W(c,'right',r)], [V(c,'left',l), V(c,'right',r)])
+            weights[i] = 0.5*(W(c,'left',l) + W(c,'right',r))
+        else:
+            raise RuntimeError('impossible')
+        
+    pots   [-1] = V(seq[-1], 'left', seq[-2])
+    weights[-1] = W(seq[-1], 'left', seq[-2])
 
-    if sheet_library is not None:
-        with tb.open_file(sheet_library) as ts:
-          srama = ts.root.rama[:]
-          sfrac = ts.root.sheet_fraction[:]
+    # Ensure normalization
+    pots -= -np.log(np.exp(-1.0*pots).sum(axis=(-2,-1), keepdims=1))
 
-        srestype = [x for x in t.root.rama._v_attrs.restype if x not in ('ALL','CPR')]
-        sdirtype = t.root.rama._v_attrs.dir
-        sridx = dict([(x,i) for i,x in enumerate(srestype)])
-        sdidx = dict([(x,i) for i,x in enumerate(sdirtype)])
-
-        g = lambda arr,r,d,n: arr[sridx[r], sdidx[d], sridx[n]]
-
-        for i in range(len(seq)):
-            N_term = i==0
-            C_term = i==len(seq)-1
-
-            map1  = 1.*g(srama, seq[i], 'left',  seq[i-1]) if not N_term else np.zeros(srama.shape[-2:],'f4')
-            frac1 = 1.*g(sfrac, seq[i], 'left',  seq[i-1]) if not N_term else 0.
-            map1 -= -np.log(np.exp(-1.*map1).sum())
-
-            map2  = 1.*g(srama, seq[i], 'right', seq[i+1]) if not C_term else np.zeros(srama.shape[-2:],'f4')
-            frac2 = 1.*g(sfrac, seq[i], 'right', seq[i+1]) if not C_term else 0.
-            map2 -= -np.log(np.exp(-1.*map2).sum())
-
-            # correct for reference energy and the presence of 2 neighbors
-            frac1 = (1. if C_term else 0.5)*frac1
-            frac2 = (1. if N_term else 0.5)*frac2
-            frac_coil = 1. - (frac1 + frac2)
-
-            frac1_energy = -np.log(1e-10 + frac1) - sheet_reference_energy
-            frac2_energy = -np.log(1e-10 + frac2) - sheet_reference_energy
-            frac_coil_energy = -np.log(1e-10+frac_coil)
-
-            e1 = map1         + frac1_energy
-            e2 = map2         + frac2_energy
-            ec = rama_maps[i] + frac_coil_energy
-
-            e_min = np.where((e1<e2), e1, e2)
-            e_min = np.where((ec<e_min), ec, e_min)
-
-            e1 = e1 - e_min
-            e2 = e2 - e_min
-            ec = ec - e_min
-
-            # taking out e_min increases numerical stability
-            rama_maps[i] = e_min + -np.log(np.exp(-ec) + np.exp(-e1) + np.exp(-e2))
-            rama_maps[i] -= (rama_maps[i]*np.exp(-rama_maps[i])).sum()/np.exp(-rama_maps[i]).sum()  # make average energy 0.
-
-    t.close()
-    return dict(rama_maps = rama_maps, phi=np.arange(-180,180,5), psi=np.arange(-180,180,5))
+    return pots, weights
 
 
-def write_rama_map_pot(seq, rama_library_h5, sheet_library=None, sheet_reference_energy=0.):
+def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None):
+    with tb.open_file(rama_library_h5) as tr:
+        coil_pots, coil_weights = read_rama_maps_and_weights(seq, tr.root.coil, mode='mixture')
+
+        if sheet_mixing is None:
+            return coil_pots
+        else:
+            sheet_pots, sheet_weights = read_rama_maps_and_weights(seq, tr.root.sheet)
+            return mixture_potential([coil_weights, sheet_weights*np.exp(-sheet_mixing)], 
+                                     [coil_pots,    sheet_pots])
+
+
+def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
 
-    rama_pot = populate_rama_maps(seq, rama_library_h5, sheet_library, sheet_reference_energy)['rama_maps']
-    assert rama_pot.shape[0] == len(seq)
+    rama_pot = read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy)
+
+    if sheet_mixing_energy is not None:
+        # support finite differencing for potential derivative
+        eps = 1e-2
+        grp._v_attrs.sheet_eps = eps
+        create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
+        create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
 
     # let's remove the average energy from each Rama map 
     # so that the Rama potential emphasizes its variation
 
-    rama_pot -= (rama_pot*np.exp(-rama_pot)).sum(axis=-1).sum(axis=-1)[:,None,None]
+    rama_pot -= (rama_pot*np.exp(-rama_pot)).sum(axis=(-2,-1),keepdims=1)
 
     create_array(grp, 'residue_id',   obj=np.arange(len(seq)))
     create_array(grp, 'rama_map_id',  obj=np.arange(rama_pot.shape[0]))
     create_array(grp, 'rama_pot',     obj=rama_pot)
 
-
-def write_hmm_pot(sequence, rama_library_h5, dimer_counts=None):
-    grp = t.create_group(potential, 'rama_hmm_pot')
-    grp._v_attrs.arguments = np.array(['pos'])
-    # first ID is previous C
-    id = np.arange(2,n_atom-4,3)
-    id = np.column_stack((id,id+1,id+2,id+3,id+4))
-    n_states = 5
-    n_bin=72
-    rama_deriv = np.zeros((id.shape[0],n_states,n_bin,n_bin,3))
-
-    d=populate_rama_maps(sequence, rama_library_h5)
-
-    import scipy.interpolate as interp
-    phi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
-    psi = np.linspace(-np.pi,np.pi,n_bin,endpoint=False) + 2*np.pi/n_bin/2
-
-    sharpness = 2. ; # parameters set basin sharpness, 4. is fairly diffuse
-    basin_cond_prob = basin_cond_prob_fcns(sharpness, sharpness)  
-    assert len(basin_cond_prob) == n_states
-
-    def find_deriv(i):
-        rmap = np.tile(d['rama_maps'][i], (3,3))  # tiling helps to ensure periodicity
-        h=d['phi']/180.*np.pi
-        s=d['psi']/180.*np.pi
-        rmap_spline = interp.RectBivariateSpline(
-                np.concatenate((h-2*np.pi, h, h+2*np.pi)),
-                np.concatenate((s-2*np.pi, s, s+2*np.pi)),
-                rmap*1.0)
-
-        eps = 1e-8
-        vals = []
-        for basin in range(n_states):
-            # the new axes are to make the broadcasting rules agree
-            lprob_fcn = lambda x,y: rmap_spline(x,y) - np.log(basin_cond_prob[basin](x[:,None],y[None,:]))
-            p  = np.exp(-lprob_fcn(phi,psi))
-            dx = (lprob_fcn(phi+eps,psi    ) - lprob_fcn(phi-eps,psi    ))/(2.*eps)
-            dy = (lprob_fcn(phi    ,psi+eps) - lprob_fcn(phi,    psi-eps))/(2.*eps)
-            vals.append(np.concatenate((p[...,None],dx[...,None],dy[...,None]), axis=-1))
-
-        # concatenate over basins
-        return np.concatenate([x[None] for x in vals], axis=0)
-
-    for nr in 1+np.arange(rama_deriv.shape[0]):
-        rama_deriv[nr-1] = find_deriv(nr).transpose((0,2,1,3))
-
-    # P(phi,b) = P(phi) * P(b|phi)
-    # P(b|phi) = f(phi, b) / sum_b' f(phi,b)
-
-    # # normalize the prob at each site (but this will ruin potential calculation)
-    # rama_deriv[...,0] /= rama_deriv[...,0].sum(axis=1)[:,None]
-
-    # scale the probabilities for each residue
-    # print rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)
-    rama_deriv[...,0] /= rama_deriv[...,0].mean(axis=1).mean(axis=1).mean(axis=1)[:,None,None,None] + 1e-8;
-
-    idx_to_map = np.arange(id.shape[0])
-
-    if dimer_counts is not None:
-        trans_matrices, prob_matrices, count_matrices = make_trans_matrices(
-                sequence[1:-1], # exclude termini
-                rama_deriv[...,0].sum(axis=-1).sum(axis=-1),
-                dimer_counts)
-    else:
-        # completely uncorrelated transition matrices
-        trans_matrices = np.ones((id.shape[0]-1, n_states, n_states))
-
-    grp._v_attrs.sharpness = sharpness
-    create_array(grp, 'id',             obj=id)
-    create_array(grp, 'rama_deriv',     obj=rama_deriv.astype('f4').transpose((0,1,3,2,4)))
-    create_array(grp, 'rama_pot',       obj=d['rama_maps'])
-    create_array(grp, 'idx_to_map',     obj=idx_to_map)
-    create_array(grp, 'trans_matrices', obj=trans_matrices.astype('f4'))
-    if dimer_counts is not None:
-        create_array(grp, 'prob_matrices',  obj=prob_matrices)
-        create_array(grp, 'count_matrices', obj=count_matrices)
 
 def compact_sigmoid(x, sharpness):
     y = x*sharpness;
@@ -835,55 +632,6 @@ def rama_box(rama, center, half_width, sharpness):
         return result
 
 
-def write_basin_correlation_pot(sequence, rama_pot, rama_map_id, dimer_basin_library):
-    np.set_printoptions(precision=3, suppress=True)
-    assert len(rama_pot.shape) == 3
-    grp = t.create_group(potential, 'basin_correlation_pot')
-    grp._v_attrs.arguments = np.array(['rama_coord'])
-
-    basin_width = 10.*deg; 
-    basin_sharpness = 1./basin_width
-
-    rama_prob = np.exp(-rama_pot)
-    rama_prob *= 1./rama_prob.sum(axis=-1,dtype='f8').sum(axis=-1)[:,None,None]
-
-    basins = deg * np.array([
-            ((-180.,   0.), (-100.,  50.)),   # alpha_R
-            ((-180.,-100.), (  50., 260.)),   # beta
-            ((-100.,   0.), (  50., 260.)),   # PPII
-            ((   0., 180.), ( -50., 100.)),   # alpha_L
-            ((   0., 180.), ( 100., 310.))])  # gamma
-
-    basin_center     = 0.5*(basins[:,:,1]+basins[:,:,0])
-    basin_half_width = 0.5*(basins[:,:,1]-basins[:,:,0])
-
-    create_array(grp, 'basin_center',     obj=basin_center)
-    create_array(grp, 'basin_half_width', obj=basin_half_width)
-    grp.basin_half_width._v_attrs.sharpness = basin_sharpness
-
-    phi_grid = np.linspace(-180.,180., rama_prob.shape[1], endpoint=False)*deg
-    psi_grid = np.linspace(-180.,180., rama_prob.shape[2], endpoint=False)*deg
-    PSI,PHI = np.meshgrid(phi_grid,psi_grid)
-    rama = np.concatenate((PHI[...,None], PSI[...,None]), axis=-1)
-
-    rama_basin_prob = rama_box(rama, basin_center, basin_half_width, basin_sharpness)
-    marginal_basin_prob = (rama_basin_prob[None] * rama_prob[...,None]).sum(axis=1).sum(axis=1)
-
-
-    connection_matrices, prob_matrices, count_matrices = make_trans_matrices(
-            sequence[1:-1], # exclude termini
-            np.array([marginal_basin_prob[i] for i in rama_map_id[1:-1]]),
-            cPickle.load(open(dimer_basin_library)))
-    connection_matrices = np.clip(connection_matrices, 1e-3, 5.)  # avoid zeros and wild numbers in energy
-
-    left_res = np.arange(1,len(sequence)-2)
-    create_array(grp, 'residue_id',           obj=np.column_stack((left_res, left_res+1)))
-    create_array(grp, 'connection_matrices',  obj=connection_matrices.astype('f4'))
-    create_array(grp, 'connection_matrix_id', obj=np.arange(grp.connection_matrices.shape[0]))
-    create_array(grp, 'prob_matrices',        obj=prob_matrices)
-    create_array(grp, 'marginal_basin_prob',  obj=marginal_basin_prob)
-
-
 def read_fasta(file_obj):
     lines = list(file_obj)
     assert lines[0][0] == '>'
@@ -900,56 +648,6 @@ def read_fasta(file_obj):
         else:
             seq.append(three_letter_aa[a])
     return np.array(seq)
-
-
-def write_dihedral_angle_energies(parser, n_res, dihedral_angle_table):
-    fields = [ln.split() for ln in open(dihedral_angle_table,'U')]
-    if [x.lower() for x in fields[0]] != 'index angle_type start end width energy'.split():
-        parser.error('First line of dihedral angle energy table must be "index angle_type start end width energy"')
-    if not all(len(f)==6 for f in fields):
-        parser.error('Invalid format for dihedral angle energy file')
-    fields = fields[1:]
-    n_elem = len(fields)
-
-    grp = t.create_group(t.root.input.potential, 'dihedral_range')
-    grp._v_attrs.arguments = np.array(['pos'])
-
-    id          = np.zeros((n_elem,4), dtype = 'i')
-    angle_range = np.zeros((n_elem,2))
-    scale       = np.zeros((n_elem,))
-    energy      = np.zeros((n_elem,))
- 
-    for i,f in enumerate(fields):
-        res_num = int(f[0])
-        good_res_num = (f[1]=='phi' and 0 < res_num <= n_res-1) or (f[1]=='psi' and 0 <= res_num < n_res-1) 
-
-        if not good_res_num:
-            raise ValueError("Cannot constrain dihedral angles for residue %i"%res_num)
-           
-        if f[1] == 'phi':
-            id[i,0] = 3*res_num - 1    # prev C
- 	    id[i,1] = 3*res_num + 0    # N
- 	    id[i,2] = 3*res_num + 1    # CA
- 	    id[i,3] = 3*res_num + 2    # C
-        elif f[1] == 'psi':
-            id[i,0] = 3*res_num + 0    # N
-            id[i,1] = 3*res_num + 1    # CA
-            id[i,2] = 3*res_num + 2    # C
-            id[i,3] = 3*res_num + 3    # next N
-        else:
- 	   raise ValueError('angle type %s not understood'%f[1])
- 
- 	angle_range[i,0] = float(f[2])*np.pi/180.0
- 	angle_range[i,1] = float(f[3])*np.pi/180.0
-        if angle_range[i,0] > angle_range[i,1]:
-            raise ValueError("Lower dihedral angle bound for residue %i %s is greater than upper bound" % (res_num, f[1]))
-        scale[i]       = 1./(float(f[4])*np.pi/180.)
-        energy[i]      = float(f[5])
- 
-    create_array(grp, 'id',          obj=id)
-    create_array(grp, 'angle_range', obj=angle_range)
-    create_array(grp, 'scale',       obj=scale)
-    create_array(grp, 'energy',      obj=energy)
 
 
 def write_contact_energies(parser, fasta, contact_table):
@@ -1139,11 +837,11 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
-    create_array(grp, 'signature',       np.array(['point','vector']))
+    create_array(grp, 'signature',       np.array(['point']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
-    create_array(grp, 'placement_data',  placement_pos)
+    create_array(grp, 'placement_data',  placement_pos[...,:3])
     create_array(grp, 'restype_seq',     restype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
 
@@ -1370,11 +1068,9 @@ def main():
             help='smooth Rama probability library')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
-    parser.add_argument('--rama-sheet-reference-energy', default=0., type=float,
-            help='reference energy for sheets when mixing with coil library.  More negative numbers mean less '+
-            'sheet content in the final structure.  Default is 0.')
-    parser.add_argument('--dimer-basin-library', default='',
-            help='dimer basin probability library')
+    parser.add_argument('--rama-sheet-mixing-energy', default=None, type=float,
+            help='reference energy for sheets when mixing with coil library.  More negative numbers mean more '+
+            'sheet content in the final structure.  Default is no sheet mixing.')
     parser.add_argument('--hbond-energy', default=0., type=float,
             help='energy for forming a protein-protein hydrogen bond.  Default is no HBond energy.')
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
@@ -1522,17 +1218,10 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_library, args.rama_sheet_reference_energy)
+        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy)
 
-        if args.dimer_basin_library:
-            write_basin_correlation_pot(fasta_seq,
-                    potential.rama_map_pot.rama_pot[:], potential.rama_map_pot.rama_map_id[:], 
-                    args.dimer_basin_library)
     else:
         print>>sys.stderr, 'WARNING: running without any Rama potential !!!'
-
-    if args.dihedral_range:
-        write_dihedral_angle_energies(parser, len(fasta_seq), args.dihedral_range)
 
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)

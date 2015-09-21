@@ -475,16 +475,18 @@ try {
         }
         */
 
-        if(pivot_interval) {
-            printf("pivot_success:");
-            for(auto& sys: systems) {
-                std::vector<int64_t> ps(2,0);
-                traverse_dset<2,int>(sys.config.get(), "/output/pivot_stats", [&](size_t nf, int d, int x) {
-                        ps[d] += x;});
-                printf(" % .4f", double(ps[0])/double(ps[1]));
+        try {
+            if(pivot_interval) {
+                printf("pivot_success:");
+                for(auto& sys: systems) {
+                    std::vector<int64_t> ps(2,0);
+                    traverse_dset<2,int>(sys.config.get(), "/output/pivot_stats", [&](size_t nf, int d, int x) {
+                            ps[d] += x;});
+                    printf(" % .4f", double(ps[0])/double(ps[1]));
+                }
+                printf("\n");
             }
-            printf("\n");
-        }
+        } catch(...) {}  // stats reporting is optional
 
 #ifdef COLLECT_PROFILE
         printf("\n");
@@ -502,5 +504,8 @@ try {
     return 0;
 } catch(const TCLAP::ArgException &e) { 
     fprintf(stderr, "\n\nERROR: %s for argument %s\n", e.error().c_str(), e.argId().c_str());
+    return 1;
+} catch(const string &e) {
+    fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
     return 1;
 }

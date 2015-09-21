@@ -55,8 +55,8 @@ struct RigidPlacementNode: public CoordNode {
                     throw string("unrecognized type in signature");
                 }});
         if(n_pos_dim_input != n_pos_dim) 
-            throw string("number of dimensions in input signature does not "
-                    "match compiled n_pos_dim.  Unable to continue.");
+            throw string("number of dimensions in input signature("+to_string(n_pos_dim_input)+") does not "
+                    "match compiled n_pos_dim("+to_string(n_pos_dim)+").  Unable to continue.");
 
         check_size(grp, "layer_index",    n_elem);
         check_size(grp, "affine_residue", n_elem);
@@ -225,4 +225,5 @@ struct RigidPlacementNode: public CoordNode {
 static RegisterNodeType<RigidPlacementNode<1>,2> placement_scalar_node("placement_scalar");
 static RegisterNodeType<RigidPlacementNode<3>,2> placement3_node("placement3");
 static RegisterNodeType<RigidPlacementNode<4>,2> placement4_node("placement4");
-static RegisterNodeType<RigidPlacementNode<6>,2> placement_rotamer_node("placement_rotamer");
+static RegisterNodeType<RigidPlacementNode<3>,2> placement_rotamer_node("placement_rotamer");
+static RegisterNodeType<RigidPlacementNode<6>,2> placement_cb_only_node("placement_cb_only");

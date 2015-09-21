@@ -146,7 +146,9 @@ class UpsideEnergyGapGrad(theano.Op):
 def sgd_sweep(state, mom, mu, eps, minibatches, change_batch_function, d_obj, nesterov=True):
     for mb in minibatches:
         change_batch_function(mb)
-        state, mom = state + mom, mu*mom - eps*d_obj(state+mu*mom if nesterov else state)
+        # note that the momentum update happens *before* the state update
+        mom = mu*mom - eps*d_obj(state+mu*mom if nesterov else state)
+        state = state + mom
     return state, mom
 
 

@@ -103,7 +103,7 @@ struct EnvironmentCoverage : public CoordNode {
         igraph(grp, rotamer_sidechains_, weighted_sidechains_),
         n_restype(elem_width)
     {
-        if(logging(LOG_DETAILED)) {  // FIXME this should be LOG_EXTENSIVE but I am debugging
+        if(logging(LOG_EXTENSIVE)) {
             default_logger->add_logger<float>("environment_vector", {n_elem, n_restype}, [&](float* buffer) {
                     for(int ne: range(n_elem))
                         for(int rt: range(n_restype))

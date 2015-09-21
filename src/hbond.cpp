@@ -285,7 +285,7 @@ namespace {
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_param=6, n_dim1=7, n_dim2=6, n_deriv=7;
+        constexpr static const int n_param=6, n_dim1=7, n_dim2=3, n_deriv=7;
 
         static float cutoff(const Vec<n_param> &p) {
             return p[0] + compact_sigmoid_cutoff(p[1]);
@@ -333,7 +333,7 @@ namespace {
             store<3,6>(d_hb,  extract<3,6>(d_base));
             d_hb[6] = d_base[6];
             store<0,3>(d_sc,  extract<0,3>(d_base));
-            store<3,6>(d_sc,  make_zero<3>());
+            // store<3,6>(d_sc,  make_zero<3>());
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 

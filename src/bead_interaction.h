@@ -230,6 +230,6 @@ namespace {
     };
 }
 
-typedef PosDistInteraction6 preferred_bead_type;
+typedef PosDistInteraction preferred_bead_type;
 
 #endif

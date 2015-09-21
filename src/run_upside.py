@@ -11,22 +11,19 @@ upside_dir = os.path.expanduser('~/upside/')
 
 
 def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=True, 
-                  sidechain=False, hbond=None, use_sheet_library=False, sheet_ref_energy=0., environment=None,
+                  sidechain=False, hbond=None, sheet_mix_energy=None, environment=None,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, rama_pot=True,
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5'):
-    args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output, '--n-system=%i'%n_system]
-    if rama_pot:
-        args.append('--rama-library=%s'%(params_dir+'NDRD_TCB.h5'))
-        
-    #args.append('--backbone-dependent-point=%s'%(params_dir+'backbone_dependent_com.h5'))
     
-    if use_sheet_library:
-        args.append('--rama-sheet-library=%s'%(params_dir+'sheet_rama_library.h5'))
-        args.append('--rama-sheet-reference-energy=%f'%sheet_ref_energy)
-        
+    args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output, '--n-system=%i'%n_system]
+
     if init:
         args.append('--initial-structures=%s'%init)
+    if rama_pot:
+        args.append('--rama-library=%s'%(params_dir+'rama_libraries.h5'))
+    if sheet_mix_energy is not None:
+        args.append('--rama-sheet-mixing-energy=%f'%sheet_mix_energy)
     if dimer:
         args.append('--dimer-basin-library=%s'%(params_dir+'TCB_count_matrices.pkl'))
     if not backbone:
@@ -56,6 +53,8 @@ def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=T
         args.append('--sidechain-radial-scale-inverse-energy=%f'%inverse_scale)
         args.append('--sidechain-radial-scale-inverse-radius=%f'%inverse_radius_scale)
         
+    # print ' '.join(args)
+
     return ' '.join(args) + '\n' + sp.check_output(args)
 
 
@@ -68,10 +67,7 @@ UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
 
 def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
                replica_interval=None, max_temp=None, pivot_interval=None, time_step = None, 
-               do_compile=True, log_level='basic'):
-    if do_compile:
-        compile()
-        
+               log_level='basic'):
     if isinstance(config,str): config = [config]
     
     upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, 
@@ -106,7 +102,7 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
         try:
             os.environ['OMP_NUM_THREADS'] = str(n_threads)
             args = ['srun', '--ntasks=1', '--nodes=1', '--cpus-per-task=%i'%n_threads, 
-                    '--slurmd-debug=quiet', '--output=%s'%output_path] + upside_args
+                    '--slurmd-debug=0', '--output=%s'%output_path] + upside_args
             job = sp.Popen(args, close_fds=True)
         finally:
             if old_omp_num_threads is None:
