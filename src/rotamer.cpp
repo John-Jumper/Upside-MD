@@ -394,6 +394,7 @@ struct RotamerSidechain: public PotentialNode {
 
     void fill_holders()
     {
+        edges11.reset();
         for(int n_rot1: range(UPPER_ROT))
             for(int n_rot2: range(UPPER_ROT))
                 if(edge_holders_matrix[n_rot1][n_rot2])
@@ -557,7 +558,8 @@ struct RotamerSidechain: public PotentialNode {
         for(auto nh: node_holders_matrix)
             if(nh)
                 for(int no: range(nh->n_rot))
-                    copy_n(&nh->prob(no,0), nh->n_elem, &nh->old_belief(no,0));
+                    for(int ne: range(nh->n_elem))
+                        nh->old_belief(no,ne) = nh->prob(no,ne);
 
         fill(edges33.old_belief, 1.f);
 
