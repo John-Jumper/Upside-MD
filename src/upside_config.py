@@ -245,7 +245,6 @@ def write_environment(fasta, environment_library):
     #      create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
     # create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
 
-
     egrp = t.create_group(potential, 'simple_environment')
     egrp._v_attrs.arguments = np.array(['environment_vector'])
 
@@ -339,7 +338,7 @@ def make_restraint_group(group_num, residues, initial_pos, strength):
     create_array(grp, 'id',           obj=np.concatenate((id,          pairs),      axis=0))
     create_array(grp, 'equil_dist',   obj=np.concatenate((equil_dist,  pair_dists), axis=0))
     create_array(grp, 'spring_const', obj=np.concatenate((spring_const,strength*np.ones(len(pairs))),axis=0))
-    create_array(grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms,np.zeros(len(pairs),dtype='bool')),axis=0))
+    create_array(grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms,np.zeros(len(pairs),dtype='int')),axis=0))
 
 
 def make_tab_matrices(phi, theta, bond_length):
@@ -421,7 +420,7 @@ def write_dist_spring(args):
     equil_dist[2::3] = 1.300
 
     spring_const = args.bond_stiffness*np.ones(id.shape[0])
-    bonded_atoms = np.ones(id.shape[0], dtype='bool')
+    bonded_atoms = np.ones(id.shape[0], dtype='int')
 
     create_array(grp, 'id', obj=id)
     create_array(grp, 'equil_dist',   obj=equil_dist)
@@ -860,7 +859,7 @@ def write_rotamer(fasta, interaction_library, damping):
             (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []) +
             (['environment_energy'] if 'environment_energy' in t.root.input.potential else [])
             )
-    g._v_attrs.max_iter = 10000
+    g._v_attrs.max_iter = 1000
     g._v_attrs.tol      = 1e-4
     g._v_attrs.damping  = damping
     g._v_attrs.iteration_chunk_size = 2

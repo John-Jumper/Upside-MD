@@ -310,22 +310,41 @@ struct DistSpring : public PotentialNode
     int n_elem;
     CoordNode& pos;
     vector<DistSpringParams> params;
+    vector<int> bonded_atoms;
 
     DistSpring(hid_t grp, CoordNode& pos_):
         PotentialNode(pos_.n_system),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
-        check_size(grp, "id",              n_elem, n_dep);
-        check_size(grp, "equil_dist",      n_elem);
+        check_size(grp, "id",           n_elem, n_dep);
+        check_size(grp, "equil_dist",   n_elem);
         check_size(grp, "spring_const", n_elem);
+        check_size(grp, "bonded_atoms", n_elem);
 
         auto& p = params;
         traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
         traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dist = x;});
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
+        traverse_dset<1,int>  (grp, "bonded_atoms", [&](size_t i,           int   x) { bonded_atoms.push_back(x);});
 
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
+
+        if(logging(LOG_DETAILED))
+            default_logger->add_logger<float>("nonbonded_spring_energy", {n_system}, [&](float* buffer) {
+                    for(int ns=0; ns<n_system; ++ns) {
+                        float pot = 0.f;
+                        VecArray x = pos.coords().value[ns];
+
+                        for(int nt=0; nt<n_elem; ++nt) {
+                            if(bonded_atoms[nt]) continue;  // don't count bonded spring energy
+
+                            DistSpringParams p = params[nt];
+                            float dmag = mag(load_vec<3>(x, p.atom[0].index) - load_vec<3>(x, p.atom[1].index));
+                            pot += 0.5f * p.spring_constant * sqr(dmag - p.equil_dist);
+                        }
+                        buffer[ns] = pot;
+                    }});
     }
 
     virtual void compute_value(ComputeMode mode) {

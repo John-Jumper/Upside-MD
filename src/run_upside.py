@@ -66,8 +66,8 @@ UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
 
 
 def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
-               replica_interval=None, max_temp=None, pivot_interval=None, time_step = None, 
-               log_level='basic'):
+               replica_interval=None, max_temp=None, anneal_factor=1., anneal_duration=-1., pivot_interval=None, time_step = None, 
+               log_level='basic', account=None):
     if isinstance(config,str): config = [config]
     
     upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, 
@@ -78,6 +78,10 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
         upside_args.extend(['--max-temperature', '%f'%max_temp])
     if pivot_interval is not None:
         upside_args.extend(['--pivot-interval', '%f'%pivot_interval])
+    if anneal_factor != 1.:
+        upside_args.extend(['--anneal-factor', '%f'%anneal_factor])
+    if anneal_duration != -1.:
+        upside_args.extend(['--anneal-duration', '%f'%anneal_duration])
     upside_args.extend(['--log-level', log_level])
     
     if time_step is not None:
@@ -113,6 +117,8 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
         args = ['sbatch', '-p', queue, '--time=0-%i'%hours, '--ntasks=1', 
                 '--cpus-per-task=%i'%n_threads, '--export=OMP_NUM_THREADS=%i'%n_threads,
                 '--output=%s'%output_path, '--parsable', '--wrap', ' '.join(upside_args)]
+        if account is not None:
+            args.append('--account=%s'%account)
         job = sp.check_output(args).strip()
 
     return UpsideJob(job,config,output_path)

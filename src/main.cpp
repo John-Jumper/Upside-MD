@@ -176,6 +176,12 @@ try {
             false, 1., "float", cmd);
     ValueArg<double> max_temperature_arg("", "max-temperature", "maximum thermostat temperature (useful for parallel tempering)", 
             false, -1., "float", cmd);
+    ValueArg<double> anneal_factor_arg("", "anneal-factor", "annealing factor (0.1 means the final temperature "
+            "will be 10% of the initial temperature)", 
+            false, 1., "float", cmd);
+    ValueArg<double> anneal_duration_arg("", "anneal-duration", "duration of annealing phase "
+            "(default is duration of simulation)", 
+            false, -1., "float", cmd);
     ValueArg<double> frame_interval_arg("", "frame-interval", "simulation time between frames", 
             true, -1., "float", cmd);
     ValueArg<double> replica_interval_arg("", "replica-interval", 
@@ -230,10 +236,6 @@ try {
         // initialize thermostat and thermalize momentum
         printf("random seed: %lu\n", (unsigned long)(base_random_seed));
 
-        float max_temp = max_temperature_arg.getValue();
-        float min_temp = temperature_arg.getValue();
-        if(max_temp == -1.) max_temp = min_temp;
-
         int pivot_interval = pivot_interval_arg.getValue() > 0. 
             ? max(1,int(pivot_interval_arg.getValue()/(3*dt)))
             : 0;
@@ -250,6 +252,31 @@ try {
         h5_noerr(H5Eset_auto(H5E_DEFAULT, nullptr, nullptr));
         vector<string> config_paths = config_args.getValue();
         vector<System> systems(config_paths.size());
+
+        float max_temp = max_temperature_arg.getValue();
+        float min_temp = temperature_arg.getValue();
+
+        if(max_temp == -1.) 
+            max_temp = min_temp;
+        else if(systems.size() == 1u) 
+            throw string("--max-temperature cannot be specified for only a single system");
+
+        double anneal_factor = anneal_factor_arg.getValue();
+        double anneal_duration = anneal_duration_arg.getValue();
+        if(anneal_duration == -1.) anneal_duration = duration;
+
+        auto temp_interpolate = [=](double T0, double T1, double fraction) {
+            return sqr(sqrt(T0)*(1.-fraction) + sqrt(T1)*fraction);};
+
+        // system 0 is the minimum temperature
+        // tighter spacing at the low end of temperatures because the variance is decreasing
+        int n_system = systems.size();
+        auto replica_temp = [&temp_interpolate, anneal_factor, n_system, min_temp, max_temp](
+                double replica, double anneal_fraction) {
+            auto T0 = temp_interpolate(min_temp, anneal_factor*min_temp, anneal_fraction);
+            auto T1 = temp_interpolate(max_temp, anneal_factor*max_temp, anneal_fraction);
+            return (n_system>1) ? temp_interpolate(T0, T1, double(replica)/(n_system-1)) : T0;
+        };
 
         #pragma omp critical
         for(int ns=0; ns<int(systems.size()); ++ns) {
@@ -310,17 +337,7 @@ try {
                 printf("\n");
             }
 
-            if(max_temp != min_temp && systems.size() == 1u) 
-                throw string("--max-temperature cannot be specified for only a single system");
-            if(systems.size()==1u) {
-                systems.front().temperature = temperature_arg.getValue();
-            } else {
-                // system 0 is the minimum temperature
-                // tighter spacing at the low end of temperatures because the variance is decreasing
-                int n_system = systems.size();
-                sys->temperature = sqr((sqrt(min_temp)*(n_system-1-ns) + sqrt(max_temp)*ns)/(n_system-1));
-            }
-
+            sys->temperature = replica_temp(ns, 0.);
             sys->thermostat = OrnsteinUhlenbeckThermostat(
                     sys->random_seed,
                     thermostat_timescale_arg.getValue(),
@@ -394,11 +411,13 @@ try {
         //     printf("Single-threaded execution\n\n");
         // #endif
 
+
         printf("\n");
         for(int ns: range(systems.size())) {
-            printf("temperature %2i: %.3f\n", ns, systems[ns].temperature);
-            systems[ns].logger->log_once<double>("temperature", {1}, [&](double* temperature_buffer) {
-                    temperature_buffer[0] = systems[ns].temperature;});
+            printf("%i %.2f\n", ns, systems[ns].temperature);
+            float* temperature_pointer = &(systems[ns].temperature);
+            systems[ns].logger->add_logger<double>("temperature", {1}, [temperature_pointer](double* temperature_buffer) {
+                    temperature_buffer[0] = *temperature_pointer;});
         }
         printf("\n");
 
@@ -437,15 +456,22 @@ try {
                             Rg += mag2(load_vec<3>(sys.engine.pos->coords().value[0],na)-com);
                         Rg = sqrtf(Rg/sys.n_atom);
 
-                        printf("%*.0f / %*.0f elapsed %2i system %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
+                        printf("%*.0f / %*.0f elapsed %2i system %.2f temp %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
                                 duration_print_width, nr*3*double(dt), 
                                 duration_print_width, duration, 
-                                ns,
+                                ns, sys.temperature,
                                 get_n_hbond(sys.engine), Rg, sys.engine.potential[0]);
                         fflush(stdout);
                     }
-                    if(!(nr%thermostat_interval)) 
+                    if(!(nr%thermostat_interval)) {
+                        // Handle simulated annealing if applicable
+                        if(anneal_factor != 1.) {
+                            double fraction = (3*dt*(sys.round_num+1))/anneal_duration;
+                            sys.temperature = replica_temp(ns, min(fraction,1.));
+                            sys.thermostat.set_temp(vector<float>(1,sys.temperature));
+                        }
                         sys.thermostat.apply(sys.mom.array(), sys.n_atom);
+                    }
                     sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
 
                     do_break = nr>last_start && replica_interval && !((nr+1)%replica_interval);

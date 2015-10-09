@@ -330,7 +330,7 @@ struct BetweenInteractionGraph {
 
         // First find all the edges
         {
-            Timer timer(std::string("edge_finder"));
+            // Timer timer(std::string("edge_finder"));
             int ne = 0;
             for(int i1: range(n_elem1)) {
                 auto index1 = param1[i1].index;
@@ -357,7 +357,7 @@ struct BetweenInteractionGraph {
 
         // First find all the edges
         {
-            Timer timer(std::string("edge_computation"));
+            // Timer timer(std::string("edge_computation"));
 
             for(int ne: range(n_edge[ns])) {
                 int i1 = edge_indices[ns*2*max_n_edge + 2*ne + 0];

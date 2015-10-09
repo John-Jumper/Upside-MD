@@ -377,7 +377,6 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     virtual void compute_value(ComputeMode mode) {
-        Timer timer("rotamer");  // Timer code is not thread-safe, so cannot be used within parallel for
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         fill_holders();
@@ -394,6 +393,7 @@ struct RotamerSidechain: public PotentialNode {
 
     void fill_holders()
     {
+        Timer timer(std::string("rotamer_fill"));
         edges11.reset();
         for(int n_rot1: range(UPPER_ROT))
             for(int n_rot2: range(UPPER_ROT))
@@ -554,6 +554,7 @@ struct RotamerSidechain: public PotentialNode {
     
 
     pair<int,float> solve_for_marginals() {
+        Timer timer(std::string("rotamer_solve"));
         // first initialize old node beliefs to just be probability to speed convergence
         for(auto nh: node_holders_matrix)
             if(nh)
