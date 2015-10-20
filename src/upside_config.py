@@ -1214,6 +1214,7 @@ def main():
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
         args_group._v_attrs[k] = v
+    args_group._v_attrs['invocation'] = ' '.join(sys.argv[:])
 
     if args.rama_library:
         require_rama = True

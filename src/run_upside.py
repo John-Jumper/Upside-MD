@@ -66,16 +66,22 @@ UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
 
 
 def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
-               replica_interval=None, max_temp=None, anneal_factor=1., anneal_duration=-1., pivot_interval=None, time_step = None, 
+               replica_interval=None, anneal_factor=1., anneal_duration=-1., pivot_interval=None, 
+               time_step = None, swap_sets = None,
                log_level='basic', account=None):
     if isinstance(config,str): config = [config]
     
-    upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, 
-            '--frame-interval', '%f'%frame_interval, '--temperature', '%f'%temperature] + config
+    upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
+
+    try:
+        upside_args.extend(['--temperature', ','.join(map(str,temperature))])
+    except TypeError:  # not iterable
+        upside_args.extend(['--temperature', str(temperature)])
+
     if replica_interval is not None:
         upside_args.extend(['--replica-interval', '%f'%replica_interval])
-    if max_temp is not None:
-        upside_args.extend(['--max-temperature', '%f'%max_temp])
+        for s in swap_sets:
+            upside_args.extend(['--swap-set', s])
     if pivot_interval is not None:
         upside_args.extend(['--pivot-interval', '%f'%pivot_interval])
     if anneal_factor != 1.:
@@ -261,3 +267,15 @@ def display_structure(topo_aug, pos, size=(600,600)):
     return disp.Javascript(lib='/files/js/protein-viewer.js', 
                     data='render_structure(element, "%s", %i, %i, %s, %s);'%
                        (id_string, size[0], size[1], topo_aug[0], topo_aug[1](pos))), id_string
+
+def swap_table2d(nx,ny):
+    idx = lambda xy: xy[0]*ny + xy[1]
+    good = lambda xy: (0<=xy[0]<nx and 0<=xy[1]<ny)
+    swap = lambda i,j: '%i-%i'%(idx(i),idx(j)) if good(i) and good(j) else None
+    horiz0 = [swap((a,b),(a+1,b)) for a in range(0,nx,2) for b in range(0,ny)]
+    horiz1 = [swap((a,b),(a+1,b)) for a in range(1,nx,2) for b in range(0,ny)]
+    vert0  = [swap((a,b),(a,b+1)) for a in range(0,nx)   for b in range(0,ny,2)]
+    vert1  = [swap((a,b),(a,b+1)) for a in range(0,nx)   for b in range(1,ny,2)]
+    sets = (horiz0,horiz1,vert0,vert1)
+    sets = [[y for y in x if y is not None] for x in sets]
+    return [','.join(x) for x in sets if x]

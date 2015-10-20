@@ -20,6 +20,7 @@ using namespace h5;
 struct System {
     int n_atom;
     uint32_t random_seed;
+    float initial_temperature;
     float temperature;
     H5Obj config;
     shared_ptr<H5Logger> logger;
@@ -29,63 +30,168 @@ struct System {
     OrnsteinUhlenbeckThermostat thermostat;
     uint64_t round_num;
     System(): round_num(0) {}
+
+    void set_temperature(float new_temp) {
+        temperature = new_temp;
+        thermostat.set_temp(vector<float>(1,temperature));
+    }
 };
 
 
-void parallel_tempering_step(
-        uint32_t seed, uint64_t round,
-        vector<System>& systems) {
-    int n_system = systems.size();
+double stod_strict(const std::string& s) {
+    size_t nchar = -1u;
+    double x = stod(s, &nchar);
+    if(nchar != s.size()) throw("invalid float '" + s + "'");
+    return x;
+}
+int stoi_strict(const std::string& s) {
+    size_t nchar = -1u;
+    int i = stoi(s, &nchar);
+    if(nchar != s.size()) throw("invalid integer '" + s + "'");
+    return i;
+}
 
-    vector<float> beta(n_system);
-    for(int i=0; i<n_system; ++i) beta[i] = 1.f/systems[i].temperature;
+vector<string> split_string(const string& src, const string& sep) {
+    vector<string> ret;
 
-    // compute the boltzmann factors for everyone
-    auto compute_log_boltzmann = [&]() {
-        vector<float> result(n_system);
-        for(int i=0; i<n_system; ++i) {
-            systems[i].engine.compute(PotentialAndDerivMode);
-            result[i] = -beta[i]*systems[i].engine.potential[0];
+    for(auto curr_pos = begin(src); curr_pos-begin(src) < ptrdiff_t(src.size()); ) {
+        auto next_match_end = search(curr_pos, end(src), begin(sep), end(sep));
+        ret.emplace_back(curr_pos, next_match_end);
+        curr_pos = next_match_end + sep.size();
+    }
+
+    return ret;
+}
+
+
+struct ReplicaExchange {
+    struct SwapPair {int sys1; int sys2; uint64_t n_attempt; uint64_t n_success;};
+    vector<vector<SwapPair>> swap_sets;
+    vector<int> replica_indices;
+    vector<vector<SwapPair*>> participating_swaps;
+
+    ReplicaExchange(vector<System>& systems, vector<string> swap_sets_strings) {
+        int n_system = systems.size();
+        for(int ns: range(n_system)) {
+            replica_indices.push_back(ns);
+            participating_swaps.emplace_back();
         }
-        return result;
-    };
 
-    // swap coordinates and the associated system indices
-    auto coord_swap = [&](int ns1, int ns2) {
-        swap_ranges(
-                systems[ns1].engine.pos->coords().value[0].v,  
-                systems[ns1].engine.pos->coords().value[1].v,  
-                systems[ns2].engine.pos->coords().value[0].v);
-    };
+        for(string& set_string: swap_sets_strings) {
+            swap_sets.emplace_back();
+            auto& set = swap_sets.back();
+            
+            for(auto pair_string: split_string(set_string,",")) {
+                set.emplace_back();
+                auto& s = set.back();
+                auto p = split_string(pair_string, "-");
+                if(p.size() != 2u) throw string("invalid swap pair, because it contains " +
+                        to_string(p.size()) + "elements but should contain 2");
 
-    RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
+                s.sys1 = stoi_strict(p[0]);
+                s.sys2 = stoi_strict(p[1]);
 
-    // attempt neighbor swaps, first (2*i,2*i+1) swaps, then (2*i-1,2*i)
-    int start = random.uniform_open_closed().x() < 0.5f;  // must start at 0 or 1 randomly
+                s.n_attempt = 0u;
+                s.n_success = 0u;
 
-    auto old_lboltz = compute_log_boltzmann();
-    for(int i=start; i+1<n_system; i+=2) coord_swap(i,i+1);
-    auto new_lboltz  = compute_log_boltzmann();
+                int n_system = systems.size();
+                if(s.sys1 >= n_system || s.sys2 >= n_system) throw string("invalid system");
+            }
+        }
 
-    // reverse all swaps that should not occur by metropolis criterion
-    int n_trial = 0; 
-    int n_accept = 0;
-    for(int i=start; i+1<n_system; i+=2) {
-        n_trial++;
-        float lboltz_diff = (new_lboltz[i] + new_lboltz[i+1]) - (old_lboltz[i]+old_lboltz[i+1]);
-        // If we reject the swap, we must reverse it
-        if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x()) {
-            coord_swap(i,i+1);
-        } else {
-            n_accept++;
+        for(auto& ss: swap_sets) {
+            for(auto& sw: ss) {
+                participating_swaps[sw.sys1].push_back(&sw);
+                participating_swaps[sw.sys2].push_back(&sw);
+            }
+        }
+
+        // enable logging of replica events
+        for(int ns: range(n_system)) {
+            auto logger = systems[ns].logger;
+            if(!logger) continue;
+            if(static_cast<int>(logger->level) < static_cast<int>(LOG_BASIC)) continue;
+
+            auto* replica_ptr = &replica_indices[ns];
+            logger->add_logger<int>("replica_index", {1}, [replica_ptr](int* buffer){buffer[0] = *replica_ptr;});
+
+            auto* swap_vectors = &participating_swaps[ns];
+            logger->log_once<int>("replica_swap_partner", {int(swap_vectors->size())},[swap_vectors,ns](int* buffer){
+                    for(int i: range(swap_vectors->size())) {
+                        auto sw = (*swap_vectors)[i];
+                        // write down the system that is *not* this system
+                        buffer[i] = (sw->sys1!=ns ? sw->sys1 : sw->sys2);
+                    }});
+
+            logger->add_logger<int>("replica_cumulative_swaps", {int(swap_vectors->size()), 2}, 
+                  [swap_vectors](int* buffer) {
+                    for(int i: range(swap_vectors->size())) {
+                        auto sw = (*swap_vectors)[i];
+                        buffer[2*i+0] = sw->n_success;
+                        buffer[2*i+1] = sw->n_attempt;
+                    }});
         }
     }
-    // This function could probably do with fewer potential evaluations,
-    // but it is called so rarely that it is unlikely to matter.
-    // It is important that the energy is computed more than once in case
-    // we are doing Hamiltonian parallel tempering rather than 
-    // temperature parallel tempering
-}
+
+    void reset_stats() {
+        for(auto& ss: swap_sets)
+            for(auto& sw: ss)
+                sw.n_success = sw.n_attempt = 0u;
+    }
+
+    void attempt_swaps(uint32_t seed, uint64_t round, vector<System>& systems) {
+        int n_system = systems.size();
+
+        vector<float> beta;
+        for(auto &sys: systems) beta.push_back(1.f/sys.temperature);
+
+        // compute the boltzmann factors for everyone
+        auto compute_log_boltzmann = [&]() {
+            vector<float> result(n_system);
+            for(int i=0; i<n_system; ++i) {
+                systems[i].engine.compute(PotentialAndDerivMode);
+                result[i] = -beta[i]*systems[i].engine.potential[0];
+            }
+            return result;
+        };
+
+        // swap coordinates and the associated system indices
+        auto coord_swap = [&](int ns1, int ns2) {
+            swap_ranges(
+                    systems[ns1].engine.pos->coords().value[0].v,  
+                    systems[ns1].engine.pos->coords().value[1].v,  
+                    systems[ns2].engine.pos->coords().value[0].v);
+            swap(replica_indices[ns1], replica_indices[ns2]);
+        };
+
+        RandomGenerator random(seed, REPLICA_EXCHANGE_RANDOM_STREAM, 0u, round);
+
+        for(auto& set: swap_sets) {
+            // FIXME the first energy computation is unnecessary if we are not on the first swap set
+            // It is important that the energy is computed more than once in case
+            // we are doing Hamiltonian parallel tempering rather than 
+            // temperature parallel tempering
+            
+            auto old_lboltz = compute_log_boltzmann();
+            for(auto& swap_pair: set) coord_swap(swap_pair.sys1, swap_pair.sys2);
+            auto new_lboltz  = compute_log_boltzmann();
+
+            // reverse all swaps that should not occur by metropolis criterion
+            for(auto& swap_pair: set) {
+                auto s1 = swap_pair.sys1; 
+                auto s2 = swap_pair.sys2;
+                swap_pair.n_attempt++;
+                float lboltz_diff = (new_lboltz[s1] + new_lboltz[s2]) - (old_lboltz[s1]+old_lboltz[s2]);
+                // If we reject the swap, we must reverse it
+                if(lboltz_diff < 0.f && expf(lboltz_diff) < random.uniform_open_closed().x()) {
+                    coord_swap(s1,s2);
+                } else {
+                    swap_pair.n_success++;
+                }
+            }
+        }
+    }
+};
 
 
 void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-4) {
@@ -172,10 +278,13 @@ try {
             true, -1., "float", cmd);
     ValueArg<unsigned long> seed_arg("", "seed", "random seed (default 42)", 
             false, 42l, "int", cmd);
-    ValueArg<double> temperature_arg("", "temperature", "thermostat temperature (default 1.0)", 
-            false, 1., "float", cmd);
-    ValueArg<double> max_temperature_arg("", "max-temperature", "maximum thermostat temperature (useful for parallel tempering)", 
-            false, -1., "float", cmd);
+    ValueArg<string> temperature_arg("", "temperature", "thermostat temperature (default 1.0, "
+            "should be comma-separated list of temperatures). If running a single system, a single temperature is fine)", 
+            false, "", "temperature_list", cmd);
+    MultiArg<string> swap_set_args("","swap-set", "list like 0-1,2-3,6-7,4-8 of non-overlapping swaps for a replica "
+            "exchange.  May be specified multiple times for multiple swap sets (non-overlapping is only required "
+            "within a single swap set).", false, "h5_files");
+    cmd.add(swap_set_args);
     ValueArg<double> anneal_factor_arg("", "anneal-factor", "annealing factor (0.1 means the final temperature "
             "will be 10% of the initial temperature)", 
             false, 1., "float", cmd);
@@ -242,10 +351,6 @@ try {
 
         int duration_print_width = ceil(log(1+duration)/log(10));
 
-        int replica_interval = 0;
-        if(replica_interval_arg.getValue())
-            replica_interval = max(1.,replica_interval_arg.getValue()/(3*dt));
-
         bool do_recenter = !disable_recenter_arg.getValue();
         bool xy_recenter_only = do_recenter && disable_z_recenter_arg.getValue();
 
@@ -253,33 +358,38 @@ try {
         vector<string> config_paths = config_args.getValue();
         vector<System> systems(config_paths.size());
 
-        float max_temp = max_temperature_arg.getValue();
-        float min_temp = temperature_arg.getValue();
+        auto temperature_strings = split_string(temperature_arg.getValue(), ",");
+        if(temperature_strings.size() != 1u && temperature_strings.size() != systems.size()) 
+            throw string("Received "+to_string(temperature_strings.size())+" temperatures but have "
+                    +to_string(systems.size())+" systems");
 
-        if(max_temp == -1.) 
-            max_temp = min_temp;
-        else if(systems.size() == 1u) 
-            throw string("--max-temperature cannot be specified for only a single system");
+        for(int ns: range(systems.size())) {
+            float T = stod_strict(temperature_strings.size()>1u ? temperature_strings[ns] : temperature_strings[0]);
+            systems[ns].initial_temperature = T;
+        }
 
         double anneal_factor = anneal_factor_arg.getValue();
         double anneal_duration = anneal_duration_arg.getValue();
         if(anneal_duration == -1.) anneal_duration = duration;
+        double anneal_start = duration - anneal_duration;
 
-        auto temp_interpolate = [=](double T0, double T1, double fraction) {
-            return sqr(sqrt(T0)*(1.-fraction) + sqrt(T1)*fraction);};
-
-        // system 0 is the minimum temperature
         // tighter spacing at the low end of temperatures because the variance is decreasing
-        int n_system = systems.size();
-        auto replica_temp = [&temp_interpolate, anneal_factor, n_system, min_temp, max_temp](
-                double replica, double anneal_fraction) {
-            auto T0 = temp_interpolate(min_temp, anneal_factor*min_temp, anneal_fraction);
-            auto T1 = temp_interpolate(max_temp, anneal_factor*max_temp, anneal_fraction);
-            return (n_system>1) ? temp_interpolate(T0, T1, double(replica)/(n_system-1)) : T0;
+        auto anneal_temp = [=](double initial_temperature, double time) {
+            auto fraction = max(0., (time-anneal_start) / anneal_duration);
+            double T0 = initial_temperature;
+            double T1 = initial_temperature*anneal_factor;
+            return sqr(sqrt(T0)*(1.-fraction) + sqrt(T1)*fraction);
         };
 
+        int replica_interval = 0;
+        if(replica_interval_arg.getValue())
+            replica_interval = max(1.,replica_interval_arg.getValue()/(3*dt));
+
+        // system 0 is the minimum temperature
+        int n_system = systems.size();
+
         #pragma omp critical
-        for(int ns=0; ns<int(systems.size()); ++ns) {
+        for(int ns=0; ns<n_system; ++ns) {
             System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
             sys->random_seed = base_random_seed + ns;
 
@@ -320,7 +430,8 @@ try {
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
                     sys->engine.pos->coords().value[ns](d,na) = x;});
-            printf("\nn_atom %i\n", sys->n_atom);
+
+            printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
             deriv_matching(sys->config.get(), sys->engine, generate_expected_deriv_arg.getValue());
             if(potential_deriv_agreement_arg.getValue()){
@@ -337,12 +448,12 @@ try {
                 printf("\n");
             }
 
-            sys->temperature = replica_temp(ns, 0.);
             sys->thermostat = OrnsteinUhlenbeckThermostat(
                     sys->random_seed,
                     thermostat_timescale_arg.getValue(),
-                    vector<float>(1,sys->temperature),
+                    vector<float>(1,1.),
                     1e8);
+            sys->set_temperature(sys->initial_temperature);
 
             sys->thermostat.apply(sys->mom.array(), sys->n_atom); // initial thermalization
             sys->thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
@@ -395,22 +506,20 @@ try {
         }
         default_logger = shared_ptr<H5Logger>();  // FIXME kind of a hack for the ugly global variable
 
+        unique_ptr<ReplicaExchange> replex;
+        if(replica_interval) {
+            printf("initializing replica exchange\n");
+            replex.reset(new ReplicaExchange(systems, swap_set_args.getValue()));
+            if(!replex->swap_sets.size()) throw string("replica exchange requested but no swap sets proposed");
+        }
+
+
         if(replica_interval) {
             int n_atom = systems[0].n_atom;
             for(System& sys: systems) 
                 if(sys.n_atom != n_atom) 
                     throw string("Replica exchange requires all systems have the same number of atoms");
         }
-
-        // #if defined(_OPENMP)
-        // // current we only use OpenMP parallelism over systems
-        // if(n_system < omp_get_max_threads()) omp_set_num_threads(n_system);
-        // if(omp_get_max_threads() > 1) 
-        //     printf("Multi-threaded execution with %i threads\n\n", omp_get_max_threads());
-        // else
-        //     printf("Single-threaded execution\n\n");
-        // #endif
-
 
         printf("\n");
         for(int ns: range(systems.size())) {
@@ -465,11 +574,8 @@ try {
                     }
                     if(!(nr%thermostat_interval)) {
                         // Handle simulated annealing if applicable
-                        if(anneal_factor != 1.) {
-                            double fraction = (3*dt*(sys.round_num+1))/anneal_duration;
-                            sys.temperature = replica_temp(ns, min(fraction,1.));
-                            sys.thermostat.set_temp(vector<float>(1,sys.temperature));
-                        }
+                        if(anneal_factor != 1.)
+                            sys.set_temperature(anneal_temp(sys.initial_temperature, 3*dt*(sys.round_num+1)));
                         sys.thermostat.apply(sys.mom.array(), sys.n_atom);
                     }
                     sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
@@ -478,9 +584,8 @@ try {
                 }
             }
 
-            if(replica_interval && !(systems[0].round_num % replica_interval)) {
-                parallel_tempering_step(base_random_seed, systems[0].round_num, systems);
-            }
+            if(replica_interval && !(systems[0].round_num % replica_interval))
+                replex->attempt_swaps(base_random_seed, systems[0].round_num, systems);
         }
         for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr
 
