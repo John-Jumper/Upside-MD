@@ -23,6 +23,7 @@ struct alignas(16) Float4
     public:
         Float4(): vec(_mm_setzero_ps()) {}
 
+
         // constructor from aligned storage
         explicit Float4(const float* vec, Alignment align = Alignment::aligned):
             vec(align==Alignment::aligned ? _mm_load_ps(vec) : _mm_loadu_ps(vec)) {}
@@ -54,8 +55,8 @@ struct alignas(16) Float4
         int movemask() {return _mm_movemask_ps(vec);}
         bool any() {return movemask();}
 
-        void right_rotate() { vec = _mm_shuffle_ps(vec,vec, _MM_SHUFFLE(2,1,0,3)); }
-        void left_rotate()  { vec = _mm_shuffle_ps(vec,vec, _MM_SHUFFLE(0,3,2,1)); }
+        const Float4 right_rotate() const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(2,1,0,3))); }
+        const Float4 left_rotate()  const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(0,3,2,1))); }
 
         void store(float* vec_, Alignment align=Alignment::aligned) const { 
             if(align==Alignment::aligned) 
@@ -141,9 +142,6 @@ struct alignas(32) Float8
 
         // int movemask() {return _mm256_movemask_ps(vec);}
         // bool any() {return movemask();}
-
-        // void right_rotate() { vec = _mm256_shuffle_ps(vec,vec, _MM_SHUFFLE(2,1,0,3)); }
-        // void left_rotate()  { vec = _mm256_shuffle_ps(vec,vec, _MM_SHUFFLE(0,3,2,1)); }
 
         void store(float* vec_, Alignment align=Alignment::aligned) const { 
             if(align==Alignment::aligned) 
@@ -232,16 +230,11 @@ struct alignas(16) Vec34
         Float4 operator!=(const Vec34 &o) const {return (x!=o.x) | (y!=o.y) | (z!=o.z);}
         Vec34 operator+=(const Vec34  &o) { x+=o.x; y+=o.y; z+=o.z; return *this; }
 
-        void left_rotate() {
-            x.left_rotate();
-            y.left_rotate();
-            z.left_rotate();
+        Vec34 left_rotate() const {
+            return Vec34(x.left_rotate(), y.left_rotate(), z.left_rotate());
         }
-
-        void right_rotate() {
-            x.right_rotate();
-            y.right_rotate();
-            z.right_rotate();
+        Vec34 right_rotate() const {
+            return Vec34(x.right_rotate(), y.right_rotate(), z.right_rotate());
         }
 
         void store(float* x, float* y, float* z) {

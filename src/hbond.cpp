@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "state_logger.h"
 #include "interaction_graph.h"
+#include "spline.h"
 
 using namespace h5;
 using namespace std;
@@ -285,10 +286,12 @@ namespace {
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_param=6, n_dim1=7, n_dim2=3, n_deriv=7;
+        constexpr static const int n_knot = 18;
+        constexpr static const float inv_dx = 1.f/0.5f;
+        constexpr static const int n_param=2+2*n_knot, n_dim1=7, n_dim2=3, n_deriv=7;
 
         static float cutoff(const Vec<n_param> &p) {
-            return p[0] + compact_sigmoid_cutoff(p[1]);
+            return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
         static bool exclude_by_id(unsigned id1, unsigned id2) { 
@@ -297,28 +300,31 @@ namespace {
 
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
-
             float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
             float  dist2 = mag2(displace);
             float  inv_dist = rsqrt(dist2);
-            float  dist = dist2*inv_dist;
+            float  dist_coord = dist2*(inv_dist*inv_dx);
             float3 displace_unitvec = inv_dist*displace;
             float  cos_coverage_angle = dot(rHN,displace_unitvec);
 
-            float2 radial_cover    = compact_sigmoid(dist-p[0], p[1]);
-            float2 angular_sigmoid = compact_sigmoid(p[2]-cos_coverage_angle, p[3]);
-            float2 angular_cover   = make_vec2(p[4]+p[5]*angular_sigmoid.x(), p[5]*angular_sigmoid.y());
+            float2 wide_cover = clamped_deBoor_value_and_deriv(p.v+2, dist_coord, n_knot);
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2+n_knot, dist_coord, n_knot);
+
+            float2 angular_sigmoid = compact_sigmoid(p[0]-cos_coverage_angle, p[1]);
+
+            // negative sign on angular_deriv is due to -cos_coverage_angle
+            float radial_deriv  = inv_dx*(wide_cover.y() + angular_sigmoid.x()*narrow_cover.y());
+            float angular_deriv = -angular_sigmoid.y()*narrow_cover.x();
 
             float3 col0, col1, col2;
             hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
             float3 deriv_dir = make_vec3(dot(col0,rHN), dot(col1,rHN), dot(col2,rHN));
 
-            float3 d_displace = (angular_cover.x()*radial_cover.y()) * displace_unitvec + 
-                                (-radial_cover.x()*angular_cover.y()) * deriv_dir;
-            float3 d_rHN = (-radial_cover.x()*angular_cover.y()) * displace_unitvec;
+            float3 d_displace = radial_deriv * displace_unitvec + angular_deriv * deriv_dir;
+            float3 d_rHN      = angular_deriv * displace_unitvec;
 
-            float coverage = radial_cover.x() * angular_cover.x();
+            float coverage = wide_cover.x() + angular_sigmoid.x()*narrow_cover.x();
             float prefactor = sqr(1.f-hb_pos[6]);
 
             store<0,3>(d_base, prefactor * d_displace);
@@ -333,36 +339,42 @@ namespace {
             store<3,6>(d_hb,  extract<3,6>(d_base));
             d_hb[6] = d_base[6];
             store<0,3>(d_sc,  extract<0,3>(d_base));
-            // store<3,6>(d_sc,  make_zero<3>());
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
+            d_param = make_zero<n_param>();
+
             float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
 
             float  dist2 = mag2(displace);
             float  inv_dist = rsqrt(dist2);
-            float  dist = dist2*inv_dist;
+            float  dist_coord = dist2*(inv_dist*inv_dx);
             float3 displace_unitvec = inv_dist*displace;
             float  cos_coverage_angle = dot(rHN,displace_unitvec);
 
-            float2 radial_cover    = compact_sigmoid(dist-p[0], p[1]);
-            float2 angular_sigmoid = compact_sigmoid(p[2]-cos_coverage_angle, p[3]);
-            float2 angular_cover   = make_vec2(p[4]+p[5]*angular_sigmoid.x(), p[5]*angular_sigmoid.y());
+            float2 angular_sigmoid = compact_sigmoid(p[0]-cos_coverage_angle, p[1]);
 
-            float radial_cover_s =(dist-p[0])*compact_sigmoid((dist-p[0])*p[1],1.f).y();
-            float angular_cover_s=p[5]*(p[2]-cos_coverage_angle)*compact_sigmoid((p[2]-cos_coverage_angle)*p[3],
+            // wide_cover derivative
+            int starting_bin;
+            float result[4];
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2, dist_coord, n_knot);
+            for(int i: range(4)) d_param[2+starting_bin+i] = result[i];
+
+            // narrow_cover derivative
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2+n_knot, dist_coord, n_knot);
+            for(int i: range(4)) d_param[2+n_knot+starting_bin+i] = angular_sigmoid.x()*result[i];
+
+            // angular_sigmoid derivatives
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2+n_knot, dist_coord, n_knot);
+            float angular_sigmoid_s=(p[0]-cos_coverage_angle)*compact_sigmoid((p[0]-cos_coverage_angle)*p[1],
                     1.f).y();
+            d_param[0] = narrow_cover.x() * angular_sigmoid.y();
+            d_param[1] = narrow_cover.x() * angular_sigmoid_s;
 
             float prefactor = sqr(1.f-hb_pos[6]);
-
-            d_param[0] = prefactor * -radial_cover.y() * angular_cover.x();
-            d_param[1] = prefactor *  radial_cover_s   * angular_cover.x();
-            d_param[2] = prefactor *  radial_cover.x() * angular_cover.y();
-            d_param[3] = prefactor *  radial_cover.x() * angular_cover_s;
-            d_param[4] = prefactor *  radial_cover.x();
-            d_param[5] = prefactor *  radial_cover.x() * angular_sigmoid.x();
+            d_param *= prefactor;
         }
     };
 }

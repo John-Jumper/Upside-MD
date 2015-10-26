@@ -16,6 +16,9 @@ extern "C" {
     int get_param      (int n_param,  float* param,  DerivEngine* engine, const char* node_name);
     int get_output     (int n_output, float* output, DerivEngine* engine, const char* node_name);
     int get_output_dims(int* n_elem, int* elem_width, DerivEngine* engine, const char* node_name);
+
+    int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff, float x);
+    int get_clamped_coeff_deriv    (int N, float* result, const float* bspline_coeff, float x);
 }
 
 #endif

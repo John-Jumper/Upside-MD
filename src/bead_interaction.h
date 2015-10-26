@@ -2,6 +2,7 @@
 #define BEAD_INTERACTION_H
 
 #include "vector_math.h"
+#include "spline.h"
 
 namespace {
     constexpr static const int n_bit_rotamer = 4; // max number of rotamers is 2**n_bit_rotamer
@@ -64,14 +65,18 @@ namespace {
     };
 
 
-    struct PosDistInteraction6 {
-        // energy_inner, radius_inner, scale_inner,  energy_outer, radius_outer, scale_outer
-        constexpr static const int n_param=6, n_dim=6, n_deriv=3;
+    struct PosDistSplineInteraction {
+        // spline-based distance interaction
+        // n_param is the number of basis splines (including those required to get zero
+        //   derivative in the clamped spline)
+        // spline is constant over [0,dx] to avoid funniness at origin
+        // spline should be clamped at zero at the large end for cutoffs
+
+        constexpr static const float inv_dx = 1.f/0.5f;  // half-angstrom bins
+        constexpr static const int n_param=18, n_dim=3, n_deriv=3;  // 8.5 angstrom cutoff
 
         static float cutoff(const Vec<n_param> &p) {
-            float radius_i=p[1], scale_i=p[2]; float cutoff_i = radius_i + compact_sigmoid_cutoff(scale_i);
-            float radius_o=p[4], scale_o=p[5]; float cutoff_o = radius_o + compact_sigmoid_cutoff(scale_o);
-            return cutoff_i<cutoff_o? cutoff_o: cutoff_i;
+            return (n_param-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
         }
 
         static bool is_compatible(const Vec<n_param> &p1, const Vec<n_param> &p2) {
@@ -85,38 +90,30 @@ namespace {
 
         static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
-            auto disp      = extract<0,3>(x1)-extract<0,3>(x2);
-            auto dist2     = mag2(disp);
-            auto inv_dist  = rsqrt(dist2);
-            auto dist      = dist2*inv_dist;
+            auto disp       = x1-x2;
+            auto dist2      = mag2(disp);
+            auto inv_dist   = rsqrt(dist2+1e-7f);  // 1e-7 is divergence protection
+            auto dist_coord = dist2*(inv_dist*inv_dx);
 
-            auto en = p[0]*compact_sigmoid(dist-p[1], p[2])
-                    + p[3]*compact_sigmoid(dist-p[4], p[5]);
-
-            d_base = en.y() * (disp*inv_dist);
+            auto en = clamped_deBoor_value_and_deriv(p.v, dist_coord, n_param);
+            d_base = disp*(inv_dist*inv_dx*en.y());
             return en.x();
         }
 
         static void expand_deriv(Vec<n_dim> &d1, Vec<n_dim> &d2, const Vec<n_deriv> &d_base) {
-            store<0,3>(d1, d_base); store<3,6>(d1, make_zero<3>());
-            store<0,3>(d2,-d_base); store<3,6>(d2, make_zero<3>());
+            d1 =  d_base;
+            d2 = -d_base;
         }
 
         static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
                 const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
-            auto dist = mag(extract<0,3>(x1)-extract<0,3>(x2));
-            for(int i: range(2)) {
-                int off = 3*i;
-                auto sig = compact_sigmoid(dist-p[off+1], p[off+2]);
+            auto dist_coord = inv_dx*mag(x1-x2);
+            d_param = make_zero<n_param>();
 
-                // I need the derivative with respect to the scale, but
-                // compact_sigmoid(x,s) == compact_sigmoid(x*s,1.), so I can cheat
-                float2 sig_s = compact_sigmoid((dist-p[off+1]) * p[off+2], 1.f);
-
-                d_param[off+0] =  sig  .x();  // energy
-                d_param[off+1] = -sig  .y() * p[off+0];  // radius
-                d_param[off+2] =  sig_s.y() * (dist-p[off+1]) * p[off+0];  // scale
-            }
+            int starting_bin;
+            float result[4];
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v, dist_coord, n_param);
+            for(int i: range(4)) d_param[starting_bin+i] = result[i];
         }
     };
 
@@ -230,6 +227,6 @@ namespace {
     };
 }
 
-typedef PosDistInteraction preferred_bead_type;
+typedef PosDistSplineInteraction preferred_bead_type;
 
 #endif

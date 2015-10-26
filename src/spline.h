@@ -5,6 +5,7 @@
 #include <random>
 #include <cstring>
 #include "vector_math.h"
+#include "Float4.h"
 
 void solve_periodic_1d_spline(
         int n, 
@@ -57,6 +58,105 @@ inline void spline_value_and_deriv(T result[2], const T* c, T fx) {
     
     result[0] =           c[1] + T(2.f)*fx *c[2] + T(3.f)*fx2*c[3]; // deriv
     result[1] = c[0] + fx*c[1] +        fx2*c[2] +        fx3*c[3]; // value
+}
+
+inline float clamped_spline_left(const float* bspline_coeff, int n_coeff) {
+    // for clamping with derivative continuity, you should really have bspline_coeff[0] == bspline_coeff[2]
+    return (1.f/6.f)*bspline_coeff[0] + 
+           (2.f/3.f)*bspline_coeff[1] + 
+           (1.f/6.f)*bspline_coeff[2];
+}
+
+inline float clamped_spline_right(const float* bspline_coeff, int n_coeff) {
+    // for clamping with derivative continuity, you should really have bspline_coeff[n_coeff-3] == bspline_coeff[n_coeff-1]
+    return (1.f/6.f)*bspline_coeff[n_coeff-3] + 
+           (2.f/3.f)*bspline_coeff[n_coeff-2] + 
+           (1.f/6.f)*bspline_coeff[n_coeff-1];
+}
+
+static void print_float4(const char* nm, const Float4& val) {
+    fprintf(stderr, "%s % .2f % .2f % .2f % .2f\n", nm, val.w(), val.x(), val.y(), val.z());
+}
+
+inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) {
+    // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
+    // the first spline is centered at -1
+    // return is value then derivative
+
+    int x_bin = int(x); // must be at least 1
+    Float4 y = Float4(x-x_bin);
+
+    Float4 c0(bspline_coeff+(x_bin-1), Alignment::unaligned);
+    // let's do value first
+
+    // leftmost value of u is unused
+    alignas(16) const float u[4] = {0.f, -2.f, -1.f, 0.f};
+    Float4 yu = y - Float4(u);
+    Float4 one = Float4(1.f);
+
+    Float4 alpha1 = Float4(1.f/3.f) * yu;
+    Float4 c1 = (one-alpha1)*c0.right_rotate() + alpha1*c0;
+
+    Float4 alpha2 = Float4(1.f/2.f) * yu;
+    Float4 c2 = (one-alpha2)*c1.right_rotate() + alpha2*c1;
+
+    Float4 alpha3 =                   yu;
+    Float4 c3 = (one-alpha3)*c2.right_rotate() + alpha3*c2;
+
+    // now let's do derivatives
+    Float4 d1 = c0 - c0.right_rotate();  // coeffs for spline of order 2
+    Float4 d2 = (one-alpha2)*d1.right_rotate() + alpha2*d1;
+    Float4 d3 = (one-alpha3)*d2.right_rotate() + alpha3*d2;
+
+    return make_vec2(c3.z(), d3.z());
+}
+
+
+inline Vec<2> clamped_deBoor_value_and_deriv(const float* bspline_coeff, const float x, int n_knot) {
+    if(x<=1.f)      return make_vec2(clamped_spline_left (bspline_coeff, n_knot), 0.f);
+    if(x>=n_knot-2) return make_vec2(clamped_spline_right(bspline_coeff, n_knot), 0.f);
+    return deBoor_value_and_deriv(bspline_coeff, x);
+}
+
+
+inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float* bspline_coeff, const float x) {
+    // this function is not intended to be especially efficient
+
+    int x_bin = int(x); // must be at least 1
+    *starting_bin = x_bin-1;
+    float y = x-x_bin + 1.f; // ensure y in [1.,2)
+
+    float dc[4];
+
+    // derivative with respect to coefficient
+    // is the value of spline with zeros for every coefficient
+    // except that one
+
+    for(int i=0; i<4; ++i) {
+        dc[0]=dc[1]=dc[2]=dc[3]=0.f;
+        dc[i]=1.f;
+        result[i] = deBoor_value_and_deriv(dc, y).x();
+    }
+}
+
+
+inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const float* bspline_coeff, const float x, 
+        int n_knot) {
+    if(x<=1.f) {
+        *starting_bin = 0;
+        result[0] = 1.f/6.f;
+        result[1] = 2.f/3.f;
+        result[2] = 1.f/6.f;
+        result[3] = 0.f;
+    } else if(x>=n_knot-2) {
+        *starting_bin = n_knot-4;
+        result[0] = 0.f;
+        result[1] = 1.f/6.f;
+        result[2] = 2.f/3.f;
+        result[3] = 1.f/6.f;
+    } else {
+        deBoor_coeff_deriv(starting_bin, result, bspline_coeff, x);
+    }
 }
 
 

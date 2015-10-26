@@ -1,6 +1,7 @@
 #include "engine_c_library.h"
 #include "deriv_engine.h"
 #include <algorithm>
+#include "spline.h"
 
 using namespace h5;
 using namespace std;
@@ -69,9 +70,14 @@ int set_param(int n_param, const float* param, DerivEngine* engine, const char* 
     engine->get(string(node_name)).computation->set_param(param_v);
     return 0;
 #else
+    fprintf(stderr, "not compile for param deriv\n");
     return -1;
 #endif
+} catch(const string& s) {
+    fprintf(stderr, "ERROR: %s\n", s.c_str());
+    return 1;
 } catch(...) {
+    fprintf(stderr, "ERROR: %s\n", "unknown error");
     return 1;
 }
 
@@ -156,3 +162,18 @@ int get_output_dims(int* n_elem, int* elem_width, DerivEngine* engine, const cha
     return 1;
 }
 
+int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff, float x) {
+    auto en = clamped_deBoor_value_and_deriv(bspline_coeff, x, N);
+    result[0] = en.x();
+    result[1] = en.y();
+    return 0;
+}
+
+int get_clamped_coeff_deriv(int N, float* result, const float* bspline_coeff, float x) {
+    int starting_bin;
+    float data[4];
+    clamped_deBoor_coeff_deriv(&starting_bin, data, bspline_coeff, x, N);
+    for(int i: range(N)) result[i] = 0.f;
+    for(int i: range(4)) result[starting_bin+i] = data[i];
+    return 0;
+}

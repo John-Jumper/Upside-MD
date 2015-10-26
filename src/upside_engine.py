@@ -33,6 +33,47 @@ calc.get_output_dims.argtypes = [ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_cha
 calc.get_output.restype  = ct.c_int
 calc.get_output.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 
+calc.get_clamped_value_and_deriv.restype  = ct.c_int
+calc.get_clamped_value_and_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
+
+calc.get_clamped_coeff_deriv.restype  = ct.c_int
+calc.get_clamped_coeff_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
+
+def clamped_value_and_deriv(bspline_coeff, x):
+    x = np.asarray(x, dtype='f4')
+    assert len(x.shape) == 1
+
+    bspline_coeff = np.require(bspline_coeff, dtype='f4', requirements='C')
+    assert len(bspline_coeff.shape) == 1
+
+    result = np.zeros((len(x),2), dtype='f4')
+
+    for i,y in enumerate(x):
+        if calc.get_clamped_value_and_deriv(
+                len(bspline_coeff),
+                result[i].ctypes.data, 
+                bspline_coeff.ctypes.data,
+                y): raise RuntimeError("spline evaluation error")
+    return result
+
+def clamped_coeff_deriv(bspline_coeff, x):
+    x = np.asarray(x, dtype='f4')
+    assert len(x.shape) == 1
+
+    bspline_coeff = np.require(bspline_coeff, dtype='f4', requirements='C')
+    assert len(bspline_coeff.shape) == 1
+
+    result = np.zeros((len(x),len(bspline_coeff)), dtype='f4')
+
+    for i,y in enumerate(x):
+        if calc.get_clamped_coeff_deriv(
+                len(bspline_coeff),
+                result[i].ctypes.data, 
+                bspline_coeff.ctypes.data,
+                y): raise RuntimeError("spline evaluation error")
+    return result
+
+
 class Upside(object):
     def __init__(self, n_atom, config_file_path, quiet=True):
         self.config_file_path = str(config_file_path)

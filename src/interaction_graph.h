@@ -111,7 +111,7 @@ struct WithinInteractionGraph {
                 auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
 
                 // // compute finite difference deriv to check
-                // if(IType::n_dim==3 && IType::n_param==6) {
+                // if(IType::n_dim==3 && IType::n_param==18) {
                 //     float eps = 1e-3f;
                 //     Vec<IType::n_dim> actual_deriv1;
                 //     for(int dim: range(IType::n_dim)) {
@@ -135,14 +135,19 @@ struct WithinInteractionGraph {
                 //     Vec<IType::n_dim> pred_deriv2;
                 //     IType::expand_deriv(pred_deriv1, pred_deriv2, deriv);
 
-                //     printf("%i %i pred_deriv", IType::n_dim, IType::n_dim); 
-                //     for(int i: range(IType::n_dim)) printf(" % .2f", pred_deriv1[i]);
-                //     for(int i: range(IType::n_dim)) printf(" % .2f", pred_deriv2[i]);
-                //     printf("\n");
-                //     printf("%i %i actu_deriv", IType::n_dim, IType::n_dim); 
-                //     for(int i: range(IType::n_dim)) printf(" % .2f", actual_deriv1[i]);
-                //     for(int i: range(IType::n_dim)) printf(" % .2f", actual_deriv2[i]);
-                //     printf("\n\n");
+                //     if(max( pred_deriv1-actual_deriv1)>0.01f || 
+                //        max(-pred_deriv1+actual_deriv1)>0.01f || 
+                //        max( pred_deriv2-actual_deriv2)>0.01f || 
+                //        max(-pred_deriv2+actual_deriv2)>0.01f){
+                //         fprintf(stderr,"%i %i pred_deriv", IType::n_dim, IType::n_dim); 
+                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", pred_deriv1[i]);
+                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", pred_deriv2[i]);
+                //         fprintf(stderr,"\n");
+                //         fprintf(stderr,"%i %i actu_deriv", IType::n_dim, IType::n_dim); 
+                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", actual_deriv1[i]);
+                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", actual_deriv2[i]);
+                //         fprintf(stderr,"\n\n");
+                //     }
                 // }
 
                 store_vec(edge_deriv[ns], ne, deriv);
@@ -174,6 +179,7 @@ struct WithinInteractionGraph {
         auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
         auto type1 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
         auto type2 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
+
         update_vec(interaction_param_deriv[ns], type1*n_type+type2, d);
         #endif
     }
@@ -385,9 +391,6 @@ struct BetweenInteractionGraph {
                 IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
                 store_vec(edge_param_deriv[ns], ne, dp);
                 #endif
-            }
-        }
-    }
 
                 // // compute finite difference deriv to check
                 // if(IType::n_dim1==7 && IType::n_dim2==3) {
@@ -423,6 +426,10 @@ struct BetweenInteractionGraph {
                 //     for(int i: range(IType::n_dim2)) printf(" % .2f", actual_deriv2[i]);
                 //     printf("\n\n");
                 // }
+            }
+        }
+    }
+
 
     void use_derivative(int ns, int edge_idx, float sensitivity) {
         auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv[ns], edge_idx);
