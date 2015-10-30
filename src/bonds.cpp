@@ -38,25 +38,6 @@ struct PosSpringParams {
 };
 
 
-void pos_spring(
-        float* potential,
-        const CoordArray pos,
-        const PosSpringParams* restrict params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        for(int nt=0; nt<n_terms; ++nt) {
-            PosSpringParams p = params[nt];
-            Coord<3> x1(pos, ns, p.atom[0]);
-            float3 disp = x1.f3() - make_vec3(p.x,p.y,p.z);
-            if(potential) potential[ns] += 0.5f * p.spring_constant * mag2(disp);
-            x1.set_deriv(p.spring_constant * disp);
-            x1.flush();
-        }
-    }
-}
-
 struct PosSpring : public PotentialNode
 {
     int n_elem;
@@ -64,7 +45,7 @@ struct PosSpring : public PotentialNode
     vector<PosSpringParams> params;
 
     PosSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         n_elem(get_dset_size(1, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 1;  // number of atoms that each term depends on 
@@ -83,8 +64,18 @@ struct PosSpring : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("pos_spring")); 
-        pos_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        auto posc = pos.coords();
+
+        if(pot) *pot = 0.f;
+        for(int nt=0; nt<n_elem; ++nt) {
+            PosSpringParams p = params[nt];
+            Coord<3> x1(posc, 0, p.atom[0]);
+            float3 disp = x1.f3() - make_vec3(p.x,p.y,p.z);
+            if(pot) *pot += 0.5f * p.spring_constant * mag2(disp);
+            x1.set_deriv(p.spring_constant * disp);
+            x1.flush();
+        }
     }
     double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
@@ -149,64 +140,62 @@ void rama_coord(
         const SysArray output,
         const CoordArray pos,
         const RamaCoordParams* params,
-        const int n_term, const int n_system) 
+        const int n_term) 
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        for(int nt=0; nt<n_term; ++nt) {
-            MutableCoord<2> rama_pos(output, ns, nt);
+    for(int nt=0; nt<n_term; ++nt) {
+        MutableCoord<2> rama_pos(output, 0, nt);
 
-            bool has_prev = params[nt].atom[0].index != index_t(-1);
-            bool has_next = params[nt].atom[4].index != index_t(-1);
+        bool has_prev = params[nt].atom[0].index != index_t(-1);
+        bool has_next = params[nt].atom[4].index != index_t(-1);
 
-            Coord<3,2> prev_C(pos, ns, has_prev ? params[nt].atom[0] : CoordPair(0,0));
-            Coord<3,2> N     (pos, ns, params[nt].atom[1]);
-            Coord<3,2> CA    (pos, ns, params[nt].atom[2]);
-            Coord<3,2> C     (pos, ns, params[nt].atom[3]);
-            Coord<3,2> next_N(pos, ns, has_next ? params[nt].atom[4] : CoordPair(0,0));
+        Coord<3,2> prev_C(pos, 0, has_prev ? params[nt].atom[0] : CoordPair(0,0));
+        Coord<3,2> N     (pos, 0, params[nt].atom[1]);
+        Coord<3,2> CA    (pos, 0, params[nt].atom[2]);
+        Coord<3,2> C     (pos, 0, params[nt].atom[3]);
+        Coord<3,2> next_N(pos, 0, has_next ? params[nt].atom[4] : CoordPair(0,0));
 
-            {
-                float3 d1,d2,d3,d4;
-                if(has_prev) {
-                    rama_pos.v[0] = dihedral_germ(
-                            prev_C.f3(), N.f3(), CA.f3(), C.f3(),
-                            d1, d2, d3, d4);
-                } else {
-                    rama_pos.v[0] = -1.3963f;  // -80 degrees
-                    d1 = d2 = d3 = d4 = make_vec3(0.f,0.f,0.f);
-                }
-
-                prev_C.set_deriv(0,d1);
-                N     .set_deriv(0,d2);
-                CA    .set_deriv(0,d3);
-                C     .set_deriv(0,d4);
-                next_N.set_deriv(0,make_vec3(0.f,0.f,0.f));
+        {
+            float3 d1,d2,d3,d4;
+            if(has_prev) {
+                rama_pos.v[0] = dihedral_germ(
+                        prev_C.f3(), N.f3(), CA.f3(), C.f3(),
+                        d1, d2, d3, d4);
+            } else {
+                rama_pos.v[0] = -1.3963f;  // -80 degrees
+                d1 = d2 = d3 = d4 = make_vec3(0.f,0.f,0.f);
             }
 
-            {
-                float3 d2,d3,d4,d5;
-                if(has_next) {
-                    rama_pos.v[1] = dihedral_germ(
-                            N.f3(), CA.f3(), C.f3(), next_N.f3(),
-                            d2, d3, d4, d5);
-                } else {
-                    rama_pos.v[1] = -1.3963f;  // -80 degrees
-                    d2 = d3 = d4 = d5 = make_vec3(0.f,0.f,0.f);
-                }
-
-                prev_C.set_deriv(1,make_vec3(0.f,0.f,0.f));
-                N     .set_deriv(1,d2);
-                CA    .set_deriv(1,d3);
-                C     .set_deriv(1,d4);
-                next_N.set_deriv(1,d5);
-            }
-
-            rama_pos.flush();
-            if(has_prev) prev_C.flush();
-            N .flush();
-            CA.flush();
-            C .flush();
-            if(has_next) next_N.flush();
+            prev_C.set_deriv(0,d1);
+            N     .set_deriv(0,d2);
+            CA    .set_deriv(0,d3);
+            C     .set_deriv(0,d4);
+            next_N.set_deriv(0,make_vec3(0.f,0.f,0.f));
         }
+
+        {
+            float3 d2,d3,d4,d5;
+            if(has_next) {
+                rama_pos.v[1] = dihedral_germ(
+                        N.f3(), CA.f3(), C.f3(), next_N.f3(),
+                        d2, d3, d4, d5);
+            } else {
+                rama_pos.v[1] = -1.3963f;  // -80 degrees
+                d2 = d3 = d4 = d5 = make_vec3(0.f,0.f,0.f);
+            }
+
+            prev_C.set_deriv(1,make_vec3(0.f,0.f,0.f));
+            N     .set_deriv(1,d2);
+            CA    .set_deriv(1,d3);
+            C     .set_deriv(1,d4);
+            next_N.set_deriv(1,d5);
+        }
+
+        rama_pos.flush();
+        if(has_prev) prev_C.flush();
+        N .flush();
+        CA.flush();
+        C .flush();
+        if(has_next) next_N.flush();
     }
 }
 
@@ -218,7 +207,7 @@ struct RamaCoord : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     RamaCoord(hid_t grp, CoordNode& pos_):
-        CoordNode(pos_.n_system, get_dset_size(2, grp, "id")[0], 2),
+        CoordNode(1, get_dset_size(2, grp, "id")[0], 2),
         pos(pos_),
         params(n_elem)
     {
@@ -245,8 +234,8 @@ struct RamaCoord : public CoordNode
                 AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot, p.atom[3].slot, p.atom[4].slot}));
 
         if(logging(LOG_DETAILED)) {
-            default_logger->add_logger<float>("rama", {n_system,n_elem,2}, [&](float* buffer) {
-                    copy_sys_array_to_buffer(coords().value, n_system, n_elem,2, buffer);});
+            default_logger->add_logger<float>("rama", {n_elem,2}, [&](float* buffer) {
+                    copy_sys_array_to_buffer(coords().value, 1, n_elem,2, buffer);});
         }
     }
 
@@ -256,7 +245,7 @@ struct RamaCoord : public CoordNode
                 coords().value,
                 pos.coords(),
                 params.data(),
-                n_elem, pos.n_system);
+                n_elem);
     }
 
     virtual void propagate_deriv() {
@@ -266,43 +255,13 @@ struct RamaCoord : public CoordNode
                 pos.slot_machine.accum_array(), SysArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_elem, pos.n_system);
+                n_elem, 1);
     }
     virtual double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
     }
 };
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
-
-
-void dist_spring(
-        float* potential,
-        const CoordArray pos,
-        const DistSpringParams* restrict params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-
-        for(int nt=0; nt<n_terms; ++nt) {
-            DistSpringParams p = params[nt];
-            Coord<3> x1(pos, ns, p.atom[0]);
-            Coord<3> x2(pos, ns, p.atom[1]);
-
-            float3 disp = x1.f3() - x2.f3();
-            float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
-            if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist);
-  //          printf("distance(%3i,%3i) = %.2f  %.2f\n", p.atom[0].index, p.atom[1].index, mag(disp),
-// 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist));
-
-            x1.set_deriv( deriv);
-            x2.set_deriv(-deriv);
-
-            x1.flush();
-            x2.flush();
-        }
-    }
-}
 
 
 struct DistSpring : public PotentialNode
@@ -313,7 +272,7 @@ struct DistSpring : public PotentialNode
     vector<int> bonded_atoms;
 
     DistSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
@@ -331,26 +290,43 @@ struct DistSpring : public PotentialNode
         for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
 
         if(logging(LOG_DETAILED))
-            default_logger->add_logger<float>("nonbonded_spring_energy", {n_system}, [&](float* buffer) {
-                    for(int ns=0; ns<n_system; ++ns) {
-                        float pot = 0.f;
-                        VecArray x = pos.coords().value[ns];
+            default_logger->add_logger<float>("nonbonded_spring_energy", {1}, [&](float* buffer) {
+                    float pot = 0.f;
+                    VecArray x = pos.coords().value[0];
 
-                        for(int nt=0; nt<n_elem; ++nt) {
-                            if(bonded_atoms[nt]) continue;  // don't count bonded spring energy
+                    for(int nt=0; nt<n_elem; ++nt) {
+                    if(bonded_atoms[nt]) continue;  // don't count bonded spring energy
 
-                            DistSpringParams p = params[nt];
-                            float dmag = mag(load_vec<3>(x, p.atom[0].index) - load_vec<3>(x, p.atom[1].index));
-                            pot += 0.5f * p.spring_constant * sqr(dmag - p.equil_dist);
-                        }
-                        buffer[ns] = pot;
-                    }});
+                    DistSpringParams p = params[nt];
+                    float dmag = mag(load_vec<3>(x, p.atom[0].index) - load_vec<3>(x, p.atom[1].index));
+                    pot += 0.5f * p.spring_constant * sqr(dmag - p.equil_dist);
+                    }
+                    buffer[0] = pot;
+                    });
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dist_spring"));
-        dist_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);
+
+        auto posc = pos.coords();
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        if(pot) *pot = 0.f;
+
+        for(int nt=0; nt<n_elem; ++nt) {
+            DistSpringParams p = params[nt];
+            Coord<3> x1(posc, 0, p.atom[0]);
+            Coord<3> x2(posc, 0, p.atom[1]);
+
+            float3 disp = x1.f3() - x2.f3();
+            float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
+            if(pot) *pot += 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist);
+
+            x1.set_deriv( deriv);
+            x2.set_deriv(-deriv);
+
+            x1.flush();
+            x2.flush();
+        }
     }
     double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
@@ -366,35 +342,6 @@ struct CavityRadialParams {
 };
 
 
-void cavity_radial(
-        float* potential,
-        const CoordArray pos,
-        const CavityRadialParams* params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-
-        for(int nt=0; nt<n_terms; ++nt) {
-            CavityRadialParams p = params[nt];
-            Coord<3> x(pos, ns, p.id);
-
-            float r2 = mag2(x.f3());
-            if(r2>sqr(p.radius)) {
-                float inv_r = rsqrt(r2);
-                float r = r2*inv_r;
-                float excess = r-p.radius;
-
-                if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(excess);
-                x.set_deriv((p.spring_constant*excess*inv_r)*x.f3());
-            } else {
-                x.set_deriv(make_vec3(0.f,0.f,0.f));
-            }
-            x.flush();
-        }
-    }
-}
-
 struct CavityRadial : public PotentialNode
 {
     int n_term;
@@ -402,7 +349,7 @@ struct CavityRadial : public PotentialNode
     vector<CavityRadialParams> params;
 
     CavityRadial(hid_t hdf_group, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         pos(pos_), params(get_dset_size(1, hdf_group, "id")[0] )
     {
         n_term = params.size();
@@ -420,8 +367,28 @@ struct CavityRadial : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("cavity_radial"));
-        cavity_radial((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_term, pos.n_system);
+
+        auto posc = pos.coords();
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        if(pot) *pot = 0.f;
+
+        for(int nt=0; nt<n_term; ++nt) {
+            CavityRadialParams p = params[nt];
+            Coord<3> x(posc, 0, p.id);
+
+            float r2 = mag2(x.f3());
+            if(r2>sqr(p.radius)) {
+                float inv_r = rsqrt(r2);
+                float r = r2*inv_r;
+                float excess = r-p.radius;
+
+                if(pot) *pot += 0.5f * p.spring_constant * sqr(excess);
+                x.set_deriv((p.spring_constant*excess*inv_r)*x.f3());
+            } else {
+                x.set_deriv(make_vec3(0.f,0.f,0.f));
+            }
+            x.flush();
+        }
     }
 
     double test_value_deriv_agreement() {
@@ -433,35 +400,6 @@ struct CavityRadial : public PotentialNode
 static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
 
 
-void z_flat_bottom_spring(
-        float* potential,
-        const CoordArray pos,
-        const ZFlatBottomParams* params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-
-        for(int nt=0; nt<n_terms; ++nt) {
-            ZFlatBottomParams p = params[nt];
-            Coord<3> atom_pos(pos, ns, p.id);
-            
-            float z = atom_pos.f3().z();
-            float3 deriv = make_vec3(0.f,0.f,0.f);
-            float excess = z-p.z0 >  p.radius ? z-p.z0 - p.radius
-                :         (z-p.z0 < -p.radius ? z-p.z0 + p.radius : 0.f);
-            deriv.z() = p.spring_constant * excess;
-            atom_pos.set_deriv(deriv);
-            atom_pos.flush();
-
-            if(potential) potential[ns] += 0.5f*p.spring_constant * sqr(excess);
-        }
-    }
-}
-
-
-
-
 struct ZFlatBottom : public PotentialNode
 {
     int n_term;
@@ -469,7 +407,7 @@ struct ZFlatBottom : public PotentialNode
     vector<ZFlatBottomParams> params;
 
     ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         pos(pos_), params( get_dset_size(1, hdf_group, "atom")[0] )
     {
         n_term = params.size();
@@ -489,8 +427,25 @@ struct ZFlatBottom : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("z_flat_bottom"));
-        z_flat_bottom_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_term, pos.n_system);
+
+        auto posc = pos.coords();
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        if(pot) *pot = 0.f;
+
+        for(int nt=0; nt<n_term; ++nt) {
+            ZFlatBottomParams p = params[nt];
+            Coord<3> atom_pos(posc, 0, p.id);
+            
+            float z = atom_pos.f3().z();
+            float3 deriv = make_vec3(0.f,0.f,0.f);
+            float excess = z-p.z0 >  p.radius ? z-p.z0 - p.radius
+                :         (z-p.z0 < -p.radius ? z-p.z0 + p.radius : 0.f);
+            deriv.z() = p.spring_constant * excess;
+            atom_pos.set_deriv(deriv);
+            atom_pos.flush();
+
+            if(pot) *pot += 0.5f*p.spring_constant * sqr(excess);
+        }
     }
 
     double test_value_deriv_agreement() {
@@ -502,40 +457,6 @@ struct ZFlatBottom : public PotentialNode
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
 
 
-void angle_spring(
-        float* potential,
-        const CoordArray pos,
-        const AngleSpringParams* restrict params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-
-        for(int nt=0; nt<n_terms; ++nt) {
-            AngleSpringParams p = params[nt];
-            Coord<3> atom1(pos, ns, p.atom[0]);
-            Coord<3> atom2(pos, ns, p.atom[1]);
-            Coord<3> atom3(pos, ns, p.atom[2]);
-
-            float3 x1 = atom1.f3() - atom3.f3(); float inv_d1 = inv_mag(x1); float3 x1h = x1*inv_d1;
-            float3 x2 = atom2.f3() - atom3.f3(); float inv_d2 = inv_mag(x2); float3 x2h = x2*inv_d2;
-
-            float dp = dot(x1h, x2h);
-            float force_prefactor = p.spring_constant * (dp - p.equil_dp);
-            if(potential) potential[ns] += 0.5f * p.spring_constant * sqr(dp-p.equil_dp);
-
-            atom1.set_deriv(force_prefactor * (x2h - x1h*dp) * inv_d1);
-            atom2.set_deriv(force_prefactor * (x1h - x2h*dp) * inv_d2);
-            atom3.set_deriv(-atom1.df3(0)-atom2.df3(0));  // computed by the condition of zero net force
-    
-            atom1.flush();
-            atom2.flush();
-            atom3.flush();
-        }
-    }
-}
-
-
 struct AngleSpring : public PotentialNode
 {
     int n_elem;
@@ -543,7 +464,7 @@ struct AngleSpring : public PotentialNode
     vector<AngleSpringParams> params;
 
     AngleSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 3;  // number of atoms that each term depends on 
@@ -561,8 +482,32 @@ struct AngleSpring : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("angle_spring"));
-        angle_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);
+
+        auto posc = pos.coords();
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        if(pot) *pot = 0.f;
+
+        for(int nt=0; nt<n_elem; ++nt) {
+            AngleSpringParams p = params[nt];
+            Coord<3> atom1(posc, 0, p.atom[0]);
+            Coord<3> atom2(posc, 0, p.atom[1]);
+            Coord<3> atom3(posc, 0, p.atom[2]);
+
+            float3 x1 = atom1.f3() - atom3.f3(); float inv_d1 = inv_mag(x1); float3 x1h = x1*inv_d1;
+            float3 x2 = atom2.f3() - atom3.f3(); float inv_d2 = inv_mag(x2); float3 x2h = x2*inv_d2;
+
+            float dp = dot(x1h, x2h);
+            float force_prefactor = p.spring_constant * (dp - p.equil_dp);
+            if(pot) *pot += 0.5f * p.spring_constant * sqr(dp-p.equil_dp);
+
+            atom1.set_deriv(force_prefactor * (x2h - x1h*dp) * inv_d1);
+            atom2.set_deriv(force_prefactor * (x1h - x2h*dp) * inv_d2);
+            atom3.set_deriv(-atom1.df3(0)-atom2.df3(0));  // computed by the condition of zero net force
+    
+            atom1.flush();
+            atom2.flush();
+            atom3.flush();
+        }
     }
     double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
@@ -597,92 +542,6 @@ inline void dihedral_spring_body(
 }
 
 
-void dynamic_dihedral_spring(
-        float* potential,
-        const CoordArray pos,
-        const DihedralSpringParams* restrict params,
-        int params_offset,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        for(int nt=0; nt<n_terms; ++nt) {
-            Coord<3> x1(pos, ns, params[nt].atom[0]);
-            Coord<3> x2(pos, ns, params[nt].atom[1]);
-            Coord<3> x3(pos, ns, params[nt].atom[2]);
-            Coord<3> x4(pos, ns, params[nt].atom[3]);
-            dihedral_spring_body((potential?potential+ns:0),
-                    x1,x2,x3,x4, params[ns*params_offset + nt]);
-            x1.flush();
-            x2.flush();
-            x3.flush();
-            x4.flush();
-        }
-    }
-}
-
-
-struct DynamicDihedralSpring : public PotentialNode
-{
-    int n_elem;
-    CoordNode& pos;
-    int params_offset;
-    vector<DihedralSpringParams> params;  // separate params for each system, id's must be the same
-
-    DynamicDihedralSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
-        n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params_offset(n_elem), params(pos.n_system*params_offset)
-    {
-        int n_dep = 4;  // number of atoms that each term depends on 
-        check_size(grp, "id", n_elem, n_dep, pos.n_system);  // only id is required for dynamic spring
-
-        auto& p = params;
-        traverse_dset<2,int>  (grp, "id", [&](size_t nt, size_t na, int x) {
-                for(int ns=0; ns<pos.n_system; ++ns) 
-                    p[ns*n_elem+nt].atom[na].index = x;});
-
-        for(auto& p: params) {
-            p.equil_dihedral  = 0.f;
-            p.spring_constant = 0.f;
-        }
-
-        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<p.size(); ++i) pos.slot_machine.add_request(1, p[i].atom[j]);
-    }
-
-    virtual void compute_value(ComputeMode mode) {
-        Timer timer(string("dynamic_dihedral_spring"));
-        dynamic_dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), params_offset, n_elem, pos.n_system);
-    }
-    double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
-    }
-};
-
-
-void dihedral_spring(
-        float* potential,
-        const CoordArray pos,
-        const DihedralSpringParams* restrict params,
-        int n_terms, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        for(int nt=0; nt<n_terms; ++nt) {
-            Coord<3> x1(pos, ns, params[nt].atom[0]);
-            Coord<3> x2(pos, ns, params[nt].atom[1]);
-            Coord<3> x3(pos, ns, params[nt].atom[2]);
-            Coord<3> x4(pos, ns, params[nt].atom[3]);
-            dihedral_spring_body((potential?potential+ns:0),
-                    x1,x2,x3,x4, params[nt]);
-            x1.flush();
-            x2.flush();
-            x3.flush();
-            x4.flush();
-        }
-    }
-}
-
 struct DihedralSpring : public PotentialNode
 {
     int n_elem;
@@ -690,7 +549,7 @@ struct DihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;
 
     DihedralSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(pos_.n_system),
+        PotentialNode(1),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
@@ -708,8 +567,22 @@ struct DihedralSpring : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("dihedral_spring"));
-        dihedral_spring((mode==PotentialAndDerivMode ? potential.data() : nullptr),
-                pos.coords(), params.data(), n_elem, pos.n_system);
+
+        auto posc = pos.coords();
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        if(pot) *pot = 0.f;
+
+        for(int nt=0; nt<n_elem; ++nt) {
+            Coord<3> x1(posc, 0, params[nt].atom[0]);
+            Coord<3> x2(posc, 0, params[nt].atom[1]);
+            Coord<3> x3(posc, 0, params[nt].atom[2]);
+            Coord<3> x4(posc, 0, params[nt].atom[3]);
+            dihedral_spring_body(pot, x1,x2,x3,x4, params[nt]);
+            x1.flush();
+            x2.flush();
+            x3.flush();
+            x4.flush();
+        }
     }
     double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
@@ -726,21 +599,19 @@ struct ConstantCoord : public CoordNode
         CoordNode(get_dset_size(3, grp, "value")[0], 
                   get_dset_size(3, grp, "value")[1], 
                   get_dset_size(3, grp, "value")[2]),
-        value(n_system, elem_width, n_elem)
+        value(1, elem_width, n_elem)
     {
         traverse_dset<3,float>(grp, "value", [&](size_t ns, size_t ne, size_t nd, float x) {
                 value[ns](nd,ne) = x;});
     }
 
     virtual void compute_value(ComputeMode mode) {
-        for(int ns=0; ns<n_system; ++ns) {
-            VecArray to   = coords().value[ns];
-            VecArray from = value[ns];
+        VecArray to   = coords().value[0];
+        VecArray from = value[0];
 
-            for(int nd: range(elem_width))
-                for(int ne: range(n_elem))
-                    to(nd,ne) = from(nd,ne);
-        }
+        for(int nd: range(elem_width))
+            for(int ne: range(n_elem))
+                to(nd,ne) = from(nd,ne);
     }
 
     virtual void propagate_deriv() {}
@@ -748,26 +619,22 @@ struct ConstantCoord : public CoordNode
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {
-        vector<float> p; p.reserve(n_system*n_elem*elem_width);
-        for(int ns: range(n_system)) {
-            auto v = value[ns];
-            for(int ne: range(n_elem))
-                for(int d: range(elem_width))
-                    p.push_back(v(d,ne));
-        }
+        vector<float> p; p.reserve(n_elem*elem_width);
+        auto v = value[0];
+        for(int ne: range(n_elem))
+            for(int d: range(elem_width))
+                p.push_back(v(d,ne));
         return p;
     }
 
     // FIXME I could support get_param_deriv here if I had a non-trivial propagate_deriv
 
     virtual void set_param(const std::vector<float>& new_param) {
-        if(new_param.size() != size_t(n_system)*n_elem*elem_width) throw string("invalid size to set_param");
-        for(int ns: range(n_system)) {
-            auto v = value[ns];
-            for(int ne: range(n_elem))
-                for(int d: range(elem_width))
-                    v(d,ne) = new_param[ne*elem_width + d];
-        }
+        if(new_param.size() != size_t(n_elem*elem_width)) throw string("invalid size to set_param");
+        auto v = value[0];
+        for(int ne: range(n_elem))
+            for(int d: range(elem_width))
+                v(d,ne) = new_param[ne*elem_width + d];
     }
 #endif
 
