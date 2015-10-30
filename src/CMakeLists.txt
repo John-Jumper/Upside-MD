@@ -27,7 +27,6 @@ set (ENGINE_SRC
     hbond.cpp 
     rotamer.cpp
     placement.cpp
-    basin_correlation.cpp
     rama_map_pot.cpp
     spline.cpp
     deriv_engine.cpp 
@@ -35,7 +34,6 @@ set (ENGINE_SRC
     nonbond.cpp 
     bonds.cpp 
     eig.cpp 
-    dihedral_range.cpp
     membrane_potential.cpp
     md.cpp 
     timing.cpp 
