@@ -107,6 +107,7 @@ struct alignas(16) Float4
         friend Vec34;
 };
 
+/*
 struct alignas(32) Float8 
 {
     protected:
@@ -163,6 +164,7 @@ struct alignas(32) Float8
             return ret;
         }
 };
+*/
 
 
 template <int i3, int i2, int i1, int i0>
@@ -268,7 +270,7 @@ inline Vec34 cross(const Vec34&a, const Vec34 &b) {
         a.x*b.y - a.y*b.x);
 }
 
-
+/*
 struct alignas(32) Vec38
 {
     public:
@@ -336,5 +338,6 @@ struct alignas(32) Vec38
         }
 
 };
+*/
 
 #endif

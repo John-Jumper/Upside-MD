@@ -82,9 +82,9 @@ python_executable(support attr_overview.py)
 python_executable(support ugly_hack_break_chain.py)
 python_executable(support estimate_rama_distributions.py)
 
-add_executable(rotamer_sidechain generate_from_rotamer.cpp test_rotamer.cpp h5_support.cpp)
-target_link_libraries(rotamer_sidechain stdc++ m ${HDF5_LIBRARIES})
-set_target_properties(rotamer_sidechain PROPERTIES EXCLUDE_FROM_ALL 1)
+add_executable(compute_rotamer_centers generate_from_rotamer.cpp compute_rotamer_centers.cpp h5_support.cpp)
+target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES})
+set_target_properties(compute_rotamer_centers PROPERTIES EXCLUDE_FROM_ALL 1)
 
 include_directories(SYSTEM "/home/jumper/code/external/libdai/include")
 # add_library(optimize_rotamer SHARED EXCLUDE_FROM_ALL rotameric_sidechain.cpp)

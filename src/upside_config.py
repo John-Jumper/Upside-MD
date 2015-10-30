@@ -224,14 +224,14 @@ def write_environment(fasta, environment_library):
 
     # # group1 is the source sidechain rotamer
     # rot_grp = t.root.input.potential.placement_rotamer
-    # create_array(cgrp, 'index1', np.arange(len(rot_grp.restype_seq[:])))
-    # create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+    # create_array(cgrp, 'index1', np.arange(len(rot_grp.beadtype_seq[:])))
+    # create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.beadtype_seq[:]]))
     # create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
 
     # group 2 is the weighted points to interact with
     w_grp = t.root.input.potential.placement4_weighted
-    create_array(cgrp, 'index2', np.arange(len(w_grp.restype_seq[:])))
-    create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.restype_seq[:]]))
+    create_array(cgrp, 'index2', np.arange(len(w_grp.beadtype_seq[:])))
+    create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.beadtype_seq[:]]))
     create_array(cgrp, 'id2',    w_grp.affine_residue[:])
 
     # egrp = t.create_group(potential, 'environment_energy')
@@ -243,7 +243,7 @@ def write_environment(fasta, environment_library):
     #      create_array(egrp, "linear_shift0",  obj=data.root.linear_shift0 [:])
     #      create_array(egrp, "linear_weight1", obj=data.root.linear_weight1[:])
     #      create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
-    # create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.restype_seq[:]]))
+    # create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.beadtype_seq[:]]))
 
     egrp = t.create_group(potential, 'simple_environment')
     egrp._v_attrs.arguments = np.array(['environment_vector'])
@@ -285,6 +285,10 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
     cgrp = t.create_group(potential, 'hbond_coverage')
     cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_rotamer'])
 
+    with tb.open_file(coverage_library) as data:
+         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
+         bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+
     # group1 is the HBond partners
     create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
     create_array(cgrp, 'type1',  1*(np.arange(n_donor+n_acceptor) >= n_donor))  # donor is 0, acceptor is 1
@@ -292,13 +296,11 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
                                                  infer_group.acceptors.residue[:]]))
 
     # group 2 is the sidechains
-    rseq = t.root.input.potential.placement_rotamer.restype_seq[:]
+    rseq = t.root.input.potential.placement_rotamer.beadtype_seq[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
-    create_array(cgrp, 'type2',  np.array([aa_num[s] for s in rseq]))
+    create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
     create_array(cgrp, 'id2',    np.arange(len(rseq)))
 
-    with tb.open_file(coverage_library) as data:
-         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
     n_res = len(fasta)
     if hbond_energy > 0.:
@@ -745,6 +747,7 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
 
 
 def write_weighted_placement(fasta, placement_library):
+    assert not 'Weighted placement is currently broken because it does not handle bead types'
     with tb.open_file(placement_library) as data:
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
         placement_pos  = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
@@ -757,7 +760,7 @@ def write_weighted_placement(fasta, placement_library):
     rama_residue = []
     affine_residue = []
     layer_index = []
-    restype_seq = []
+    beadtype_seq = []
 
     for rnum,aa in enumerate(fasta):
         restype = restype_num[aa]
@@ -767,7 +770,7 @@ def write_weighted_placement(fasta, placement_library):
         rama_residue  .extend([rnum]*n_rot)
         affine_residue.extend([rnum]*n_rot)
         layer_index   .extend(np.arange(start,stop))
-        restype_seq   .extend([aa]*n_rot)
+        beadtype_seq   .extend([aa]*n_rot)
 
     grp = t.create_group(potential, 'placement4_weighted')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -776,7 +779,7 @@ def write_weighted_placement(fasta, placement_library):
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_data)
-    create_array(grp, 'restype_seq',     restype_seq)
+    create_array(grp, 'beadtype_seq',     beadtype_seq)
 
 
 def write_rotamer_placement(fasta, placement_library, fix_rotamer):
@@ -784,7 +787,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
         placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
         placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
-        start_stop = data.root.rotamer_start_stop[:]
+        start_stop = data.root.rotamer_start_stop_bead[:]
 
     fix = dict()
     if fix_rotamer:
@@ -806,20 +809,21 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     rama_residue = []
     affine_residue = []
     layer_index = []
-    restype_seq = []
+    beadtype_seq = []
     id_seq = []
 
     count_by_n_rot = dict()
 
     for rnum,aa in enumerate(fasta):
         restype = restype_num[aa]
-        start,stop = start_stop[restype]
-        n_rot = stop-start
+        start,stop,n_bead = start_stop[restype]
+        assert (stop-start)%n_bead == 0
+        n_rot = (stop-start)//n_bead
 
         # if it should be fixed, then we must modify these answers to get a single rotamer
         if rnum in fix:
             if not (0 <= fix[rnum] < n_rot): raise ValueError('invalid fix rotamer state')
-            start,stop = start+fix[rnum], start+fix[rnum]+1
+            start,stop = start+n_bead*fix[rnum], start+n_bead*(fix[rnum]+1)
             n_rot = 1
 
         if n_rot not in count_by_n_rot: 
@@ -828,11 +832,11 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
         base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
         count_by_n_rot[n_rot] += 1
 
-        rama_residue  .extend([rnum]*n_rot)
-        affine_residue.extend([rnum]*n_rot)
+        rama_residue  .extend([rnum]*(stop-start))
+        affine_residue.extend([rnum]*(stop-start))
         layer_index   .extend(np.arange(start,stop))
-        restype_seq   .extend([aa]*n_rot)
-        id_seq        .extend(np.arange(n_rot) + (base_id<<n_bit_rotamer))
+        beadtype_seq   .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
+        id_seq        .extend(np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer))
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
@@ -841,7 +845,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_pos[...,:3])
-    create_array(grp, 'restype_seq',     restype_seq)
+    create_array(grp, 'beadtype_seq',    beadtype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
 
     grp = t.create_group(potential, 'placement_scalar')
@@ -868,6 +872,7 @@ def write_rotamer(fasta, interaction_library, damping):
 
     with tb.open_file(interaction_library) as data:
          create_array(pg, 'interaction_param', data.root.pair_interaction[:])
+         bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
 
     # now I need to create index, type, and id
     index = []
@@ -891,9 +896,9 @@ def write_rotamer(fasta, interaction_library, damping):
             type .append(restype)
             id   .append((base_id<<n_bit_rotamer) + no)
 
-    rseq = t.root.input.potential.placement_rotamer.restype_seq[:]
+    rseq = t.root.input.potential.placement_rotamer.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))
-    create_array(pg, 'type',  np.array([aa_num[s] for s in rseq]))
+    create_array(pg, 'type',  np.array([bead_num[s] for s in rseq]))
     create_array(pg, 'id',    t.root.input.potential.placement_rotamer.id_seq[:])
 
 

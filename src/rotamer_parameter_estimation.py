@@ -10,7 +10,8 @@ import scipy.optimize as opt
 import threading
 import concurrent.futures
 
-n_restype = 20
+n_restype = 24
+n_knot = 18
 
 lparam = T.dvector('lparam')
 func = lambda expr: (theano.function([lparam],expr),expr)
@@ -21,7 +22,6 @@ def read_param(shape):
     i[0] += size
     return ret
 
-n_knot = 18
 
 def unpack_param_maker():
     def read_symm():
@@ -83,7 +83,6 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
         for nm, pm in zip(node_names, param_matrices):
             fix .set_param(pm, nm) 
             free.set_param(pm, nm) 
-        # print 'param', free.get_param((2,20,38), 'hbond_coverage')[0]
 
         en0 = fix .energy(pos)
         en1 = free.energy(pos)

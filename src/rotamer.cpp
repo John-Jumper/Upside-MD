@@ -10,6 +10,7 @@
 #include <memory>
 #include "state_logger.h"
 #include <tuple>
+#include <set>
 
 using namespace std;
 using namespace h5;
@@ -34,8 +35,10 @@ struct NodeHolder {
         {
             fill(cur_belief, 1.f);
             fill(old_belief, 1.f);
+            reset();
         }
 
+        void reset() {fill(prob, 1.f);}
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
         void standardize_probs() {
@@ -82,6 +85,7 @@ struct NodeHolder {
             float en = 0.f;
             // free energy is average energy - entropy
             for(int no: range(N_ROT)) en += b[no] * logf((1e-10f+b[no])*rcp(1e-10f+pr[no]));
+            // if(nn==59 || fabsf(b[no]-pr[no])>0.1f) printf("node %i %i %.2f %.2f\n", nn, no, b[no], pr[no]);}
             return en;
         }
 };
@@ -99,7 +103,7 @@ struct EdgeHolder {
     public:
         struct EdgeLoc {int edge_num, dim, ne;};
 
-        // FIXME include numerical stability data  (basically scale each probability in a sane way)
+        // FIXME include numerical stability data (basically scale each probability in a sane way)
         VArray prob;
         VArray cur_belief;
         VArray old_belief;
@@ -132,6 +136,7 @@ struct EdgeHolder {
                 int ne, float prob_val,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
+            // if(prob_val!=1.f) printf("prob nonzero %i %f %i %i %i %i\n", ne,prob_val,id1,rot1,id2,rot2);
             // really I could take n_rot1 and n_rot2 as parameters so I didn't have to do a read 
             // of a number I already know
             unsigned pr = (id1<<16) + id2;  // this limits me to 65k residues, but that is enough I think
@@ -276,11 +281,17 @@ array<int,UPPER_ROT> calculate_n_elem(WithinInteractionGraph<BT> &igraph) {
     array<int,UPPER_ROT> result; // 0-rot is included
     for(int& i: result) i=0;
 
+    unordered_map<unsigned,set<unsigned>> unique_ids;
     for(unsigned id: igraph.id) {
         unsigned selector = (1u<<n_bit_rotamer) - 1u;
-        if(id&selector) continue; // only count on the 0th rotamer
-        unsigned n_rot = (id>>n_bit_rotamer) & selector;
-        result.at(n_rot) += 1;
+        unsigned   rot = id & selector; id >>= n_bit_rotamer;
+        unsigned n_rot = id & selector; id >>= n_bit_rotamer;
+        if(rot>=n_rot) throw string("invalid rotamer number");
+        unique_ids[n_rot].insert(id);
+    }
+    for(auto& kv: unique_ids) {
+        if(kv.first >= UPPER_ROT) throw string("invalid rotamer count ")+to_string(kv.first);
+        result.at(kv.first) = kv.second.size();
     }
     return result;
 }
@@ -366,10 +377,7 @@ struct RotamerSidechain: public PotentialNode {
                             auto en = this->rotamer_1body_energy(npn);
                             copy(begin(en), end(en), buffer);});
         }
-
-
     }
-
 
 
     void ensure_fresh_energy() {
@@ -400,6 +408,10 @@ struct RotamerSidechain: public PotentialNode {
                 if(edge_holders_matrix[n_rot1][n_rot2])
                     edge_holders_matrix[n_rot1][n_rot2]->reset();
 
+        for(int n_rot: range(UPPER_ROT))
+            if(node_holders_matrix[n_rot])
+                node_holders_matrix[n_rot]->reset();
+
         vector<VecArray> energy_1body;
         energy_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
@@ -415,7 +427,7 @@ struct RotamerSidechain: public PotentialNode {
             float energy = 0.f;
             for(auto &a: energy_1body) energy += a(0,index);
 
-            node_holders_matrix[n_rot]->prob(rot,id) = expf(-energy);
+            node_holders_matrix[n_rot]->prob(rot,id) *= expf(-energy);
         }
 
         // Fill edge probabilities
@@ -502,9 +514,13 @@ struct RotamerSidechain: public PotentialNode {
         vector<float> energies(n_elem_rot[1]+n_elem_rot[3]);
         auto en_loc = begin(energies);
 
+        set<unsigned> known_ids;
+
         for(unsigned id: igraph.id) {
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             if(id&selector) continue; // only count on the 0th rotamer
+            if(known_ids.find(id)!=known_ids.end()) continue; //may be multiple beads
+            known_ids.insert(id);
             id>>=n_bit_rotamer;
             unsigned n_rot = id & selector;
             id>>=n_bit_rotamer;  // now id contains the local alignment

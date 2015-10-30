@@ -45,104 +45,104 @@ static float dihedral(MatrixX3f r) {
 }
 
 void get_rotamer(const string &name, const MatrixX3f &pos, array<float,4> &chi) {
-if(name == "ALA") {
-}
+    if(name == "ALA") {
+    }
 
-if(name == "ARG") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-    chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
-    chi[3] = dihedral(pos.row(5), pos.row(6), pos.row(7), pos.row(8));
-}
+    if(name == "ARG") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+        chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
+        chi[3] = dihedral(pos.row(5), pos.row(6), pos.row(7), pos.row(8));
+    }
 
-if(name == "ASN") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "ASN") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "ASP") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "ASP") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "CYS") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-}
+    if(name == "CYS") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+    }
 
-if(name == "GLN") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-    chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
-}
+    if(name == "GLN") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+        chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
+    }
 
-if(name == "GLU") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-    chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
-}
+    if(name == "GLU") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+        chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
+    }
 
-if(name == "GLY") {
-}
+    if(name == "GLY") {
+    }
 
-if(name == "HIS") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "HIS") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "ILE") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(7));
-}
+    if(name == "ILE") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(7));
+    }
 
-if(name == "LEU") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "LEU") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "LYS") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-    chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
-    chi[3] = dihedral(pos.row(5), pos.row(6), pos.row(7), pos.row(8));
-}
+    if(name == "LYS") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+        chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
+        chi[3] = dihedral(pos.row(5), pos.row(6), pos.row(7), pos.row(8));
+    }
 
-if(name == "MET") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-    chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
-}
+    if(name == "MET") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+        chi[2] = dihedral(pos.row(4), pos.row(5), pos.row(6), pos.row(7));
+    }
 
-if(name == "PHE") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "PHE") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "PRO") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "PRO") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "SER") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-}
+    if(name == "SER") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+    }
 
-if(name == "THR") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-}
+    if(name == "THR") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+    }
 
-if(name == "TRP") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "TRP") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "TYR") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-    chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
-}
+    if(name == "TYR") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+        chi[1] = dihedral(pos.row(1), pos.row(4), pos.row(5), pos.row(6));
+    }
 
-if(name == "VAL") {
-    chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
-}
+    if(name == "VAL") {
+        chi[0] = dihedral(pos.row(0), pos.row(1), pos.row(4), pos.row(5));
+    }
 }
 
 string to_string(RowVector3f x) {
@@ -299,10 +299,66 @@ Affine3f rigid_alignment(
 //     fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
 // }
 
+void push_vector(vector<float>& a, const RowVector3f& v) {
+    a.push_back(v[0]); a.push_back(v[1]); a.push_back(v[2]);
+}
+
+int get_beads(const std::string& rname, vector<float>& centers, vector<float>& direcs, MatrixX3f &pos) {
+    auto pc = [&](const RowVector3f& v) {push_vector(centers, v);};
+    auto pd = [&](const RowVector3f& v) {push_vector(direcs,  v.normalized());};
+
+    if(rname == "GLY") {
+        pc(pos.row(1));
+        pd(pos.row(1)  - 0.5f*(pos.row(0) + pos.row(2)));
+        return 1;
+    } else if(rname == "ALA"){
+        pc(pos.row(4));
+        pd(pos.row(4) - pos.row(1));
+        return 1;
+    } else if(rname == "GLU") {
+        pc(pos.bottomRows(pos.rows()-6).colwise().mean());
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        return 1;
+    } else if(rname == "LYS") {
+        pc(pos.row(8)); // NZ atom
+        pc(pos.row(6)); // CD atom
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        return 2;
+    } else if(rname == "ARG") {
+        pc((1.f/3.f)*(pos.row(7)+pos.row(9)+pos.row(10))); // center of nitrogens
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        return 1;
+    } else if(rname == "THR") {
+        pc(pos.row(5)); // atom 5 is OG1 
+        pc(pos.row(6)); // atom 6 is CG1
+        pd(pos.row(5)-pos.row(4)); // CB->OG1 bond vector
+        pd(pos.row(6)-pos.row(4)); // CB->CG1 bond vector
+        return 2;
+    } else if(rname == "TRP") {
+        pc((1.f/6.f)*(pos.row(7)+pos.row(9)+pos.row(10)+pos.row(11)+pos.row(12)+pos.row(13))); // 2nd aromatic ring
+        pc(pos.row(8)); // atom 8 is NE1
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        pd(pos.row(8)-pos.row(4)); // CB->NE1 bond vector
+        return 2;
+    } else if(rname == "TYR") {
+        pc((1.f/6.f)*(pos.row(5)+pos.row(6)+pos.row(7)+pos.row(8)+pos.row(9)+pos.row(10))); // aromatic ring
+        pc(pos.row(11)); // atom 11 is OH
+        pd(pos.row( 5)-pos.row(4)); // CB->CG bond vector
+        pd(pos.row(11)-pos.row(4)); // CB->OH bond vector
+        return 2;
+    } else {
+        pc(pos.bottomRows(pos.rows()-5).colwise().mean());
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
+        return 1;
+    }
+    return -1;
+}
 
 int main(int argc, char** argv) try {
+    if(argc!=2) throw string("wrong number of arguments");
     auto config = h5_obj(H5Fclose, 
-            H5Fopen("/home/jumper/Dropbox/code/upside-parameters/Dunbrack-Rotamer-Simple1-5.h5", 
+            H5Fopen(argv[1],
                 H5F_ACC_RDWR, H5P_DEFAULT));
 
     const int n_bin = 37;
@@ -313,6 +369,7 @@ int main(int argc, char** argv) try {
         string rname   = rf.first;
         auto &res_func = *rf.second;
         printf("%s\n", rname.c_str());
+        int n_bead = -1;
 
         std::vector<float> centers;
         std::vector<float> direcs;
@@ -334,23 +391,11 @@ int main(int argc, char** argv) try {
 
             for(int i1=0; i1<n_bin; ++i1) {
                 for(int i2=0; i2<n_bin; ++i2) {
-                    float psi = i2*bin_size - M_PI_F;
                     MatrixX3f pos;
+                    float psi = i2*bin_size - M_PI_F;
                     array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
                     res_func(pos, psi, chi);
-
-                    Vector3f center = pos.row((rname == "GLY") ?  1 : 4);
-                    centers.push_back(center[0]);
-                    centers.push_back(center[1]);
-                    centers.push_back(center[2]);
-
-
-                    Vector3f direc = pos.row((rname == "GLY") ?  1 : 4) - pos.row(1);
-                    if(rname != "GLY") direc.normalize();
-
-                    direcs.push_back(direc[0]);
-                    direcs.push_back(direc[1]);
-                    direcs.push_back(direc[2]);
+                    n_bead = get_beads(rname, centers, direcs, pos);
                 }
             }
         } else {
@@ -369,32 +414,22 @@ int main(int argc, char** argv) try {
             for(int i1=0; i1<n_bin; ++i1) {
                 for(int i2=0; i2<n_bin; ++i2) {
                     MatrixX3f pos;
-
                     float psi = i2*bin_size - M_PI_F;
 
                     for(int nr=starts(i1,i2); nr<stops(i1,i2); ++nr) {
                         array<float,4> chi = {{0.f, 0.f, 0.f, 0.f}};
                         for(int nchi=0; nchi<4; ++nchi) chi[nchi] = chis(nr,nchi);
                         res_func(pos, psi, chi);
-
-                        RowVector3f curr_center = pos.bottomRows(pos.rows()-5).colwise().mean();
-                        centers.push_back(curr_center[0]);
-                        centers.push_back(curr_center[1]);
-                        centers.push_back(curr_center[2]);
-
-                        RowVector3f direc = (pos.row(5)-pos.row(4)).normalized(); // CB->CG bond vector
-                        direcs.push_back(direc[0]);
-                        direcs.push_back(direc[1]);
-                        direcs.push_back(direc[2]);
+                        n_bead = get_beads(rname, centers, direcs, pos);
                     }
                 }
             }
         }
 
-        auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {-1,3}, {1,3});
+        auto center_array = create_earray(grp.get(), "center", H5T_NATIVE_FLOAT, {-1,n_bead,3}, {8,n_bead,3});
         append_to_dset(center_array.get(), centers, 0);
 
-        auto direc_array = create_earray(grp.get(), "direc", H5T_NATIVE_FLOAT, {-1,3}, {1,3});
+        auto direc_array = create_earray(grp.get(), "direc", H5T_NATIVE_FLOAT, {-1,n_bead,3}, {8,n_bead,3});
         append_to_dset(direc_array.get(), direcs, 0);
 
         vector<float> bin_vals(n_bin);
