@@ -379,56 +379,6 @@ three_atom_alignment(
     }
 }
 
-namespace {
-
-template <typename CoordT, typename MutableCoordT>
-void affine_alignment_body(
-        MutableCoordT &rigid_body,
-        CoordT &x1,
-        CoordT &x2,
-        CoordT &x3,
-        const AffineAlignmentParams &p)
-{
-    float my_deriv[3*3*7];
-
-    three_atom_alignment(rigid_body.v,my_deriv, x1.v,x2.v,x3.v, p.ref_geom);
-
-    for(int quat_dim=0; quat_dim<7; ++quat_dim) {
-        for(int atom_dim=0; atom_dim<3; ++atom_dim) {
-            x1.d[quat_dim][atom_dim] = my_deriv[0*21 + atom_dim*7 + quat_dim];
-            x2.d[quat_dim][atom_dim] = my_deriv[1*21 + atom_dim*7 + quat_dim];
-            x3.d[quat_dim][atom_dim] = my_deriv[2*21 + atom_dim*7 + quat_dim];
-        }
-    }
-}
-}
-
-void affine_alignment(
-        SysArray rigid_body,
-        CoordArray pos,
-        const AffineAlignmentParams* restrict params,
-        int n_res,
-        int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        for(int nr=0; nr<n_res; ++nr) {
-            MutableCoord<7> rigid_body_coord(rigid_body, ns, nr);
-
-            Coord<3,7> x1(pos, ns, params[nr].atom[0]);
-            Coord<3,7> x2(pos, ns, params[nr].atom[1]);
-            Coord<3,7> x3(pos, ns, params[nr].atom[2]);
-
-            affine_alignment_body(rigid_body_coord, x1,x2,x3, params[nr]);
-
-            rigid_body_coord.flush();
-            x1.flush();
-            x2.flush();
-            x3.flush();
-        }
-    }
-}
-
-
 
 void
 affine_reverse_autodiff(
@@ -438,43 +388,40 @@ affine_reverse_autodiff(
         const DerivRecord* tape,
         const AutoDiffParams* p,
         int n_tape,
-        int n_res, 
-        int n_system)
+        int n_res)
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        std::vector<TempCoord<6>> torque_sens(n_res);
+    std::vector<TempCoord<6>> torque_sens(n_res);
 
-        for(int nt=0; nt<n_tape; ++nt) {
-            auto tape_elem = tape[nt];
-            for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-                auto val = StaticCoord<6>(affine_accum, ns, tape_elem.loc + rec);
-                for(int d=0; d<6; ++d)
-                    torque_sens[tape_elem.atom].v[d] += val.v[d];
-            }
+    for(int nt=0; nt<n_tape; ++nt) {
+        auto tape_elem = tape[nt];
+        for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
+            auto val = StaticCoord<6>(affine_accum, 0, tape_elem.loc + rec);
+            for(int d=0; d<6; ++d)
+                torque_sens[tape_elem.atom].v[d] += val.v[d];
         }
+    }
 
-        for(int na=0; na<n_res; ++na) {
-            float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
+    for(int na=0; na<n_res; ++na) {
+        float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
 
-            float q[4]; for(int d=0; d<4; ++d) q[d] = affine[ns](d+3,na);
+        float q[4]; for(int d=0; d<4; ++d) q[d] = affine[0](d+3,na);
 
-            // push back torque to affine derivatives (multiply by quaternion)
-            // the torque is in the tangent space of the rotated frame
-            // to act on a tangent in the affine space, I need to push that tangent into the rotated space
-            // this means a right multiply by the quaternion itself
+        // push back torque to affine derivatives (multiply by quaternion)
+        // the torque is in the tangent space of the rotated frame
+        // to act on a tangent in the affine space, I need to push that tangent into the rotated space
+        // this means a right multiply by the quaternion itself
 
-            float *torque = torque_sens[na].v+3;
-            sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
-            sens[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
-            sens[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
-            sens[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+        float *torque = torque_sens[na].v+3;
+        sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
+        sens[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
+        sens[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
+        sens[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
 
-            for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
-                for(int sens_dim=0; sens_dim<7; ++sens_dim) {
-                    MutableCoord<3> c(pos_deriv, ns, p[na].slots1[nsl]+sens_dim);
-                    for(int d=0; d<3; ++d) c.v[d] *= sens[sens_dim];
-                    c.flush();
-                }
+        for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
+            for(int sens_dim=0; sens_dim<7; ++sens_dim) {
+                MutableCoord<3> c(pos_deriv, 0, p[na].slots1[nsl]+sens_dim);
+                for(int d=0; d<3; ++d) c.v[d] *= sens[sens_dim];
+                c.flush();
             }
         }
     }
@@ -484,12 +431,11 @@ affine_reverse_autodiff(
 struct AffineAlignment : public CoordNode
 {
     CoordNode& pos;
-    int n_system;
     vector<AffineAlignmentParams> params;
     vector<AutoDiffParams> autodiff_params;
 
     AffineAlignment(hid_t grp, CoordNode& pos_):
-        CoordNode(pos_.n_system, get_dset_size(2, grp, "atoms")[0], 7),
+        CoordNode(1, get_dset_size(2, grp, "atoms")[0], 7),
         pos(pos_), params(n_elem)
     {
         int n_dep = 3;
@@ -505,8 +451,34 @@ struct AffineAlignment : public CoordNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("affine_alignment"));
-        affine_alignment(coords().value, pos.coords(), params.data(), 
-                n_elem, pos.n_system);}
+
+        auto rigid_body = coords().value;
+        auto posc = pos.coords();
+
+        for(int nr=0; nr<n_elem; ++nr) {
+            MutableCoord<7> rigid_body_coord(rigid_body, 0, nr);
+
+            Coord<3,7> x1(posc, 0, params[nr].atom[0]);
+            Coord<3,7> x2(posc, 0, params[nr].atom[1]);
+            Coord<3,7> x3(posc, 0, params[nr].atom[2]);
+
+            float my_deriv[3*3*7];
+            three_atom_alignment(rigid_body_coord.v,my_deriv, x1.v,x2.v,x3.v, params[nr].ref_geom);
+
+            for(int quat_dim=0; quat_dim<7; ++quat_dim) {
+                for(int atom_dim=0; atom_dim<3; ++atom_dim) {
+                    x1.d[quat_dim][atom_dim] = my_deriv[0*21 + atom_dim*7 + quat_dim];
+                    x2.d[quat_dim][atom_dim] = my_deriv[1*21 + atom_dim*7 + quat_dim];
+                    x3.d[quat_dim][atom_dim] = my_deriv[2*21 + atom_dim*7 + quat_dim];
+                }
+            }
+
+            rigid_body_coord.flush();
+            x1.flush();
+            x2.flush();
+            x3.flush();
+        }
+    }
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
@@ -514,7 +486,7 @@ struct AffineAlignment : public CoordNode
                 coords().value, coords().deriv, pos.slot_machine.accum_array(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_elem, pos.n_system);
+                n_elem);
     }
 
     virtual double test_value_deriv_agreement() {

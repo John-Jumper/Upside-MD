@@ -97,7 +97,7 @@ struct EnvironmentCoverage : public CoordNode {
     int n_restype;
 
     EnvironmentCoverage(hid_t grp, CoordNode& rotamer_sidechains_, CoordNode& weighted_sidechains_):
-        CoordNode(rotamer_sidechains_.n_system, 
+        CoordNode(1, 
                 get_dset_size(1,grp,"index1")[0], 
                 get_dset_size(3,grp,"interaction_param")[1]),
         igraph(grp, rotamer_sidechains_, weighted_sidechains_),
@@ -113,39 +113,35 @@ struct EnvironmentCoverage : public CoordNode {
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("environment_vector"));
-        for(int ns=0; ns<n_system; ++ns) {
-            VecArray env = coords().value[ns];
-            fill(env, n_restype, n_elem, 0.f);
+        VecArray env = coords().value[0];
+        fill(env, n_restype, n_elem, 0.f);
 
-            // Compute coverage and its derivative
-            igraph.compute_edges(ns, [&](int ne, float cov,
-                        int index1, unsigned type1, unsigned id1,
-                        int index2, unsigned type2, unsigned id2) {
-                    env(type2,index1) += cov;});
-        }
+        // Compute coverage and its derivative
+        igraph.compute_edges(0, [&](int ne, float cov,
+                    int index1, unsigned type1, unsigned id1,
+                    int index2, unsigned type2, unsigned id2) {
+                env(type2,index1) += cov;});
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("environment_vector_deriv"));
-        for(int ns=0; ns<n_system; ++ns) {
-            vector<float> sens(n_elem*n_restype, 0.f);
-            VecArray accum = slot_machine.accum_array()[ns];
+        vector<float> sens(n_elem*n_restype, 0.f);
+        VecArray accum = slot_machine.accum_array()[0];
 
-            for(auto tape_elem: slot_machine.deriv_tape)
-                for(int rec=0; rec<int(tape_elem.output_width); ++rec)
-                    for(int rt: range(n_restype))
-                        sens[tape_elem.atom*n_restype+rt] += accum(rt, tape_elem.loc+rec);
+        for(auto tape_elem: slot_machine.deriv_tape)
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                for(int rt: range(n_restype))
+                    sens[tape_elem.atom*n_restype+rt] += accum(rt, tape_elem.loc+rec);
 
-            // Push coverage derivatives
-            for(int ned: range(igraph.n_edge[ns])) {
-                int sc_num0 = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 0];
-                int sc_num1 = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 1];
-                int sc_idx0 = igraph.param1[sc_num0].index;
-                int sc_type1= igraph.types2[sc_num1];
-                igraph.use_derivative(ns, ned, sens[sc_idx0*n_restype+sc_type1]);
-            }
-            igraph.propagate_derivatives(ns);
+        // Push coverage derivatives
+        for(int ned: range(igraph.n_edge[0])) {
+            int sc_num0 = igraph.edge_indices[2*ned + 0];
+            int sc_num1 = igraph.edge_indices[2*ned + 1];
+            int sc_idx0 = igraph.param1[sc_num0].index;
+            int sc_type1= igraph.types2[sc_num1];
+            igraph.use_derivative(0, ned, sens[sc_idx0*n_restype+sc_type1]);
         }
+        igraph.propagate_derivatives(0);
     }
 
 #ifdef PARAM_DERIV
@@ -167,13 +163,12 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
     vector<slot_t> slots;
 
     SimpleEnvironmentEnergy(hid_t grp, CoordNode& env_vector_):
-        PotentialNode(env_vector_.n_system),
+        PotentialNode(1),
         env_vector(env_vector_),
         n_elem(env_vector.n_elem),
         n_restype(env_vector.elem_width),
         coeff(n_elem*n_restype) 
     {
-        if(n_system!=1) throw string("impossible");
         check_size(grp, "coefficients", n_elem , n_restype);
         traverse_dset<2,float>(grp, "coefficients", [&](size_t ne, size_t rt, float x) {coeff[ne*n_restype+rt]=x;});
 
@@ -237,7 +232,7 @@ struct EnvironmentEnergy : public CoordNode {
     vector<slot_t> slots;
 
     EnvironmentEnergy(hid_t grp, CoordNode &env_vector_):
-        CoordNode (env_vector_.n_system, env_vector_.n_elem, 1),
+        CoordNode (1, env_vector_.n_elem, 1),
         env_vector(env_vector_),
 
         n_hidden(get_dset_size(1, grp, "linear_shift0")[0]),

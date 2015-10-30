@@ -551,7 +551,7 @@ try {
                         sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
-                        if(do_recenter) recenter(sys.engine.pos->coords().value, xy_recenter_only, sys.n_atom, 1);
+                        if(do_recenter) recenter(sys.engine.pos->coords().value, xy_recenter_only, sys.n_atom);
                         sys.engine.compute(PotentialAndDerivMode);
                         sys.logger->collect_samples();
 

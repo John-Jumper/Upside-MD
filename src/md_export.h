@@ -11,7 +11,7 @@ integration_stage(
         float vel_factor,
         float pos_factor,
         float max_force,
-        int n_atom, int n_system);
+        int n_atom);
 
 void 
 deriv_accumulation(
@@ -19,11 +19,8 @@ deriv_accumulation(
         const SysArray accum_buffer, 
         const DerivRecord* restrict tape,
         int n_tape,
-        int n_atom, int n_system);
+        int n_atom);
 
 void
-recenter(
-        SysArray pos, bool xy_recenter_only,
-        int n_atom, int n_system
-        );
+recenter(SysArray pos, bool xy_recenter_only, int n_atom);
 #endif

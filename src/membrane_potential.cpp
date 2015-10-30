@@ -22,19 +22,17 @@ void membrane_potential(
         const MembraneResidueParams* params,
         const LayeredClampedSpline1D<1>& energy_spline,
         float z_shift, float z_scale,
-        int n_residue, int n_system)
+        int n_residue)
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
+    if(potential) potential[0] = 0.f;
 
-        for(int nr=0; nr<n_residue; ++nr) {	                                                         
-            Coord<3> pos1(sc_com_pos, ns, params[nr].residue); 
-            float result[2];  // deriv then value
-            energy_spline.evaluate_value_and_deriv(result, params[nr].restype, (pos1.f3().z()+z_shift)*z_scale);
-            pos1.set_deriv(make_vec3(0.f, 0.f, result[0]*z_scale));
-            if(potential) potential[ns] += result[1];
-            pos1.flush();
-        }
+    for(int nr=0; nr<n_residue; ++nr) {	                                                         
+        Coord<3> pos1(sc_com_pos, 0, params[nr].residue); 
+        float result[2];  // deriv then value
+        energy_spline.evaluate_value_and_deriv(result, params[nr].restype, (pos1.f3().z()+z_shift)*z_scale);
+        pos1.set_deriv(make_vec3(0.f, 0.f, result[0]*z_scale));
+        if(potential) potential[0] += result[1];
+        pos1.flush();
     }
 }
 
@@ -51,7 +49,7 @@ struct MembranePotential : public PotentialNode
     float z_scale;
 
     MembranePotential(hid_t grp, CoordNode& sidechain_pos_):
-        PotentialNode(sidechain_pos_.n_system),
+        PotentialNode(1),
         n_elem(get_dset_size(1, grp, "residue_id")[0]), 
         sidechain_pos(sidechain_pos_), 
         params(n_elem),
@@ -82,7 +80,7 @@ struct MembranePotential : public PotentialNode
         membrane_potential((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 sidechain_pos.coords(), params.data(),
                 membrane_energy_spline, z_shift, z_scale,
-                n_elem, n_system);
+                n_elem);
     }
     virtual double test_value_deriv_agreement() {
         vector<vector<CoordPair>> coord_pairs(1);

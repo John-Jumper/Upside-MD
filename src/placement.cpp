@@ -29,7 +29,7 @@ struct RigidPlacementNode: public CoordNode {
     SysArrayStorage rama_deriv;
 
     RigidPlacementNode(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
-        CoordNode(rama_.n_system, get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
+        CoordNode(1, get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
         rama(rama_), alignment(alignment_),
         params(n_elem), 
         spline(
@@ -37,7 +37,7 @@ struct RigidPlacementNode: public CoordNode {
                 get_dset_size(4, grp, "placement_data")[1],
                 get_dset_size(4, grp, "placement_data")[2]),
 
-        rama_deriv(n_system, 2*n_pos_dim, n_elem) // first is all phi deriv then all psi deriv
+        rama_deriv(1, 2*n_pos_dim, n_elem) // first is all phi deriv then all psi deriv
     {
         // verify that the signature is as expected
         int n_pos_dim_input = 0;
@@ -76,12 +76,11 @@ struct RigidPlacementNode: public CoordNode {
 
         if(logging(LOG_EXTENSIVE)) {
             // FIXME prepend the logging with the class name for disambiguation
-            default_logger->add_logger<float>("placement_pos", {n_system, n_elem, n_pos_dim}, [&](float* buffer) {
-                    SysArray pos = coords().value;
-                    for(int ns: range(n_system))
-                        for(int ne: range(n_elem))
-                            for(int d: range(n_pos_dim))
-                                buffer[ns*n_elem*n_pos_dim + ne*n_pos_dim + d] = pos[ns](d,ne);});
+            default_logger->add_logger<float>("placement_pos", {n_elem, n_pos_dim}, [&](float* buffer) {
+                    auto pos = coords().value[0];
+                    for(int ne: range(n_elem))
+                        for(int d: range(n_pos_dim))
+                            buffer[ne*n_pos_dim + d] = pos(d,ne);});
         }
 
         for(auto &p: params) rama     .slot_machine.add_request(1, p.rama_residue);
@@ -96,124 +95,114 @@ struct RigidPlacementNode: public CoordNode {
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
         const float shift = M_PI_F;
 
-        SysArray pos_s    = coords().value;
-        SysArray rama_s   = rama.coords().value;
-        SysArray affine_s = alignment.coords().value;
+        VecArray affine_pos = alignment.coords().value[0];
+        VecArray rama_pos   = rama.coords().value[0];
+        VecArray pos        = coords().value[0];
+        VecArray phi_d      = rama_deriv[0];
+        VecArray psi_d      = rama_deriv[0].shifted(n_pos_dim);
 
-        for(int ns=0; ns<n_system; ++ns) {
-            VecArray affine_pos = affine_s [ns];
-            VecArray rama_pos   = rama_s   [ns];
-            VecArray pos        = pos_s    [ns];
-            VecArray phi_d      = rama_deriv[ns];
-            VecArray psi_d      = rama_deriv[ns].shifted(n_pos_dim);
+        for(int ne: range(n_elem)) {
+            auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
+            auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue.index);
+            auto t   = extract<0,3>(aff);
+            float U[9]; quat_to_rot(U, aff.v+3);
 
-            for(int ne: range(n_elem)) {
-                auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
-                auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue.index);
-                auto t   = extract<0,3>(aff);
-                float U[9]; quat_to_rot(U, aff.v+3);
+            float val[n_pos_dim*3];  // 3 here is deriv_x, deriv_y, value
+            spline.evaluate_value_and_deriv(val, params[ne].layer_idx, 
+                    (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
 
-                float val[n_pos_dim*3];  // 3 here is deriv_x, deriv_y, value
-                spline.evaluate_value_and_deriv(val, params[ne].layer_idx, 
-                        (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
+            int j = 0; // index of dimension that we are on
 
-                int j = 0; // index of dimension that we are on
+            #define READ3(i,j) make_vec3(val[((i)+0)*3+(j)], val[((i)+1)*3+(j)], val[((i)+2)*3+(j)])
+            for(PlaceType type: signature) {
+                switch(type) {
+                    case PlaceType::SCALAR:
+                        phi_d(j,ne) = val[j*3+0] * scale_x;
+                        psi_d(j,ne) = val[j*3+1] * scale_y;
+                        pos  (j,ne) = val[j*3+2];
+                        j += 1;
+                        break;
+                    case PlaceType::VECTOR:
+                    case PlaceType::POINT:
+                        // This if-statement is strictly not necessary as we already checked that n_pos_dim >= 3
+                        // when we verified that the signature was consistent with n_pos_dim.  That being said,
+                        // the if statement will be optimized out at compile time and it suppresses some warnings 
+                        // from GCC at the time of writing.
+                        if(n_pos_dim >= 3) { 
+                            // point and vector differ only in shifting the final output
+                            store_vec(phi_d.shifted(j), ne, scale_x * apply_rotation(U, READ3(j,0)));
+                            store_vec(psi_d.shifted(j), ne, scale_y * apply_rotation(U, READ3(j,1)));
 
-                #define READ3(i,j) make_vec3(val[((i)+0)*3+(j)], val[((i)+1)*3+(j)], val[((i)+2)*3+(j)])
-                for(PlaceType type: signature) {
-                    switch(type) {
-                        case PlaceType::SCALAR:
-                            phi_d(j,ne) = val[j*3+0] * scale_x;
-                            psi_d(j,ne) = val[j*3+1] * scale_y;
-                            pos  (j,ne) = val[j*3+2];
-                            j += 1;
-                            break;
-                        case PlaceType::VECTOR:
-                        case PlaceType::POINT:
-                            // This if-statement is strictly not necessary as we already checked that n_pos_dim >= 3
-                            // when we verified that the signature was consistent with n_pos_dim.  That being said,
-                            // the if statement will be optimized out at compile time and it suppresses some warnings 
-                            // from GCC at the time of writing.
-                            if(n_pos_dim >= 3) { 
-                                // point and vector differ only in shifting the final output
-                                store_vec(phi_d.shifted(j), ne, scale_x * apply_rotation(U, READ3(j,0)));
-                                store_vec(psi_d.shifted(j), ne, scale_y * apply_rotation(U, READ3(j,1)));
+                            store_vec(pos.shifted(j), ne, (type==PlaceType::POINT
+                                        ? apply_affine  (U,t, READ3(j,2))
+                                        : apply_rotation(U,   READ3(j,2))));
 
-                                store_vec(pos.shifted(j), ne, (type==PlaceType::POINT
-                                            ? apply_affine  (U,t, READ3(j,2))
-                                            : apply_rotation(U,   READ3(j,2))));
-
-                                j += 3;
-                            }
-                            break;
-                    }
+                            j += 3;
+                        }
+                        break;
                 }
-                #undef READ3
             }
+            #undef READ3
         }
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("placement_deriv"));
 
-        // FIXME need to move the energy scaling back to the rotamer;
-        SysArray pos_s = coords().value;
+        VecArray pos   = coords().value[0];
+        VecArray accum = slot_machine.accum_array()[0];
+        VecArray r_accum = rama.slot_machine.accum_array()[0];
+        VecArray a_accum = alignment.slot_machine.accum_array()[0];
+        VecArray affine_pos = alignment.coords().value[0];
 
-        for(int ns=0; ns<n_system; ++ns) {
-           VecArray pos   = pos_s[ns];
-           VecArray accum = slot_machine.accum_array()[ns];
-           VecArray r_accum = rama.slot_machine.accum_array()[ns];
-           VecArray a_accum = alignment.slot_machine.accum_array()[ns];
-           VecArray affine_pos = alignment.coords().value[ns];
+        vector<Vec<n_pos_dim>> sens(n_elem);
+        for(auto &s: sens) s = make_zero<n_pos_dim>();
 
-           vector<Vec<n_pos_dim>> sens(n_elem);
-           for(auto &s: sens) s = make_zero<n_pos_dim>();
+        for(auto tape_elem: slot_machine.deriv_tape) {
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                sens[tape_elem.atom] += load_vec<n_pos_dim>(accum, tape_elem.loc + rec);
+        }
 
-           for(auto tape_elem: slot_machine.deriv_tape) {
-               for(int rec=0; rec<int(tape_elem.output_width); ++rec)
-                   sens[tape_elem.atom] += load_vec<n_pos_dim>(accum, tape_elem.loc + rec);
-           }
+        for(int ne: range(n_elem)) {
+            auto d = sens[ne];
 
-           for(int ne: range(n_elem)) {
-               auto d = sens[ne];
+            auto rd = make_vec2(
+                        dot(d, load_vec<n_pos_dim>(rama_deriv[0].shifted(0),ne)),
+                        dot(d, load_vec<n_pos_dim>(rama_deriv[0].shifted(n_pos_dim),ne)));
 
-               auto rd = make_vec2(
-                           dot(d, load_vec<n_pos_dim>(rama_deriv[ns].shifted(0),ne)),
-                           dot(d, load_vec<n_pos_dim>(rama_deriv[ns].shifted(n_pos_dim),ne)));
+            store_vec(r_accum, params[ne].rama_residue.slot, rd);
 
-               store_vec(r_accum, params[ne].rama_residue.slot, rd);
+            // only difference between points and vectors is whether to subtract off the translation
+            auto z = make_zero<6>();
+            int j=0;
 
-               // only difference between points and vectors is whether to subtract off the translation
-               auto z = make_zero<6>();
-               int j=0;
+            auto t  = load_vec<3>(affine_pos, params[ne].affine_residue.index);
+            for(PlaceType type: signature) {
+                switch(type) {
+                    case PlaceType::SCALAR:
+                        j+=1;  // no affine derivative
+                        break;
+                    case PlaceType::VECTOR:
+                    case PlaceType::POINT:
+                        // see note in compute_value for why this if-statement is unnecessary but harmless
+                        if(n_pos_dim >= 3) { 
+                            auto x  = load_vec<3>(pos.shifted(j), ne);
+                            auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
 
-               auto t  = load_vec<3>(affine_pos, params[ne].affine_residue.index);
-               for(PlaceType type: signature) {
-                   switch(type) {
-                       case PlaceType::SCALAR:
-                           j+=1;  // no affine derivative
-                           break;
-                       case PlaceType::VECTOR:
-                       case PlaceType::POINT:
-                           // see note in compute_value for why this if-statement is unnecessary but harmless
-                           if(n_pos_dim >= 3) { 
-                               auto x  = load_vec<3>(pos.shifted(j), ne);
-                               auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
+                            // torque relative to the residue center
+                            auto tq = cross((type==PlaceType::POINT?x-t:x), dx);
 
-                               // torque relative to the residue center
-                               auto tq = cross((type==PlaceType::POINT?x-t:x), dx);
-
-                               // only points, not vectors, contribute to the CoM derivative
-                               if(type==PlaceType::POINT) { z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2]; }
-                               z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
-                               j += 3;
-                           }
-                           break;
-                   }
-               }
-               store_vec(a_accum, params[ne].affine_residue.slot, z);
-           }
-        }    
+                            // only points, not vectors, contribute to the CoM derivative
+                            if(type==PlaceType::POINT) { z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2]; }
+                            z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
+                            j += 3;
+                        }
+                        break;
+                }
+            }
+            store_vec(a_accum, params[ne].affine_residue.slot, z);
+        }
+          
     }
 
    virtual double test_value_deriv_agreement() {

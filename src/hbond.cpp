@@ -81,30 +81,6 @@ void infer_x_body(
 
 }
 
-void infer_HN_OC_pos_and_dir(
-        const SysArray   HN_OC,
-        const CoordArray pos,
-        const VirtualParams* params,
-        int n_term, int n_system)
-{
-    for(int ns=0; ns<n_system; ++ns) {
-        for(int nt=0; nt<n_term; ++nt) {
-            MutableCoord<6> hbond_pos(HN_OC, ns, nt);
-            Coord<3,6>      prev_c(pos, ns, params[nt].atom[0]);
-            Coord<3,6>      curr_c(pos, ns, params[nt].atom[1]);
-            Coord<3,6>      next_c(pos, ns, params[nt].atom[2]);
-
-            infer_x_body(hbond_pos, prev_c,curr_c,next_c, params[nt].bond_length);
-
-            hbond_pos.flush();
-            prev_c.flush();
-            curr_c.flush();
-            next_c.flush();
-        }
-    }
-}
-
-
 struct Infer_H_O : public CoordNode
 {
     CoordNode& pos;
@@ -113,7 +89,7 @@ struct Infer_H_O : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     Infer_H_O(hid_t grp, CoordNode& pos_):
-        CoordNode(pos_.n_system, 
+        CoordNode(1, 
                 get_dset_size(2, grp, "donors/id")[0]+get_dset_size(2, grp, "acceptors/id")[0], 6),
         pos(pos_), n_donor(get_dset_size(2, grp, "donors/id")[0]), n_acceptor(get_dset_size(2, grp, "acceptors/id")[0]),
         n_virtual(n_donor+n_acceptor), params(n_virtual)
@@ -136,12 +112,10 @@ struct Infer_H_O : public CoordNode
         for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
 
         if(logging(LOG_EXTENSIVE)) {
-            default_logger->add_logger<float>("virtual", {n_system, n_elem, 3}, [&](float* buffer) {
-                    for(int ns=0; ns<n_system; ++ns) {
-                        for(int nv=0; nv<n_virtual; ++nv) {
-                            StaticCoord<6> x(coords().value, ns, nv);
-                            for(int d=0; d<3; ++d) buffer[ns*n_elem*3 + nv*3 + d] = x.v[d];
-                        }
+            default_logger->add_logger<float>("virtual", {n_elem, 3}, [&](float* buffer) {
+                    for(int nv=0; nv<n_virtual; ++nv) {
+                        StaticCoord<6> x(coords().value, 0, nv);
+                        for(int d=0; d<3; ++d) buffer[nv*3 + d] = x.v[d];
                     }
                 });
         }
@@ -149,9 +123,22 @@ struct Infer_H_O : public CoordNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("infer_H_O"));
-        infer_HN_OC_pos_and_dir(
-                coords().value, pos.coords(), 
-                params.data(), n_virtual, pos.n_system);
+
+        auto HN_OC = coords().value;
+        auto posc  = pos.coords();
+        for(int nt=0; nt<n_virtual; ++nt) {
+            MutableCoord<6> hbond_pos(HN_OC, 0, nt);
+            Coord<3,6>      prev_c(posc, 0, params[nt].atom[0]);
+            Coord<3,6>      curr_c(posc, 0, params[nt].atom[1]);
+            Coord<3,6>      next_c(posc, 0, params[nt].atom[2]);
+
+            infer_x_body(hbond_pos, prev_c,curr_c,next_c, params[nt].bond_length);
+
+            hbond_pos.flush();
+            prev_c.flush();
+            curr_c.flush();
+            next_c.flush();
+        }
     }
 
     virtual void propagate_deriv() {
@@ -161,7 +148,7 @@ struct Infer_H_O : public CoordNode
                 pos.slot_machine.accum_array(), SysArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_virtual, pos.n_system);}
+                n_virtual, 1);}
 
     virtual double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term));
@@ -387,7 +374,7 @@ struct ProteinHBond : public CoordNode
     int n_donor, n_acceptor, n_virtual;
 
     ProteinHBond(hid_t grp, CoordNode& infer_):
-        CoordNode(infer_.n_system, get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 7),
+        CoordNode(1, get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 7),
         infer(infer_),
         igraph(grp, infer, infer) ,
         n_donor   (igraph.n_elem1),
@@ -395,74 +382,69 @@ struct ProteinHBond : public CoordNode
         n_virtual (n_donor+n_acceptor)
     {
         if(logging(LOG_DETAILED)) {
-            default_logger->add_logger<float>("hbond", {n_system,n_donor+n_acceptor}, [&](float* buffer) {
-                    for(int ns: range(n_system))
-                       for(int nv: range(n_donor+n_acceptor))
-                           buffer[ns*(n_donor+n_acceptor) + nv] = coords().value[ns](6,nv);});
+            default_logger->add_logger<float>("hbond", {n_donor+n_acceptor}, [&](float* buffer) {
+                   for(int nv: range(n_donor+n_acceptor))
+                       buffer[nv] = coords().value[0](6,nv);});
         }
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("protein_hbond"));
 
-        for(int ns=0; ns<n_system; ++ns) {
-            int n_virtual = n_donor + n_acceptor;
-            VecArray vs = coords().value[ns];
-            VecArray ho = infer.coords().value[ns];
+        int n_virtual = n_donor + n_acceptor;
+        VecArray vs = coords().value[0];
+        VecArray ho = infer.coords().value[0];
 
-            for(int nv: range(n_virtual)) {
-                for(int d: range(6))
-                    vs(d,nv) = ho(d,nv);
-                vs(6,nv) = 0.f;
-            }
-
-            // Compute protein hbonding score and its derivative
-            igraph.compute_edges(ns, [&](int ne, float hb_log,
-                        int index1, unsigned type1, unsigned id1,
-                        int index2, unsigned type2, unsigned id2) {
-                    vs(6,index1) += hb_log;
-                    vs(6,index2) += hb_log;});
-
-            for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
+        for(int nv: range(n_virtual)) {
+            for(int d: range(6))
+                vs(d,nv) = ho(d,nv);
+            vs(6,nv) = 0.f;
         }
+
+        // Compute protein hbonding score and its derivative
+        igraph.compute_edges(0, [&](int ne, float hb_log,
+                    int index1, unsigned type1, unsigned id1,
+                    int index2, unsigned type2, unsigned id2) {
+                vs(6,index1) += hb_log;
+                vs(6,index2) += hb_log;});
+
+        for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("protein_hbond_deriv"));
 
-        for(int ns=0; ns<n_system; ++ns) {
-            vector<Vec<7>> sens(n_virtual, make_zero<7>());
-            VecArray accum = slot_machine.accum_array()[ns];
-            VecArray hb    = coords().value[ns];
+        vector<Vec<7>> sens(n_virtual, make_zero<7>());
+        VecArray accum = slot_machine.accum_array()[0];
+        VecArray hb    = coords().value[0];
 
-           for(auto tape_elem: slot_machine.deriv_tape)
-               for(int rec=0; rec<int(tape_elem.output_width); ++rec)
-                   sens[tape_elem.atom] += load_vec<7>(accum, tape_elem.loc+rec);
+        for(auto tape_elem: slot_machine.deriv_tape)
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                sens[tape_elem.atom] += load_vec<7>(accum, tape_elem.loc+rec);
 
-           for(int nv: range(n_virtual))
-               sens[nv][6] *= 1.f-hb(6,nv);
+        for(int nv: range(n_virtual))
+            sens[nv][6] *= 1.f-hb(6,nv);
 
-           // Push protein HBond derivatives
-           for(int ned: range(igraph.n_edge[ns])) {
-               int don_idx = igraph.param1[igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 0]].index;
-               int acc_idx = igraph.param2[igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 1]].index;
-               igraph.use_derivative(ns, ned,  sens[don_idx][6] + sens[acc_idx][6]);
-           }
-
-           // pass through derivatives on all other components
-           VecArray pd1 = igraph.pos_deriv1[ns];
-           for(int nd: range(n_donor)) {
-               // the last component is taken care of by the edge loop
-               update_vec(pd1, nd, extract<0,6>(sens[nd]));
-           }
-           VecArray pd2 = igraph.pos_deriv2[ns];
-           for(int na: range(n_acceptor)) {  // acceptor loop
-               // the last component is taken care of by the edge loop
-               update_vec(pd2, na, extract<0,6>(sens[na+n_donor]));
-           }
-
-           igraph.propagate_derivatives(ns);
+        // Push protein HBond derivatives
+        for(int ned: range(igraph.n_edge[0])) {
+            int don_idx = igraph.param1[igraph.edge_indices[2*ned + 0]].index;
+            int acc_idx = igraph.param2[igraph.edge_indices[2*ned + 1]].index;
+            igraph.use_derivative(0, ned,  sens[don_idx][6] + sens[acc_idx][6]);
         }
+
+        // pass through derivatives on all other components
+        VecArray pd1 = igraph.pos_deriv1[0];
+        for(int nd: range(n_donor)) {
+            // the last component is taken care of by the edge loop
+            update_vec(pd1, nd, extract<0,6>(sens[nd]));
+        }
+        VecArray pd2 = igraph.pos_deriv2[0];
+        for(int na: range(n_acceptor)) {  // acceptor loop
+            // the last component is taken care of by the edge loop
+            update_vec(pd2, na, extract<0,6>(sens[na+n_donor]));
+        }
+
+        igraph.propagate_derivatives(0);
     }
 };
 static RegisterNodeType<ProteinHBond,1> hbond_node("protein_hbond");
@@ -473,42 +455,38 @@ struct HBondCoverage : public CoordNode {
     int n_sc;
 
     HBondCoverage(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
-        CoordNode(infer_.n_system, get_dset_size(1,grp,"index2")[0], 1),
+        CoordNode(1, get_dset_size(1,grp,"index2")[0], 1),
         igraph(grp, infer_, sidechains_),
         n_sc(igraph.n_elem2) {}
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_coverage"));
-        for(int ns=0; ns<n_system; ++ns) {
-            VecArray cov = coords().value[ns];
-            for(int nc: range(n_sc)) cov(0,nc) = 0.f;
+        VecArray cov = coords().value[0];
+        for(int nc: range(n_sc)) cov(0,nc) = 0.f;
 
-            // Compute coverage and its derivative
-            igraph.compute_edges(ns, [&](int ne, float en,
-                        int index1, unsigned type1, unsigned id1,
-                        int index2, unsigned type2, unsigned id2) {
-                    cov(0,index2) += en;});
-        }
+        // Compute coverage and its derivative
+        igraph.compute_edges(0, [&](int ne, float en,
+                    int index1, unsigned type1, unsigned id1,
+                    int index2, unsigned type2, unsigned id2) {
+                cov(0,index2) += en;});
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("hbond_coverage_deriv"));
-        for(int ns=0; ns<n_system; ++ns) {
-            vector<float> sens(n_sc, 0.f);
-            VecArray accum = slot_machine.accum_array()[ns];
+        vector<float> sens(n_sc, 0.f);
+        VecArray accum = slot_machine.accum_array()[0];
 
-           for(auto tape_elem: slot_machine.deriv_tape)
-               for(int rec=0; rec<int(tape_elem.output_width); ++rec)
-                   sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
+        for(auto tape_elem: slot_machine.deriv_tape)
+            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
+                sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
 
-           // Push coverage derivatives
-           for(int ned: range(igraph.n_edge[ns])) {
-               int sc_num = igraph.edge_indices[ns*2*igraph.max_n_edge + 2*ned + 1];
-               int sc_idx = igraph.param2[sc_num].index;
-               igraph.use_derivative(ns, ned, sens[sc_idx]);
-           }
-           igraph.propagate_derivatives(ns);
+        // Push coverage derivatives
+        for(int ned: range(igraph.n_edge[0])) {
+            int sc_num = igraph.edge_indices[2*ned + 1];
+            int sc_idx = igraph.param2[sc_num].index;
+            igraph.use_derivative(0, ned, sens[sc_idx]);
         }
+        igraph.propagate_derivatives(0);
     }
 
 #ifdef PARAM_DERIV
@@ -528,7 +506,7 @@ struct HBondEnergy : public HBondCounter
     vector<slot_t> slots;
 
     HBondEnergy(hid_t grp, CoordNode& protein_hbond_):
-        HBondCounter(protein_hbond_.n_system),
+        HBondCounter(1),
         protein_hbond(protein_hbond_),
         n_virtual(protein_hbond.n_elem),
         E_protein(read_attribute<float>(grp, ".", "protein_hbond_energy"))
@@ -543,26 +521,18 @@ struct HBondEnergy : public HBondCounter
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("hbond_energy"));
-        for(int ns=0; ns<n_system; ++ns) {
-            float pot = 0.f;
-            VecArray pp   = protein_hbond .coords().value[ns];
-            VecArray d_pp = protein_hbond .coords().deriv[ns];
+        float pot = 0.f;
+        VecArray pp   = protein_hbond .coords().value[0];
+        VecArray d_pp = protein_hbond .coords().deriv[0];
 
-            // Compute probabilities of P and S states
-            for(int nv=0; nv<n_virtual; ++nv) {
-                pot += pp(6,nv)*E_protein;
-                auto d = make_zero<7>(); d[6] = E_protein;
-                store_vec(d_pp, slots[nv], d);
-            }
-            potential[ns] = pot;
-            if(!ns) n_hbond = pot/E_protein; // only report for system 0
+        // Compute probabilities of P and S states
+        for(int nv=0; nv<n_virtual; ++nv) {
+            pot += pp(6,nv)*E_protein;
+            auto d = make_zero<7>(); d[6] = E_protein;
+            store_vec(d_pp, slots[nv], d);
         }
+        potential[0] = pot;
+        n_hbond = pot/E_protein;
     }
-
-//     virtual double test_value_deriv_agreement() {
-//         vector<vector<CoordPair>> coord_pairs_pp (1);
-//         for(int nv: range(n_virtual)) coord_pairs_pp .back().push_back(CoordPair(nv, slots[nv]));
-//         return compute_relative_deviation_for_node<7>(*this, protein_hbond, coord_pairs_pp);
-//     }
 };
 static RegisterNodeType<HBondEnergy,1> hbond_energy_node("hbond_energy");

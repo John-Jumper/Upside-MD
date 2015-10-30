@@ -12,41 +12,6 @@ struct RamaMapParams {
     int       rama_map_id;
 };
 
-namespace {
-
-
-void rama_map_pot(
-        float* restrict potential,
-        SysArray s_residue_potential,
-        const CoordArray rama,
-        const RamaMapParams* restrict params,
-        const LayeredPeriodicSpline2D<1>& rama_map_data,
-        int n_residue, int n_system) 
-{
-    // add a litte paranoia to make sure there are no rounding problems
-    const float scale = rama_map_data.nx * (0.5f/M_PI_F - 1e-7f);
-    const float shift = M_PI_F;
-
-    for(int ns=0; ns<n_system; ++ns) {
-        VecArray residue_potential = s_residue_potential[ns];
-        if(potential) potential[ns] = 0.f;
-
-        for(int nr=0; nr<n_residue; ++nr) {
-            Coord<2> r(rama, ns, params[nr].residue);
-
-            float map_value[3];
-            rama_map_data.evaluate_value_and_deriv(map_value, params[nr].rama_map_id, 
-                    (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
-
-            if(potential) {potential[ns] += map_value[2]; residue_potential(0,nr) = map_value[2];}
-            r.d[0][0] = map_value[0] * scale;
-            r.d[0][1] = map_value[1] * scale;
-            r.flush();
-        }
-    }
-}
-}
-
 
 struct RamaMapPot : public PotentialNode
 {
@@ -54,10 +19,10 @@ struct RamaMapPot : public PotentialNode
     CoordNode& rama;
     vector<RamaMapParams> params;
     LayeredPeriodicSpline2D<1> rama_map_data;
-    SysArrayStorage residue_potential;
+    vector<float> residue_potential;
 
     RamaMapPot(hid_t grp, CoordNode& rama_):
-        PotentialNode(rama_.n_system),
+        PotentialNode(1),
         n_residue(get_dset_size(1, grp, "residue_id")[0]), 
         rama(rama_), 
         params(n_residue),
@@ -65,7 +30,7 @@ struct RamaMapPot : public PotentialNode
                 get_dset_size(3, grp, "rama_pot")[0], 
                 get_dset_size(3, grp, "rama_pot")[1], 
                 get_dset_size(3, grp, "rama_pot")[2]),
-        residue_potential(n_system, 1, n_residue)
+        residue_potential(n_residue)
     {
         auto& r = rama_map_data;
         check_size(grp, "residue_id",     n_residue);
@@ -84,17 +49,35 @@ struct RamaMapPot : public PotentialNode
         for(size_t i=0; i<params.size(); ++i) rama.slot_machine.add_request(1, params[i].residue);
 
         if(logging(LOG_DETAILED)) 
-            default_logger->add_logger<float>("rama_map_potential", {n_system,n_residue}, [&](float* buffer) {
-                for(int ns: range(n_system)) 
-                    for(int nr: range(n_residue)) 
-                        buffer[ns*n_residue+nr] = residue_potential[ns](0,nr);
-                        });
+            default_logger->add_logger<float>("rama_map_potential", {n_residue}, [&](float* buffer) {
+                for(int nr: range(n_residue)) 
+                    buffer[nr] = residue_potential[nr];
+                    });
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_map_pot"));
-        rama_map_pot((mode==PotentialAndDerivMode ? potential.data() : nullptr), residue_potential.array(),
-                rama.coords(), params.data(), rama_map_data, n_residue, n_system);
+
+        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        auto ramac = rama.coords();
+        if(pot) *pot = 0.f;
+
+        // add a litte paranoia to make sure there are no rounding problems
+        const float scale = rama_map_data.nx * (0.5f/M_PI_F - 1e-7f);
+        const float shift = M_PI_F;
+
+        for(int nr=0; nr<n_residue; ++nr) {
+            Coord<2> r(ramac, 0, params[nr].residue);
+
+            float map_value[3];
+            rama_map_data.evaluate_value_and_deriv(map_value, params[nr].rama_map_id, 
+                    (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
+
+            if(pot) {*pot += map_value[2]; residue_potential[nr] = map_value[2];}
+            r.d[0][0] = map_value[0] * scale;
+            r.d[0][1] = map_value[1] * scale;
+            r.flush();
+        }
     }
 
     virtual double test_value_deriv_agreement() {

@@ -52,7 +52,7 @@ void Pos::propagate_deriv() {
     Timer timer(string("pos_deriv"));
     deriv_accumulation(deriv_array(),
             slot_machine.accum_array(), slot_machine.deriv_tape.data(), 
-            slot_machine.deriv_tape.size(), n_atom, n_system);
+            slot_machine.deriv_tape.size(), n_atom);
 }
 
 void DerivEngine::add_node(
@@ -155,7 +155,7 @@ void DerivEngine::integration_cycle(SysArray mom, float dt, float max_force, Int
                 pos->coords().value,
                 pos->deriv_array(),
                 dt*mom_update[stage], dt*pos_update[stage], max_force, 
-                pos->n_atom, pos->n_system);
+                pos->n_atom);
     }
 }
 

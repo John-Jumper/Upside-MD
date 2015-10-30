@@ -68,41 +68,39 @@ void backbone_pairs(
         const AffineParams* restrict params,
         float energy_scale,
         float dist_cutoff,
-        int n_res, int n_system)
+        int n_res)
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        float dist_cutoff2 = dist_cutoff*dist_cutoff;
-        vector<AffineCoord<>> coords; coords.reserve(n_res);
-        for(int nr=0; nr<n_res; ++nr) 
-            coords.emplace_back(rigid_body, ns, params[nr].residue);
+    if(potential) potential[0] = 0.f;
+    float dist_cutoff2 = dist_cutoff*dist_cutoff;
+    vector<AffineCoord<>> coords; coords.reserve(n_res);
+    for(int nr=0; nr<n_res; ++nr) 
+        coords.emplace_back(rigid_body, 0, params[nr].residue);
 
-        vector<int>    ref_pos_atoms (n_res);
-        vector<float3> ref_pos_coords(n_res*4);
+    vector<int>    ref_pos_atoms (n_res);
+    vector<float3> ref_pos_coords(n_res*4);
 
-        for(int nr=0; nr<n_res; ++nr) {
-            ref_pos_atoms[nr] = ref_pos[nr].n_atom;
-            for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(ref_pos[nr].pos[na]);
-        }
+    for(int nr=0; nr<n_res; ++nr) {
+        ref_pos_atoms[nr] = ref_pos[nr].n_atom;
+        for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(ref_pos[nr].pos[na]);
+    }
 
-        for(int nr1=0; nr1<n_res; ++nr1) {
-            for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+2
-                if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
-                    backbone_pairs_body(
-                            (potential ? potential+ns : nullptr),
-                            coords[nr1],        coords[nr2], 
-                            ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
-                            ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
-                }
+    for(int nr1=0; nr1<n_res; ++nr1) {
+        for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+2
+            if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
+                backbone_pairs_body(
+                        (potential ? potential : nullptr),
+                        coords[nr1],        coords[nr2], 
+                        ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
+                        ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
             }
         }
-
-        for(int nr=0; nr<n_res; ++nr) {
-            for(int d=0; d<6; ++d) coords[nr].d[0][d] *= energy_scale;
-            coords[nr].flush();
-        }
-        if(potential) potential[ns] *= energy_scale;
     }
+
+    for(int nr=0; nr<n_res; ++nr) {
+        for(int d=0; d<6; ++d) coords[nr].d[0][d] *= energy_scale;
+        coords[nr].flush();
+    }
+    if(potential) potential[0] *= energy_scale;
 }
 
 
@@ -116,7 +114,7 @@ struct BackbonePairs : public PotentialNode
     float dist_cutoff;
 
     BackbonePairs(hid_t grp, CoordNode& alignment_):
-        PotentialNode(alignment_.n_system),
+        PotentialNode(1),
         n_residue(get_dset_size(1, grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
@@ -142,8 +140,7 @@ struct BackbonePairs : public PotentialNode
         backbone_pairs(
                 (mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 alignment.coords(), 
-                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue, 
-                alignment.n_system);
+                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue);
     }
 
     virtual double test_value_deriv_agreement() {
