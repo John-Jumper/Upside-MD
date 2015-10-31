@@ -114,8 +114,7 @@ void DerivEngine::compute(ComputeMode mode) {
                     n.germ_exec_level = lvl;
                     if(mode == PotentialAndDerivMode && n.computation->potential_term) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
-                        for(int ns=0; ns<pos->n_system; ++ns) 
-                            potential[ns] += pot_node->potential[ns];
+                        potential[0] += pot_node->potential[0];
                     }
                 }
             }
@@ -184,9 +183,9 @@ struct ComputeMyDeriv {
 };
 
 
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t potential_group, bool quiet)
+DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool quiet)
 {
-    DerivEngine engine(n_atom, n_system);
+    DerivEngine engine(n_atom);
     auto& m = node_creation_map();
 
     map<string, pair<bool,vector<string>>> dep_graph;  // bool indicates node is active

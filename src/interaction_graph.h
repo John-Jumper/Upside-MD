@@ -40,7 +40,7 @@ struct WithinInteractionGraph {
     // It is easiest if I just get my own subgroup of the .h5 file
     WithinInteractionGraph(hid_t grp, CoordNode& pos_node_):
         pos_node(pos_node_),
-        n_system(pos_node.n_system), 
+        n_system(1), 
         n_type(h5::get_dset_size(3,grp,"interaction_param")[0]),
         n_elem(h5::get_dset_size(1,grp,"index")[0]),
         max_n_edge((n_elem*(n_elem-1))/2),
@@ -268,7 +268,7 @@ struct BetweenInteractionGraph {
     // It is easiest if I just get my own subgroup of the .h5 file
     BetweenInteractionGraph(hid_t grp, CoordNode& pos_node1_, CoordNode& pos_node2_):
         pos_node1(pos_node1_), pos_node2(pos_node2_),
-        n_system(pos_node1.n_system), 
+        n_system(1), 
         n_type1(h5::get_dset_size(3,grp,"interaction_param")[0]), n_type2(h5::get_dset_size(3,grp,"interaction_param")[1]),
         n_elem1(h5::get_dset_size(1,grp,"index1")[0]),            n_elem2(h5::get_dset_size(1,grp,"index2")[0]),
         max_n_edge(n_elem1*n_elem2),

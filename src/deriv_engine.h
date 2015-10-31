@@ -21,20 +21,19 @@ struct SlotMachine
 {
     const int width;
     const int n_elem;
-    const int n_system;
 
     int n_slot;
     std::vector<DerivRecord> deriv_tape;
     std::vector<float>       accum;
 
-    SlotMachine(int width_, int n_elem_, int n_system_): 
-        width(width_), n_elem(n_elem_), n_system(n_system_), n_slot(0) {}
+    SlotMachine(int width_, int n_elem_): 
+        width(width_), n_elem(n_elem_), n_slot(0) {}
 
     void add_request(int output_width, CoordPair &pair) { 
         DerivRecord prev_record = deriv_tape.size() ? deriv_tape.back() : DerivRecord(-1,0,0);
         deriv_tape.emplace_back(pair.index, prev_record.loc+prev_record.output_width, output_width);
         pair.slot = deriv_tape.back().loc;
-        for(int i=0; i<output_width*width*n_system; ++i) accum.push_back(0.f);
+        for(int i=0; i<output_width*width; ++i) accum.push_back(0.f);
         n_slot += output_width;
     }
 
@@ -84,9 +83,8 @@ enum ComputeMode { DerivMode = 0, PotentialAndDerivMode = 1 };
 struct DerivComputation 
 {
     const bool potential_term;
-    int n_system;
-    DerivComputation(bool potential_term_, int n_system_):
-        potential_term(potential_term_), n_system(n_system_) {}
+    DerivComputation(bool potential_term_):
+        potential_term(potential_term_) {}
     virtual ~DerivComputation() {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
@@ -105,10 +103,10 @@ struct CoordNode : public DerivComputation
     int elem_width;
     std::vector<float> output;
     SlotMachine slot_machine;
-    CoordNode(int n_system_, int n_elem_, int elem_width_):
-        DerivComputation(false, n_system_), n_elem(n_elem_), elem_width(elem_width_), 
-        output(n_system*n_elem*elem_width), 
-        slot_machine(elem_width, n_elem, n_system) {}
+    CoordNode(int n_elem_, int elem_width_):
+        DerivComputation(false), n_elem(n_elem_), elem_width(elem_width_), 
+        output(n_elem*elem_width), 
+        slot_machine(elem_width, n_elem) {}
     virtual CoordArray coords() {
         return CoordArray(SysArray(output.data(), n_elem*elem_width, n_elem), slot_machine.accum_array());
     }
@@ -118,15 +116,15 @@ struct CoordNode : public DerivComputation
 struct PotentialNode : public DerivComputation
 {
     std::vector<float> potential;
-    PotentialNode(int n_system_):
-        DerivComputation(true, n_system_), potential(n_system_) {}
+    PotentialNode():
+        DerivComputation(true), potential(1) {}
     virtual void propagate_deriv() {};
 };
 
 
 struct HBondCounter : public PotentialNode {
     float n_hbond;
-    HBondCounter(int n_system_): PotentialNode(n_system_), n_hbond(-1.f) {};
+    HBondCounter(): PotentialNode(), n_hbond(-1.f) {};
 };
 
 
@@ -135,9 +133,9 @@ struct Pos : public CoordNode
     int n_atom;
     std::vector<float> deriv;
 
-    Pos(int n_atom_, int n_system_):
-        CoordNode(n_system_, n_atom_, 3), 
-        n_atom(n_atom_), deriv(3*n_atom*n_system, 0.f)
+    Pos(int n_atom_):
+        CoordNode(n_atom_, 3), 
+        n_atom(n_atom_), deriv(3*n_atom, 0.f)
     {}
 
     virtual void compute_value(ComputeMode mode) {};
@@ -183,10 +181,10 @@ struct DerivEngine
     std::vector<float> potential;
 
     DerivEngine() {}
-    DerivEngine(int n_atom, int n_system): 
-        potential(n_system)
+    DerivEngine(int n_atom): 
+        potential(1)
     {
-        nodes.emplace_back("pos", new Pos(n_atom, n_system));
+        nodes.emplace_back("pos", new Pos(n_atom));
         pos = dynamic_cast<Pos*>(nodes[0].computation.get());
     }
 
@@ -211,7 +209,7 @@ struct DerivEngine
 };
 
 double get_n_hbond(DerivEngine &engine);
-DerivEngine initialize_engine_from_hdf5(int n_atom, int n_system, hid_t potential_group, bool quiet=false);
+DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool quiet=false);
 
 // note that there are no null points in the vector of CoordNode*
 typedef std::vector<CoordNode*> ArgList;
@@ -268,38 +266,35 @@ void reverse_autodiff(
         const DerivRecord* tape,
         const AutoDiffParams* p,
         int n_tape,
-        int n_atom, 
-        int n_system)
+        int n_atom)
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        std::vector<TempCoord<my_width>> sens(n_atom);
-        for(int nt=0; nt<n_tape; ++nt) {
-            auto tape_elem = tape[nt];
-            for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-                auto val = StaticCoord<my_width>(accum, ns, tape_elem.loc + rec);
-                for(int d=0; d<my_width; ++d)
-                    sens[tape_elem.atom].v[d] += val.v[d];
+    std::vector<TempCoord<my_width>> sens(n_atom);
+    for(int nt=0; nt<n_tape; ++nt) {
+        auto tape_elem = tape[nt];
+        for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
+            auto val = StaticCoord<my_width>(accum, 0, tape_elem.loc + rec);
+            for(int d=0; d<my_width; ++d)
+                sens[tape_elem.atom].v[d] += val.v[d];
+        }
+    }
+
+    for(int na=0; na<n_atom; ++na) {
+        if(width1) {
+            for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
+                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                    MutableCoord<width1> c(deriv1, 0, p[na].slots1[nsl]+sens_dim);
+                    for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
+                    c.flush();
+                }
             }
         }
 
-        for(int na=0; na<n_atom; ++na) {
-            if(width1) {
-                for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
-                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                        MutableCoord<width1> c(deriv1, ns, p[na].slots1[nsl]+sens_dim);
-                        for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
-                        c.flush();
-                    }
-                }
-            }
-
-            if(width2) {
-                for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
-                    for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                        MutableCoord<width2> c(deriv2, ns, p[na].slots2[nsl]+sens_dim);
-                        for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
-                        c.flush();
-                    }
+        if(width2) {
+            for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
+                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
+                    MutableCoord<width2> c(deriv2, 0, p[na].slots2[nsl]+sens_dim);
+                    for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
+                    c.flush();
                 }
             }
         }

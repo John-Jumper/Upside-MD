@@ -29,7 +29,7 @@ struct RigidPlacementNode: public CoordNode {
     SysArrayStorage rama_deriv;
 
     RigidPlacementNode(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
-        CoordNode(1, get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
+        CoordNode(get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
         rama(rama_), alignment(alignment_),
         params(n_elem), 
         spline(

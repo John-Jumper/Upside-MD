@@ -319,7 +319,7 @@ struct RotamerSidechain: public PotentialNode {
     bool energy_fresh_relative_to_derivative;
 
     RotamerSidechain(hid_t grp, CoordNode &pos_node_, vector<CoordNode*> prob_nodes_):
-        PotentialNode(pos_node_.n_system),
+        PotentialNode(),
         prob_nodes(prob_nodes_),
         n_prob_nodes(prob_nodes.size()),
         igraph(open_group(grp,"pair_interaction").get(), pos_node_),
@@ -339,8 +339,6 @@ struct RotamerSidechain: public PotentialNode {
 
         energy_fresh_relative_to_derivative(false)
     {
-        if(n_system > 1) throw string("multiple systems broken for the node_holders and edge_holders");
-
         for(int i: range(UPPER_ROT)) node_holders_matrix[i] = nullptr;
         node_holders_matrix[1] = &nodes1;
         node_holders_matrix[3] = &nodes3;

@@ -22,7 +22,7 @@ struct RamaMapPot : public PotentialNode
     vector<float> residue_potential;
 
     RamaMapPot(hid_t grp, CoordNode& rama_):
-        PotentialNode(1),
+        PotentialNode(),
         n_residue(get_dset_size(1, grp, "residue_id")[0]), 
         rama(rama_), 
         params(n_residue),
@@ -66,6 +66,7 @@ struct RamaMapPot : public PotentialNode
         const float scale = rama_map_data.nx * (0.5f/M_PI_F - 1e-7f);
         const float shift = M_PI_F;
 
+        if(pot) *pot = 0.f;
         for(int nr=0; nr<n_residue; ++nr) {
             Coord<2> r(ramac, 0, params[nr].residue);
 

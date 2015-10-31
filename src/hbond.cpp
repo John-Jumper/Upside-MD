@@ -89,7 +89,7 @@ struct Infer_H_O : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     Infer_H_O(hid_t grp, CoordNode& pos_):
-        CoordNode(1, 
+        CoordNode(
                 get_dset_size(2, grp, "donors/id")[0]+get_dset_size(2, grp, "acceptors/id")[0], 6),
         pos(pos_), n_donor(get_dset_size(2, grp, "donors/id")[0]), n_acceptor(get_dset_size(2, grp, "acceptors/id")[0]),
         n_virtual(n_donor+n_acceptor), params(n_virtual)
@@ -148,7 +148,7 @@ struct Infer_H_O : public CoordNode
                 pos.slot_machine.accum_array(), SysArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_virtual, 1);}
+                n_virtual);}
 
     virtual double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term));
@@ -374,7 +374,7 @@ struct ProteinHBond : public CoordNode
     int n_donor, n_acceptor, n_virtual;
 
     ProteinHBond(hid_t grp, CoordNode& infer_):
-        CoordNode(1, get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 7),
+        CoordNode(get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 7),
         infer(infer_),
         igraph(grp, infer, infer) ,
         n_donor   (igraph.n_elem1),
@@ -455,7 +455,7 @@ struct HBondCoverage : public CoordNode {
     int n_sc;
 
     HBondCoverage(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
-        CoordNode(1, get_dset_size(1,grp,"index2")[0], 1),
+        CoordNode(get_dset_size(1,grp,"index2")[0], 1),
         igraph(grp, infer_, sidechains_),
         n_sc(igraph.n_elem2) {}
 
@@ -506,7 +506,7 @@ struct HBondEnergy : public HBondCounter
     vector<slot_t> slots;
 
     HBondEnergy(hid_t grp, CoordNode& protein_hbond_):
-        HBondCounter(1),
+        HBondCounter(),
         protein_hbond(protein_hbond_),
         n_virtual(protein_hbond.n_elem),
         E_protein(read_attribute<float>(grp, ".", "protein_hbond_energy"))

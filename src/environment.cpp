@@ -97,7 +97,7 @@ struct EnvironmentCoverage : public CoordNode {
     int n_restype;
 
     EnvironmentCoverage(hid_t grp, CoordNode& rotamer_sidechains_, CoordNode& weighted_sidechains_):
-        CoordNode(1, 
+        CoordNode(
                 get_dset_size(1,grp,"index1")[0], 
                 get_dset_size(3,grp,"interaction_param")[1]),
         igraph(grp, rotamer_sidechains_, weighted_sidechains_),
@@ -163,7 +163,7 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
     vector<slot_t> slots;
 
     SimpleEnvironmentEnergy(hid_t grp, CoordNode& env_vector_):
-        PotentialNode(1),
+        PotentialNode(),
         env_vector(env_vector_),
         n_elem(env_vector.n_elem),
         n_restype(env_vector.elem_width),
@@ -232,7 +232,7 @@ struct EnvironmentEnergy : public CoordNode {
     vector<slot_t> slots;
 
     EnvironmentEnergy(hid_t grp, CoordNode &env_vector_):
-        CoordNode (1, env_vector_.n_elem, 1),
+        CoordNode(env_vector_.n_elem, 1),
         env_vector(env_vector_),
 
         n_hidden(get_dset_size(1, grp, "linear_shift0")[0]),

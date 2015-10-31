@@ -33,7 +33,7 @@ struct System {
 
     void set_temperature(float new_temp) {
         temperature = new_temp;
-        thermostat.set_temp(vector<float>(1,temperature));
+        thermostat.set_temp(temperature);
     }
 };
 
@@ -201,21 +201,20 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         ensure_not_exist(group.get(), "expected_deriv");
         auto tbl = create_earray(group.get(), "expected_deriv", H5T_NATIVE_FLOAT, 
                 {pos.n_atom, 3, -1}, {pos.n_atom, 3, 1});
-        vector<float> deriv_value(pos.n_system*pos.n_atom*3);
-        for(int ns=0; ns<pos.n_system; ++ns) 
-            for(int na=0; na<pos.n_atom; ++na)
-                for(int d=0; d<3; ++d)
-                    deriv_value[ns*pos.n_atom*3 + na*3 + d] = pos.deriv_array()[ns](d,na);
+        vector<float> deriv_value(pos.n_atom*3);
+        for(int na=0; na<pos.n_atom; ++na)
+            for(int d=0; d<3; ++d)
+                deriv_value[na*3 + d] = pos.deriv_array()[0](d,na);
         append_to_dset(tbl.get(), deriv_value, 2);
     }
 
     if(h5_exists(config, "/testing/expected_deriv")) {
-        check_size(config, "/testing/expected_deriv", pos.n_atom, 3, pos.n_system);
+        check_size(config, "/testing/expected_deriv", pos.n_atom, 3, 1);
         double rms_error = 0.;
         traverse_dset<3,float>(config, "/testing/expected_deriv", [&](size_t na, size_t d, size_t ns, float x) {
                 double dev = x - pos.deriv_array()[ns](d,na);
                 rms_error += dev*dev;});
-        rms_error = sqrtf(rms_error / pos.n_atom / pos.n_system);
+        rms_error = sqrtf(rms_error / pos.n_atom);
         printf("RMS deriv difference: %.6f\n", rms_error);
         // if(rms_error > deriv_tol) throw string("inacceptable deriv deviation");
     }
@@ -227,40 +226,38 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     int n_atom = engine.pos->n_elem;
     SysArray pos_array = engine.pos->coords().value;
 
-    for(int ns=0; ns<engine.pos->n_system; ++ns) {
-        vector<float> input(n_atom*3);
+    vector<float> input(n_atom*3);
+    for(int na=0; na<n_atom; ++na)
+        for(int d=0; d<3; ++d)
+            input[na*3+d] = pos_array[0](d,na);
+    vector<float> output(1);
+
+    auto do_compute = [&]() {
         for(int na=0; na<n_atom; ++na)
             for(int d=0; d<3; ++d)
-                input[na*3+d] = pos_array[ns](d,na);
-        vector<float> output(1);
+                pos_array[0](d,na) = input[na*3+d];
+        engine.compute(PotentialAndDerivMode);
+        output[0] = engine.potential[0];
+    };
 
-        auto do_compute = [&]() {
-            for(int na=0; na<n_atom; ++na)
-                for(int d=0; d<3; ++d)
-                    pos_array[ns](d,na) = input[na*3+d];
-            engine.compute(PotentialAndDerivMode);
-            output[0] = engine.potential[ns];
-        };
-
-        for(auto &n: engine.nodes) {
-            if(n.computation->potential_term) {
-                auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
-                printf("%s:", n.name.c_str());
-                for(auto e: v) printf(" % 4.3f", e);
-                printf("\n");
-            }
+    for(auto &n: engine.nodes) {
+        if(n.computation->potential_term) {
+            auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
+            printf("%s:", n.name.c_str());
+            for(auto e: v) printf(" % 4.3f", e);
+            printf("\n");
         }
-        printf("\n\n");
-
-        auto central_diff_jac = central_difference_deriviative(do_compute, input, output, 1e-3);
-        vector<float> deriv_array;
-        for(int na=0; na<n_atom; ++na)
-            for(int d=0; d<3; ++d)
-                deriv_array.push_back(engine.pos->deriv_array()[ns](d,na));
-
-        relative_error.push_back(
-                relative_rms_deviation(central_diff_jac, deriv_array));
     }
+    printf("\n\n");
+
+    auto central_diff_jac = central_difference_deriviative(do_compute, input, output, 1e-3);
+    vector<float> deriv_array;
+    for(int na=0; na<n_atom; ++na)
+        for(int d=0; d<3; ++d)
+            deriv_array.push_back(engine.pos->deriv_array()[0](d,na));
+
+    relative_error.push_back(
+            relative_rms_deviation(central_diff_jac, deriv_array));
     return relative_error;
 }
 
@@ -426,7 +423,7 @@ try {
             if(pos_shape[2]!=1) throw string("must have n_system 1 from config");
 
             auto potential_group = open_group(sys->config.get(), "/input/potential");
-            sys->engine = initialize_engine_from_hdf5(sys->n_atom, 1, potential_group.get());
+            sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get());
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
                     sys->engine.pos->coords().value[ns](d,na) = x;});
@@ -451,7 +448,7 @@ try {
             sys->thermostat = OrnsteinUhlenbeckThermostat(
                     sys->random_seed,
                     thermostat_timescale_arg.getValue(),
-                    vector<float>(1,1.),
+                    1.,
                     1e8);
             sys->set_temperature(sys->initial_temperature);
 

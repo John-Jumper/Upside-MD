@@ -55,24 +55,22 @@ struct SidechainRadialPairs : public PotentialNode
     WithinInteractionGraph<Helper> igraph;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
-        PotentialNode(bb_point_.n_system),
+        PotentialNode(),
         igraph(grp, bb_point_)
     {};
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
 
-        for(int ns=0; ns<n_system; ++ns) {
-            potential[ns] = 0.f;
-            igraph.compute_edges(ns, [&](
-                        int edge_index, float value, 
-                        int index1, unsigned rt1, unsigned id1,
-                        int index2, unsigned rt2, unsigned id2) {
-                    potential[ns] += value;
-                    igraph.use_derivative(ns, edge_index, 1.f);
+        potential[0] = 0.f;
+        igraph.compute_edges(0, [&](
+                    int edge_index, float value, 
+                    int index1, unsigned rt1, unsigned id1,
+                    int index2, unsigned rt2, unsigned id2) {
+                potential[0] += value;
+                igraph.use_derivative(0, edge_index, 1.f);
                 });
-            igraph.propagate_derivatives(ns);
-        }
+        igraph.propagate_derivatives(0);
     }
 
     virtual double test_value_deriv_agreement() { return -1.f; }
@@ -83,36 +81,34 @@ void contact_energy(
         float* potential,
         const CoordArray   rigid_body,
         const ContactPair* contact_param,
-        int n_contacts, float cutoff, int n_system)
+        int n_contacts, float cutoff)
 {
-    for(int ns=0; ns<n_system; ++ns) {
-        if(potential) potential[ns] = 0.f;
-        for(int nc=0; nc<n_contacts; ++nc) {
-            ContactPair p = contact_param[nc];
-            AffineCoord<> r1(rigid_body, ns, p.loc[0]);
-            AffineCoord<> r2(rigid_body, ns, p.loc[1]);
+    if(potential) potential[0] = 0.f;
+    for(int nc=0; nc<n_contacts; ++nc) {
+        ContactPair p = contact_param[nc];
+        AffineCoord<> r1(rigid_body, 0, p.loc[0]);
+        AffineCoord<> r2(rigid_body, 0, p.loc[1]);
 
-            float3 x1 = r1.apply(p.sc_ref_pos[0]);
-            float3 x2 = r2.apply(p.sc_ref_pos[1]);
+        float3 x1 = r1.apply(p.sc_ref_pos[0]);
+        float3 x2 = r2.apply(p.sc_ref_pos[1]);
 
-            float3 disp = x1-x2;
-            float  dist = mag(disp);
-            float  reduced_coord = p.scale * (dist - p.r0);
+        float3 disp = x1-x2;
+        float  dist = mag(disp);
+        float  reduced_coord = p.scale * (dist - p.r0);
 
-            if(reduced_coord<cutoff) {
-                float  z = expf(reduced_coord);
-                float  w = 1.f / (1.f + z);
-                if(potential) potential[ns] += p.energy * w;
-                float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
-                float3 deriv = deriv_over_r * disp;
+        if(reduced_coord<cutoff) {
+            float  z = expf(reduced_coord);
+            float  w = 1.f / (1.f + z);
+            if(potential) potential[0] += p.energy * w;
+            float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
+            float3 deriv = deriv_over_r * disp;
 
-                r1.add_deriv_at_location(x1,  deriv);
-                r2.add_deriv_at_location(x2, -deriv);
-            }
-
-            r1.flush();
-            r2.flush();
+            r1.add_deriv_at_location(x1,  deriv);
+            r2.add_deriv_at_location(x2, -deriv);
         }
+
+        r1.flush();
+        r2.flush();
     }
 }
 
@@ -124,7 +120,7 @@ struct ContactEnergy : public PotentialNode
     float cutoff;
 
     ContactEnergy(hid_t grp, CoordNode& alignment_):
-        PotentialNode(alignment_.n_system),
+        PotentialNode(),
         n_contact(get_dset_size(2, grp, "id")[0]),
         alignment(alignment_), 
         params(n_contact),
@@ -155,7 +151,7 @@ struct ContactEnergy : public PotentialNode
         Timer timer(string("contact_energy"));
         contact_energy((mode==PotentialAndDerivMode ? potential.data() : nullptr),
                 alignment.coords(), params.data(), 
-                n_contact, cutoff, alignment.n_system);
+                n_contact, cutoff);
     }
 
     virtual double test_value_deriv_agreement() {return -1.;}

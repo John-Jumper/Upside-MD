@@ -45,7 +45,7 @@ struct PosSpring : public PotentialNode
     vector<PosSpringParams> params;
 
     PosSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         n_elem(get_dset_size(1, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 1;  // number of atoms that each term depends on 
@@ -207,7 +207,7 @@ struct RamaCoord : public CoordNode
     vector<AutoDiffParams> autodiff_params;
 
     RamaCoord(hid_t grp, CoordNode& pos_):
-        CoordNode(1, get_dset_size(2, grp, "id")[0], 2),
+        CoordNode(get_dset_size(2, grp, "id")[0], 2),
         pos(pos_),
         params(n_elem)
     {
@@ -255,7 +255,7 @@ struct RamaCoord : public CoordNode
                 pos.slot_machine.accum_array(), SysArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
-                n_elem, 1);
+                n_elem);
     }
     virtual double test_value_deriv_agreement() {
         return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
@@ -272,7 +272,7 @@ struct DistSpring : public PotentialNode
     vector<int> bonded_atoms;
 
     DistSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 2;  // number of atoms that each term depends on 
@@ -349,7 +349,7 @@ struct CavityRadial : public PotentialNode
     vector<CavityRadialParams> params;
 
     CavityRadial(hid_t hdf_group, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         pos(pos_), params(get_dset_size(1, hdf_group, "id")[0] )
     {
         n_term = params.size();
@@ -407,7 +407,7 @@ struct ZFlatBottom : public PotentialNode
     vector<ZFlatBottomParams> params;
 
     ZFlatBottom(hid_t hdf_group, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         pos(pos_), params( get_dset_size(1, hdf_group, "atom")[0] )
     {
         n_term = params.size();
@@ -464,7 +464,7 @@ struct AngleSpring : public PotentialNode
     vector<AngleSpringParams> params;
 
     AngleSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 3;  // number of atoms that each term depends on 
@@ -549,7 +549,7 @@ struct DihedralSpring : public PotentialNode
     vector<DihedralSpringParams> params;
 
     DihedralSpring(hid_t grp, CoordNode& pos_):
-        PotentialNode(1),
+        PotentialNode(),
         n_elem(get_dset_size(2, grp, "id")[0]), pos(pos_), params(n_elem)
     {
         int n_dep = 4;  // number of atoms that each term depends on 
@@ -596,8 +596,7 @@ struct ConstantCoord : public CoordNode
     SysArrayStorage value;
 
     ConstantCoord(hid_t grp):
-        CoordNode(get_dset_size(3, grp, "value")[0], 
-                  get_dset_size(3, grp, "value")[1], 
+        CoordNode(get_dset_size(3, grp, "value")[1], 
                   get_dset_size(3, grp, "value")[2]),
         value(1, elem_width, n_elem)
     {

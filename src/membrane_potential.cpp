@@ -49,7 +49,7 @@ struct MembranePotential : public PotentialNode
     float z_scale;
 
     MembranePotential(hid_t grp, CoordNode& sidechain_pos_):
-        PotentialNode(1),
+        PotentialNode(),
         n_elem(get_dset_size(1, grp, "residue_id")[0]), 
         sidechain_pos(sidechain_pos_), 
         params(n_elem),
