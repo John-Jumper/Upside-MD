@@ -62,12 +62,12 @@ struct SidechainRadialPairs : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
 
-        potential[0] = 0.f;
+        potential = 0.f;
         igraph.compute_edges([&](
                     int edge_index, float value, 
                     int index1, unsigned rt1, unsigned id1,
                     int index2, unsigned rt2, unsigned id2) {
-                potential[0] += value;
+                potential += value;
                 igraph.use_derivative(edge_index, 1.f);
                 });
         igraph.propagate_derivatives();
@@ -149,7 +149,7 @@ struct ContactEnergy : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("contact_energy"));
-        contact_energy((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+        contact_energy((mode==PotentialAndDerivMode ? &potential : nullptr),
                 alignment.coords(), params.data(), 
                 n_contact, cutoff);
     }

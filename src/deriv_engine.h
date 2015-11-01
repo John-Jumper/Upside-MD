@@ -115,9 +115,9 @@ struct CoordNode : public DerivComputation
 
 struct PotentialNode : public DerivComputation
 {
-    std::vector<float> potential;
+    float potential;
     PotentialNode():
-        DerivComputation(true), potential(1) {}
+        DerivComputation(true) {}
     virtual void propagate_deriv() {};
 };
 
@@ -178,11 +178,11 @@ struct DerivEngine
 
     std::vector<Node> nodes;  // nodes[0] is the pos node
     Pos* pos;
-    std::vector<float> potential;
+    float potential;
 
     DerivEngine() {}
     DerivEngine(int n_atom): 
-        potential(1)
+        potential(0.f)
     {
         nodes.emplace_back("pos", new Pos(n_atom));
         pos = dynamic_cast<Pos*>(nodes[0].computation.get());

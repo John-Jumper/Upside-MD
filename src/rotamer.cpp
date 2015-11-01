@@ -392,7 +392,7 @@ struct RotamerSidechain: public PotentialNode {
                     solve_results.first, solve_results.second);
 
         propagate_derivatives();
-        if(mode==PotentialAndDerivMode) potential[0] = calculate_energy_from_marginals();
+        if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
     }
 
     virtual double test_value_deriv_agreement() {return -1.;}

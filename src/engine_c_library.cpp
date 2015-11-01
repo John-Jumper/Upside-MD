@@ -32,7 +32,7 @@ int evaluate_energy(float* energy, DerivEngine* engine, const float* pos) try {
         for(int d: range(3))
             a(d,na) = pos[na*3+d];
     engine->compute(PotentialAndDerivMode);
-    *energy = engine->potential[0];
+    *energy = engine->potential;
     return 0;
 } catch(const char* e) {
     fprintf(stderr, "\n\nERROR: %s\n", e);
@@ -125,7 +125,7 @@ int get_output(int n_output, float* output, DerivEngine* engine, const char* nod
     if(dc.potential_term) {
         auto& p = dynamic_cast<PotentialNode&>(dc);
         if(n_output!=1) throw string("wrong size for potential node");
-        *output = p.potential[0];
+        *output = p.potential;
     } else {
         auto& c = dynamic_cast<CoordNode&>(dc);
         if(n_output != c.n_elem*c.elem_width) throw string("wrong size for CoordNode");

@@ -197,7 +197,7 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
             for(int ne: range(n_elem))
                 for(int rt: range(n_restype))
                     pot += coeff[ne*n_restype+rt] * ev(rt,ne);
-            potential[0] = pot;
+            potential = pot;
         }
 
         VecArray vec_accum = env_vector.coords().deriv;

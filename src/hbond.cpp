@@ -531,7 +531,7 @@ struct HBondEnergy : public HBondCounter
             auto d = make_zero<7>(); d[6] = E_protein;
             store_vec(d_pp, slots[nv], d);
         }
-        potential[0] = pot;
+        potential = pot;
         n_hbond = pot/E_protein;
     }
 };

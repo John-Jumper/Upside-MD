@@ -138,7 +138,7 @@ struct BackbonePairs : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("backbone_pairs"));
         backbone_pairs(
-                (mode==PotentialAndDerivMode ? potential.data() : nullptr),
+                (mode==PotentialAndDerivMode ? &potential : nullptr),
                 alignment.coords(), 
                 ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue);
     }

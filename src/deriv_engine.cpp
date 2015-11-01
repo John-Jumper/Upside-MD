@@ -97,7 +97,7 @@ void DerivEngine::compute(ComputeMode mode) {
 
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
-    if(mode == PotentialAndDerivMode) fill(begin(potential), end(potential), 0.f);
+    if(mode == PotentialAndDerivMode) potential = 0.f;
 
     // BFS traversal
     for(int lvl=0, not_finished=1; ; ++lvl, not_finished=0) {
@@ -114,7 +114,7 @@ void DerivEngine::compute(ComputeMode mode) {
                     n.germ_exec_level = lvl;
                     if(mode == PotentialAndDerivMode && n.computation->potential_term) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
-                        potential[0] += pot_node->potential[0];
+                        potential += pot_node->potential;
                     }
                 }
             }

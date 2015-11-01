@@ -150,7 +150,7 @@ struct ReplicaExchange {
             vector<float> result(n_system);
             for(int i=0; i<n_system; ++i) {
                 systems[i].engine.compute(PotentialAndDerivMode);
-                result[i] = -beta[i]*systems[i].engine.potential[0];
+                result[i] = -beta[i]*systems[i].engine.potential;
             }
             return result;
         };
@@ -232,22 +232,20 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     for(int na=0; na<n_atom; ++na)
         for(int d=0; d<3; ++d)
             input[na*3+d] = pos_array(d,na);
-    vector<float> output(1);
+    std::vector<float> output(1);
 
     auto do_compute = [&]() {
         for(int na=0; na<n_atom; ++na)
             for(int d=0; d<3; ++d)
                 pos_array(d,na) = input[na*3+d];
         engine.compute(PotentialAndDerivMode);
-        output[0] = engine.potential[0];
+        output[0] = engine.potential;
     };
 
     for(auto &n: engine.nodes) {
         if(n.computation->potential_term) {
             auto &v = dynamic_cast<PotentialNode&>(*n.computation.get()).potential;
-            printf("%s:", n.name.c_str());
-            for(auto e: v) printf(" % 4.3f", e);
-            printf("\n");
+            printf("%s: % 4.3f\n", n.name.c_str(), v);
         }
     }
     printf("\n\n");
@@ -471,7 +469,7 @@ try {
                     });
             sys->logger->add_logger<double>("potential", {1}, [sys](double* pot_buffer) {
                     sys->engine.compute(PotentialAndDerivMode);
-                    pot_buffer[0] = sys->engine.potential[0];});
+                    pot_buffer[0] = sys->engine.potential;});
             sys->logger->add_logger<double>("time", {}, [sys,dt](double* time_buffer) {
                     *time_buffer=3*dt*sys->round_num;});
 
@@ -532,7 +530,7 @@ try {
         printf("Initial potential energy:");
         for(System& sys: systems) {
             sys.engine.compute(PotentialAndDerivMode);
-            printf(" %.2f", sys.engine.potential[0]);
+            printf(" %.2f", sys.engine.potential);
         }
         printf("\n");
 
@@ -568,7 +566,7 @@ try {
                                 duration_print_width, nr*3*double(dt), 
                                 duration_print_width, duration, 
                                 ns, sys.temperature,
-                                get_n_hbond(sys.engine), Rg, sys.engine.potential[0]);
+                                get_n_hbond(sys.engine), Rg, sys.engine.potential);
                         fflush(stdout);
                     }
                     if(!(nr%thermostat_interval)) {

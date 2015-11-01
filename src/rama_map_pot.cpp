@@ -58,7 +58,7 @@ struct RamaMapPot : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("rama_map_pot"));
 
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         auto ramac = rama.coords();
         if(pot) *pot = 0.f;
 

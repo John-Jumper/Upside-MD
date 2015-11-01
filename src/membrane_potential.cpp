@@ -77,7 +77,7 @@ struct MembranePotential : public PotentialNode
     }
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("membrane_potential"));
-        membrane_potential((mode==PotentialAndDerivMode ? potential.data() : nullptr),
+        membrane_potential((mode==PotentialAndDerivMode ? &potential : nullptr),
                 sidechain_pos.coords(), params.data(),
                 membrane_energy_spline, z_shift, z_scale,
                 n_elem);

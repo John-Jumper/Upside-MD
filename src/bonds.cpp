@@ -64,7 +64,7 @@ struct PosSpring : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("pos_spring")); 
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         auto posc = pos.coords();
 
         if(pot) *pot = 0.f;
@@ -309,7 +309,7 @@ struct DistSpring : public PotentialNode
         Timer timer(string("dist_spring"));
 
         auto posc = pos.coords();
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_elem; ++nt) {
@@ -369,7 +369,7 @@ struct CavityRadial : public PotentialNode
         Timer timer(string("cavity_radial"));
 
         auto posc = pos.coords();
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_term; ++nt) {
@@ -427,7 +427,7 @@ struct ZFlatBottom : public PotentialNode
         Timer timer(string("z_flat_bottom"));
 
         auto posc = pos.coords();
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_term; ++nt) {
@@ -482,7 +482,7 @@ struct AngleSpring : public PotentialNode
         Timer timer(string("angle_spring"));
 
         auto posc = pos.coords();
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_elem; ++nt) {
@@ -567,7 +567,7 @@ struct DihedralSpring : public PotentialNode
         Timer timer(string("dihedral_spring"));
 
         auto posc = pos.coords();
-        float* pot = mode==PotentialAndDerivMode ? potential.data() : nullptr;
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_elem; ++nt) {

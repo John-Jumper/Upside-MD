@@ -183,12 +183,12 @@ struct PivotSampler {
         float delta_lprob;
 
         engine.compute(PotentialAndDerivMode);
-        float old_potential = engine.potential[0];
+        float old_potential = engine.potential;
 
         execute_random_pivot(&delta_lprob, seed, round, engine.pos->coords().value);
 
         engine.compute(PotentialAndDerivMode);
-        float new_potential = engine.potential[0];
+        float new_potential = engine.potential;
 
         float lboltz_diff = delta_lprob - (1.f/temperature) * (new_potential-old_potential);
         RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, 0, round);
