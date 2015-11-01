@@ -63,14 +63,14 @@ struct SidechainRadialPairs : public PotentialNode
         Timer timer(string("radial_pairs"));
 
         potential[0] = 0.f;
-        igraph.compute_edges(0, [&](
+        igraph.compute_edges([&](
                     int edge_index, float value, 
                     int index1, unsigned rt1, unsigned id1,
                     int index2, unsigned rt2, unsigned id2) {
                 potential[0] += value;
-                igraph.use_derivative(0, edge_index, 1.f);
+                igraph.use_derivative(edge_index, 1.f);
                 });
-        igraph.propagate_derivatives(0);
+        igraph.propagate_derivatives();
     }
 
     virtual double test_value_deriv_agreement() { return -1.f; }
@@ -86,8 +86,8 @@ void contact_energy(
     if(potential) potential[0] = 0.f;
     for(int nc=0; nc<n_contacts; ++nc) {
         ContactPair p = contact_param[nc];
-        AffineCoord<> r1(rigid_body, 0, p.loc[0]);
-        AffineCoord<> r2(rigid_body, 0, p.loc[1]);
+        AffineCoord<> r1(rigid_body, p.loc[0]);
+        AffineCoord<> r2(rigid_body, p.loc[1]);
 
         float3 x1 = r1.apply(p.sc_ref_pos[0]);
         float3 x2 = r2.apply(p.sc_ref_pos[1]);

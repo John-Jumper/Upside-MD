@@ -11,7 +11,6 @@
 template <typename IType>
 struct WithinInteractionGraph {
     CoordNode &pos_node;
-    int n_system;
     int n_type;
     int n_elem;
     int max_n_edge;
@@ -26,33 +25,31 @@ struct WithinInteractionGraph {
     std::vector<Vec<IType::n_param>> interaction_param;
     std::vector<float> cutoff2;
 
-    SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_n_edge)
-    SysArrayStorage pos_deriv;
+    VecArrayStorage edge_deriv;  // size (n_deriv, max_n_edge)
+    VecArrayStorage pos_deriv;
     std::vector<int> edge_indices;
 
-    std::vector<int> n_edge;
+    int n_edge;
 
 #ifdef PARAM_DERIV
-    SysArrayStorage interaction_param_deriv;
-    SysArrayStorage edge_param_deriv;
+    VecArrayStorage interaction_param_deriv;
+    VecArrayStorage edge_param_deriv;
 #endif
 
     // It is easiest if I just get my own subgroup of the .h5 file
     WithinInteractionGraph(hid_t grp, CoordNode& pos_node_):
         pos_node(pos_node_),
-        n_system(1), 
         n_type(h5::get_dset_size(3,grp,"interaction_param")[0]),
         n_elem(h5::get_dset_size(1,grp,"index")[0]),
         max_n_edge((n_elem*(n_elem-1))/2),
         interaction_param(n_type*n_type),
         cutoff2(n_type*n_type),
-        edge_deriv(n_system, IType::n_deriv, max_n_edge),
-        pos_deriv (n_system, IType::n_dim,   n_elem),
-        edge_indices(n_system*2*max_n_edge),
-        n_edge(n_system)
+        edge_deriv(IType::n_deriv, max_n_edge),
+        pos_deriv (IType::n_dim,   n_elem),
+        edge_indices(2*max_n_edge)
 #ifdef PARAM_DERIV
-        ,interaction_param_deriv(n_system, IType::n_param, n_type*n_type)
-        ,edge_param_deriv(n_system, IType::n_param, max_n_edge)
+        ,interaction_param_deriv(IType::n_param, n_type*n_type)
+        ,edge_param_deriv(IType::n_param, max_n_edge)
 #endif
     {
         using namespace h5;
@@ -78,12 +75,12 @@ struct WithinInteractionGraph {
 
     // I need to be hooked to a data source of fixed size
     template <typename F>
-    void compute_edges(int ns, F f) {
-        VecArray pos = pos_node.coords().value[ns];
-        fill(pos_deriv[ns], IType::n_dim, n_elem, 0.f);
+    void compute_edges(F f) {
+        VecArray pos = pos_node.coords().value;
+        fill(pos_deriv, IType::n_dim, n_elem, 0.f);
 
         #ifdef PARAM_DERIV
-        fill(interaction_param_deriv[ns], IType::n_param, n_type*n_type, 0.f);
+        fill(interaction_param_deriv, IType::n_param, n_type*n_type, 0.f);
         #endif
 
         int ne = 0;
@@ -150,48 +147,48 @@ struct WithinInteractionGraph {
                 //     }
                 // }
 
-                store_vec(edge_deriv[ns], ne, deriv);
-                edge_indices[ns*2*max_n_edge + 2*ne + 0] = i1;
-                edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;
+                store_vec(edge_deriv, ne, deriv);
+                edge_indices[2*ne + 0] = i1;
+                edge_indices[2*ne + 1] = i2;
 
                 f(ne, value, index1,type1,id1, index2,type2,id2);
 
                 #ifdef PARAM_DERIV
                 Vec<IType::n_param> dp;
                 IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_param_deriv[ns], ne, dp);
+                store_vec(edge_param_deriv, ne, dp);
                 #endif
 
                 ++ne;
             }
         }
-        n_edge[ns] = ne;
+        n_edge = ne;
     }
 
-    void use_derivative(int ns, int edge_idx, float sensitivity) {
-        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv[ns], edge_idx);
+    void use_derivative(int edge_idx, float sensitivity) {
+        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv, edge_idx);
         Vec<IType::n_dim> d1,d2;
         IType::expand_deriv(d1,d2, deriv);
-        update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 0], d1);
-        update_vec(pos_deriv[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 1], d2);
+        update_vec(pos_deriv, edge_indices[2*edge_idx + 0], d1);
+        update_vec(pos_deriv, edge_indices[2*edge_idx + 1], d2);
 
         #ifdef PARAM_DERIV
-        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
-        auto type1 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
-        auto type2 = types[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
+        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv, edge_idx);
+        auto type1 = types[edge_indices[2*edge_idx + 0]];
+        auto type2 = types[edge_indices[2*edge_idx + 1]];
 
-        update_vec(interaction_param_deriv[ns], type1*n_type+type2, d);
+        update_vec(interaction_param_deriv, type1*n_type+type2, d);
         #endif
     }
 
-    void propagate_derivatives(int ns) {
+    void propagate_derivatives() {
         // Finally put the data where it is needed.
         // This function must be called exactly once after the user has finished calling 
         // use_derivative for the round.
 
-       VecArray pos_accum = pos_node.coords().deriv[ns];
+       VecArray pos_accum = pos_node.coords().deriv;
        for(int i: range(n_elem))
-           store_vec(pos_accum, param[i].slot, load_vec<IType::n_dim>(pos_deriv[ns],i));
+           store_vec(pos_accum, param[i].slot, load_vec<IType::n_dim>(pos_deriv,i));
     }
 
     void update_cutoffs() {
@@ -216,11 +213,10 @@ struct WithinInteractionGraph {
     }
 
     std::vector<float> get_param_deriv() const {
-        std::vector<float> ret; ret.reserve(n_system*n_type*n_type*IType::n_param);
-        for(int ns: range(n_system))
-            for(int i: range(n_type*n_type))
-                for(int d: range(IType::n_param))
-                    ret.push_back(interaction_param_deriv[ns](d,i));
+        std::vector<float> ret; ret.reserve(n_type*n_type*IType::n_param);
+        for(int i: range(n_type*n_type))
+            for(int d: range(IType::n_param))
+                ret.push_back(interaction_param_deriv(d,i));
         return ret;
     }
 
@@ -239,7 +235,6 @@ struct WithinInteractionGraph {
 template <typename IType>
 struct BetweenInteractionGraph {
     CoordNode &pos_node1, &pos_node2;
-    int n_system;
     int n_type1, n_type2;
     int n_elem1, n_elem2;
     int max_n_edge;
@@ -254,33 +249,31 @@ struct BetweenInteractionGraph {
     std::vector<Vec<IType::n_param>> interaction_param;
     std::vector<float> cutoff2;
 
-    SysArrayStorage edge_deriv;  // size (n_system, n_deriv, max_n_edge)
-    SysArrayStorage pos_deriv1, pos_deriv2;
+    VecArrayStorage edge_deriv;  // size (n_deriv, max_n_edge)
+    VecArrayStorage pos_deriv1, pos_deriv2;
     std::vector<int> edge_indices;
 
-    std::vector<int> n_edge;
+    int n_edge;
 
 #ifdef PARAM_DERIV
-    SysArrayStorage interaction_param_deriv;
-    SysArrayStorage edge_param_deriv;
+    VecArrayStorage interaction_param_deriv;
+    VecArrayStorage edge_param_deriv;
 #endif
 
     // It is easiest if I just get my own subgroup of the .h5 file
     BetweenInteractionGraph(hid_t grp, CoordNode& pos_node1_, CoordNode& pos_node2_):
         pos_node1(pos_node1_), pos_node2(pos_node2_),
-        n_system(1), 
         n_type1(h5::get_dset_size(3,grp,"interaction_param")[0]), n_type2(h5::get_dset_size(3,grp,"interaction_param")[1]),
         n_elem1(h5::get_dset_size(1,grp,"index1")[0]),            n_elem2(h5::get_dset_size(1,grp,"index2")[0]),
         max_n_edge(n_elem1*n_elem2),
         interaction_param(n_type1*n_type2),
         cutoff2(n_type1*n_type2),
-        edge_deriv(n_system, IType::n_deriv, max_n_edge),
-        pos_deriv1(n_system, IType::n_dim1, n_elem1), pos_deriv2(n_system, IType::n_dim2, n_elem2),
-        edge_indices(n_system*2*max_n_edge),
-        n_edge(n_system)
+        edge_deriv(IType::n_deriv, max_n_edge),
+        pos_deriv1(IType::n_dim1, n_elem1), pos_deriv2(IType::n_dim2, n_elem2),
+        edge_indices(2*max_n_edge)
 #ifdef PARAM_DERIV
-        ,interaction_param_deriv(n_system, IType::n_param, n_type1*n_type2)
-        ,edge_param_deriv(n_system, IType::n_param, max_n_edge)
+        ,interaction_param_deriv(IType::n_param, n_type1*n_type2)
+        ,edge_param_deriv(IType::n_param, max_n_edge)
 #endif
     {
         using namespace h5;
@@ -312,14 +305,14 @@ struct BetweenInteractionGraph {
 
     // I need to be hooked to a data source of fixed size
     template <typename F>
-    void compute_edges(int ns, F f) {
-        VecArray pos1 = pos_node1.coords().value[ns];
-        VecArray pos2 = pos_node2.coords().value[ns];
-        fill(pos_deriv1[ns], IType::n_dim1, n_elem1, 0.f);
-        fill(pos_deriv2[ns], IType::n_dim2, n_elem2, 0.f);
+    void compute_edges(F f) {
+        VecArray pos1 = pos_node1.coords().value;
+        VecArray pos2 = pos_node2.coords().value;
+        fill(pos_deriv1, IType::n_dim1, n_elem1, 0.f);
+        fill(pos_deriv2, IType::n_dim2, n_elem2, 0.f);
 
         #ifdef PARAM_DERIV
-        fill(interaction_param_deriv[ns], IType::n_param, n_type1*n_type2, 0.f);
+        fill(interaction_param_deriv, IType::n_param, n_type1*n_type2, 0.f);
         #endif
 
         struct Rec {
@@ -352,22 +345,22 @@ struct BetweenInteractionGraph {
                     auto my_id2 = id2[i2];
                     if(IType::exclude_by_id(my_id1,my_id2)) continue;  // avoid self-interaction in user defined way
 
-                    edge_indices[ns*2*max_n_edge + 2*ne + 0] = i1;
-                    edge_indices[ns*2*max_n_edge + 2*ne + 1] = i2;
+                    edge_indices[2*ne + 0] = i1;
+                    edge_indices[2*ne + 1] = i2;
 
                     ++ne;
                 }
             }
-            n_edge[ns] = ne;
+            n_edge = ne;
         }
 
         // First find all the edges
         {
             // Timer timer(std::string("edge_computation"));
 
-            for(int ne: range(n_edge[ns])) {
-                int i1 = edge_indices[ns*2*max_n_edge + 2*ne + 0];
-                int i2 = edge_indices[ns*2*max_n_edge + 2*ne + 1];
+            for(int ne: range(n_edge)) {
+                int i1 = edge_indices[2*ne + 0];
+                int i2 = edge_indices[2*ne + 1];
 
                 auto index1 = param1[i1].index;
                 auto coord1 = load_vec<IType::n_dim1>(pos1, index1);
@@ -383,13 +376,13 @@ struct BetweenInteractionGraph {
 
                 Vec<IType::n_deriv> deriv;
                 auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_deriv[ns], ne, deriv);
+                store_vec(edge_deriv, ne, deriv);
                 f(ne, value, index1,type1,my_id1, index2,type2,my_id2);
 
                 #ifdef PARAM_DERIV
                 Vec<IType::n_param> dp;
                 IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_param_deriv[ns], ne, dp);
+                store_vec(edge_param_deriv, ne, dp);
                 #endif
 
                 // // compute finite difference deriv to check
@@ -431,34 +424,34 @@ struct BetweenInteractionGraph {
     }
 
 
-    void use_derivative(int ns, int edge_idx, float sensitivity) {
-        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv[ns], edge_idx);
+    void use_derivative(int edge_idx, float sensitivity) {
+        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv, edge_idx);
         Vec<IType::n_dim1> d1;
         Vec<IType::n_dim2> d2;
         IType::expand_deriv(d1,d2, deriv);
-        update_vec(pos_deriv1[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 0], d1);
-        update_vec(pos_deriv2[ns], edge_indices[ns*2*max_n_edge + 2*edge_idx + 1], d2);
+        update_vec(pos_deriv1, edge_indices[2*edge_idx + 0], d1);
+        update_vec(pos_deriv2, edge_indices[2*edge_idx + 1], d2);
 
         #ifdef PARAM_DERIV
-        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv[ns], edge_idx);
-        auto type1 = types1[edge_indices[ns*2*max_n_edge + 2*edge_idx + 0]];
-        auto type2 = types2[edge_indices[ns*2*max_n_edge + 2*edge_idx + 1]];
-        update_vec(interaction_param_deriv[ns], type1*n_type2+type2, d);
+        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv, edge_idx);
+        auto type1 = types1[edge_indices[2*edge_idx + 0]];
+        auto type2 = types2[edge_indices[2*edge_idx + 1]];
+        update_vec(interaction_param_deriv, type1*n_type2+type2, d);
         #endif
     }
 
-    void propagate_derivatives(int ns) {
+    void propagate_derivatives() {
         // Finally put the data where it is needed.
         // This function must be called exactly once after the user has finished calling 
         // use_derivative for the round.
 
-       VecArray pos_accum1 = pos_node1.coords().deriv[ns];
+       VecArray pos_accum1 = pos_node1.coords().deriv;
        for(int i: range(n_elem1))
-           store_vec(pos_accum1, param1[i].slot, load_vec<IType::n_dim1>(pos_deriv1[ns],i));
+           store_vec(pos_accum1, param1[i].slot, load_vec<IType::n_dim1>(pos_deriv1,i));
 
-       VecArray pos_accum2 = pos_node2.coords().deriv[ns];
+       VecArray pos_accum2 = pos_node2.coords().deriv;
        for(int i: range(n_elem2))
-           store_vec(pos_accum2, param2[i].slot, load_vec<IType::n_dim2>(pos_deriv2[ns],i));
+           store_vec(pos_accum2, param2[i].slot, load_vec<IType::n_dim2>(pos_deriv2,i));
     }
 
     void update_cutoffs() {
@@ -479,11 +472,10 @@ struct BetweenInteractionGraph {
     }
 
     std::vector<float> get_param_deriv() const {
-        std::vector<float> ret; ret.reserve(n_system*n_type1*n_type2*IType::n_param);
-        for(int ns: range(n_system))
-            for(int i: range(n_type1*n_type2))
-                for(int d: range(IType::n_param))
-                    ret.push_back(interaction_param_deriv[ns](d,i));
+        std::vector<float> ret; ret.reserve(n_type1*n_type2*IType::n_param);
+        for(int i: range(n_type1*n_type2))
+            for(int d: range(IType::n_param))
+                ret.push_back(interaction_param_deriv(d,i));
         return ret;
     }
 

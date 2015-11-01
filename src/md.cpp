@@ -28,18 +28,18 @@ integration_stage_body(
 
 void
 integration_stage(
-        SysArray mom,
-        SysArray pos,
-        const SysArray deriv,
+        VecArray mom,
+        VecArray pos,
+        const VecArray deriv,
         float vel_factor,
         float pos_factor,
         float max_force,
         int n_atom)
 {
     for(int na=0; na<n_atom; ++na) {
-        MutableCoord<3> p(mom,   0, na);
-        MutableCoord<3> x(pos,   0, na);
-        StaticCoord <3> d(deriv, 0, na);
+        MutableCoord<3> p(mom,   na);
+        MutableCoord<3> x(pos,   na);
+        StaticCoord <3> d(deriv, na);
         integration_stage_body(p, x, d, vel_factor, pos_factor, max_force);
         x.flush();
         p.flush();
@@ -48,20 +48,20 @@ integration_stage(
 
 
 void deriv_accumulation(
-        SysArray deriv, 
-        const SysArray accum_buffer, 
+        VecArray deriv, 
+        const VecArray accum_buffer, 
         const DerivRecord* restrict tape,
         int n_tape,
         int n_atom)
 {
     std::vector<MutableCoord<3>> coords;
     coords.reserve(n_atom);
-    for(int na=0; na<n_atom; ++na) coords.emplace_back(deriv, 0, na, MutableCoord<3>::Zero);
+    for(int na=0; na<n_atom; ++na) coords.emplace_back(deriv, na, MutableCoord<3>::Zero);
 
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            coords[tape_elem.atom] += StaticCoord<3>(accum_buffer, 0, tape_elem.loc + rec).f3();
+            coords[tape_elem.atom] += StaticCoord<3>(accum_buffer, tape_elem.loc + rec).f3();
         }
     }
 
@@ -69,16 +69,16 @@ void deriv_accumulation(
 }
 
 void
-recenter(SysArray pos, bool xy_recenter_only, int n_atom)
+recenter(VecArray pos, bool xy_recenter_only, int n_atom)
 {
     float3 center = make_vec3(0.f, 0.f, 0.f);
-    for(int na=0; na<n_atom; ++na) center += StaticCoord<3>(pos,0,na).f3();
+    for(int na=0; na<n_atom; ++na) center += StaticCoord<3>(pos,na).f3();
     center /= float(n_atom);
 
     if(xy_recenter_only) center.z() = 0.f;
 
     for(int na=0; na<n_atom; ++na) {
-        MutableCoord<3> x(pos,0,na);
+        MutableCoord<3> x(pos,na);
         x.set_value(x.f3() - center);
         x.flush();
     }

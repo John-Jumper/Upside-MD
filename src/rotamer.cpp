@@ -413,7 +413,7 @@ struct RotamerSidechain: public PotentialNode {
         vector<VecArray> energy_1body;
         energy_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
-            energy_1body.emplace_back(prob_nodes[i]->coords().value[0]);
+            energy_1body.emplace_back(prob_nodes[i]->coords().value);
 
         for(int n: range(igraph.n_elem)) {
             unsigned id = igraph.id[n];
@@ -429,7 +429,7 @@ struct RotamerSidechain: public PotentialNode {
         }
 
         // Fill edge probabilities
-        igraph.compute_edges(0, [&](int ne, float pot,
+        igraph.compute_edges([&](int ne, float pot,
                     int index1, unsigned type1, unsigned id1,
                     int index2, unsigned type2, unsigned id2) {
                 unsigned selector = (1u<<n_bit_rotamer) - 1u;
@@ -490,7 +490,7 @@ struct RotamerSidechain: public PotentialNode {
         vector<float> e1(nodes1.n_elem, 0.f);
         vector<float> e3(nodes3.n_elem, 0.f);
 
-        VecArray energy_1body = prob_nodes[prob_node_index]->coords().value[0];
+        VecArray energy_1body = prob_nodes[prob_node_index]->coords().value;
         for(int n: range(igraph.n_elem)) {
             unsigned id = igraph.id[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
@@ -536,17 +536,17 @@ struct RotamerSidechain: public PotentialNode {
 
     void propagate_derivatives() {
         for(auto &el: edges11.edge_loc)
-            igraph.use_derivative(0, el.edge_num, 1.f);
+            igraph.use_derivative(el.edge_num, 1.f);
         for(auto &el: edges13.edge_loc)
-            igraph.use_derivative(0, el.edge_num, nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second));
+            igraph.use_derivative(el.edge_num, nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second));
         for(auto &el: edges33.edge_loc)
-            igraph.use_derivative(0, el.edge_num, edges33.marginal  (el.dim, el.ne));
-        igraph.propagate_derivatives(0);
+            igraph.use_derivative(el.edge_num, edges33.marginal  (el.dim, el.ne));
+        igraph.propagate_derivatives();
 
         vector<VecArray> deriv_1body;
         deriv_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
-            deriv_1body.emplace_back(prob_nodes[i]->coords().deriv[0]);
+            deriv_1body.emplace_back(prob_nodes[i]->coords().deriv);
 
         for(int n: range(igraph.n_elem)) {
             unsigned id = igraph.id[n];

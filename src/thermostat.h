@@ -36,5 +36,5 @@ struct OrnsteinUhlenbeckThermostat
         OrnsteinUhlenbeckThermostat& set_delta_t  (float delta_t_)   {
             delta_t   = delta_t_;   update_parameters(); return *this;}
 
-        void apply(SysArray mom, int n_atom); 
+        void apply(VecArray mom, int n_atom); 
 };

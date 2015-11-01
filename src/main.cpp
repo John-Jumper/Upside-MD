@@ -26,7 +26,7 @@ struct System {
     shared_ptr<H5Logger> logger;
     DerivEngine engine;
     PivotSampler pivot_sampler;
-    SysArrayStorage mom; // momentum
+    VecArrayStorage mom; // momentum
     OrnsteinUhlenbeckThermostat thermostat;
     uint64_t round_num;
     System(): round_num(0) {}
@@ -157,10 +157,12 @@ struct ReplicaExchange {
 
         // swap coordinates and the associated system indices
         auto coord_swap = [&](int ns1, int ns2) {
+            VecArray value1 = systems[ns1].engine.pos->coords().value;
+            VecArray value2 = systems[ns2].engine.pos->coords().value;
             swap_ranges(
-                    systems[ns1].engine.pos->coords().value[0].v,  
-                    systems[ns1].engine.pos->coords().value[1].v,  
-                    systems[ns2].engine.pos->coords().value[0].v);
+                    value1.v,  
+                    value1.v + 3*value1.component_offset,
+                    value2.v);
             swap(replica_indices[ns1], replica_indices[ns2]);
         };
 
@@ -204,7 +206,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         vector<float> deriv_value(pos.n_atom*3);
         for(int na=0; na<pos.n_atom; ++na)
             for(int d=0; d<3; ++d)
-                deriv_value[na*3 + d] = pos.deriv_array()[0](d,na);
+                deriv_value[na*3 + d] = pos.deriv_array()(d,na);
         append_to_dset(tbl.get(), deriv_value, 2);
     }
 
@@ -212,7 +214,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         check_size(config, "/testing/expected_deriv", pos.n_atom, 3, 1);
         double rms_error = 0.;
         traverse_dset<3,float>(config, "/testing/expected_deriv", [&](size_t na, size_t d, size_t ns, float x) {
-                double dev = x - pos.deriv_array()[ns](d,na);
+                double dev = x - pos.deriv_array()(d,na);
                 rms_error += dev*dev;});
         rms_error = sqrtf(rms_error / pos.n_atom);
         printf("RMS deriv difference: %.6f\n", rms_error);
@@ -224,18 +226,18 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
 vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> relative_error;
     int n_atom = engine.pos->n_elem;
-    SysArray pos_array = engine.pos->coords().value;
+    VecArray pos_array = engine.pos->coords().value;
 
     vector<float> input(n_atom*3);
     for(int na=0; na<n_atom; ++na)
         for(int d=0; d<3; ++d)
-            input[na*3+d] = pos_array[0](d,na);
+            input[na*3+d] = pos_array(d,na);
     vector<float> output(1);
 
     auto do_compute = [&]() {
         for(int na=0; na<n_atom; ++na)
             for(int d=0; d<3; ++d)
-                pos_array[0](d,na) = input[na*3+d];
+                pos_array(d,na) = input[na*3+d];
         engine.compute(PotentialAndDerivMode);
         output[0] = engine.potential[0];
     };
@@ -254,7 +256,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> deriv_array;
     for(int na=0; na<n_atom; ++na)
         for(int d=0; d<3; ++d)
-            deriv_array.push_back(engine.pos->deriv_array()[0](d,na));
+            deriv_array.push_back(engine.pos->deriv_array()(d,na));
 
     relative_error.push_back(
             relative_rms_deviation(central_diff_jac, deriv_array));
@@ -416,8 +418,8 @@ try {
 
             auto pos_shape = get_dset_size(3, sys->config.get(), "/input/pos");
             sys->n_atom = pos_shape[0];
-            sys->mom.reset(1, 3, sys->n_atom);
-            for(int d: range(3)) for(int na: range(sys->n_atom)) sys->mom[0](d,na) = 0.f;
+            sys->mom.reset(3, sys->n_atom);
+            for(int d: range(3)) for(int na: range(sys->n_atom)) sys->mom(d,na) = 0.f;
 
             if(pos_shape[1]!=3) throw string("invalid dimensions for initial position");
             if(pos_shape[2]!=1) throw string("must have n_system 1 from config");
@@ -426,7 +428,7 @@ try {
             sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get());
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
-                    sys->engine.pos->coords().value[ns](d,na) = x;});
+                    sys->engine.pos->coords().value(d,na) = x;});
 
             printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
@@ -452,19 +454,19 @@ try {
                     1e8);
             sys->set_temperature(sys->initial_temperature);
 
-            sys->thermostat.apply(sys->mom.array(), sys->n_atom); // initial thermalization
+            sys->thermostat.apply(sys->mom, sys->n_atom); // initial thermalization
             sys->thermostat.set_delta_t(thermostat_interval*3*dt);  // set true thermostat interval
 
             // we must capture the sys pointer by value here so that it is available later
             sys->logger->add_logger<float>("pos", {1, sys->n_atom, 3}, [sys](float* pos_buffer) {
-                    SysArray pos_array = sys->engine.pos->coords().value;
+                    VecArray pos_array = sys->engine.pos->coords().value;
                     for(int na=0; na<sys->n_atom; ++na) 
                     for(int d=0; d<3; ++d) 
-                    pos_buffer[na*3 + d] = pos_array[0](d,na);
+                    pos_buffer[na*3 + d] = pos_array(d,na);
                     });
             sys->logger->add_logger<double>("kinetic", {1}, [sys](double* kin_buffer) {
                     double sum_kin = 0.f;
-                    for(int na=0; na<sys->n_atom; ++na) sum_kin += mag2(load_vec<3>(sys->mom[0],na));
+                    for(int na=0; na<sys->n_atom; ++na) sum_kin += mag2(load_vec<3>(sys->mom,na));
                     kin_buffer[0] = (0.5/sys->n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
                     });
             sys->logger->add_logger<double>("potential", {1}, [sys](double* pot_buffer) {
@@ -555,11 +557,11 @@ try {
                         double Rg = 0.f;
                         float3 com = make_vec3(0.f, 0.f, 0.f);
                         for(int na=0; na<sys.n_atom; ++na)
-                            com += load_vec<3>(sys.engine.pos->coords().value[0], na);
+                            com += load_vec<3>(sys.engine.pos->coords().value, na);
                         com *= 1.f/sys.n_atom;
 
                         for(int na=0; na<sys.n_atom; ++na) 
-                            Rg += mag2(load_vec<3>(sys.engine.pos->coords().value[0],na)-com);
+                            Rg += mag2(load_vec<3>(sys.engine.pos->coords().value,na)-com);
                         Rg = sqrtf(Rg/sys.n_atom);
 
                         printf("%*.0f / %*.0f elapsed %2i system %.2f temp %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
@@ -573,9 +575,9 @@ try {
                         // Handle simulated annealing if applicable
                         if(anneal_factor != 1.)
                             sys.set_temperature(anneal_temp(sys.initial_temperature, 3*dt*(sys.round_num+1)));
-                        sys.thermostat.apply(sys.mom.array(), sys.n_atom);
+                        sys.thermostat.apply(sys.mom, sys.n_atom);
                     }
-                    sys.engine.integration_cycle(sys.mom.array(), dt, 0.f, DerivEngine::Verlet);
+                    sys.engine.integration_cycle(sys.mom, dt, 0.f, DerivEngine::Verlet);
 
                     do_break = nr>last_start && replica_interval && !((nr+1)%replica_interval);
                 }

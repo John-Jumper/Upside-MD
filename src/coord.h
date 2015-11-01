@@ -3,32 +3,20 @@
 
 #include "vector_math.h"
 
-// //! Array containing data for each system in the simulation
-// struct SysArray {
-//     float *x;      //!< data pointer
-//     int   offset;  //!< offset per system, units of floats
-//     //! Initialize from existing data
-//     SysArray(float* x_, int offset_):
-//         x(x_), offset(offset_) {}
-//     //! Default initialization makes x the null pointer
-//     SysArray(): x(nullptr), offset(0) {}
-// };
-
-inline void copy_sys_array_to_buffer(SysArray arr, int n_system, int n_elem, int n_dim, float* buffer) {
-    for(int ns=0; ns<n_system; ++ns)
+inline void copy_vec_array_to_buffer(VecArray arr, int n_elem, int n_dim, float* buffer) {
         for(int i=0; i<n_elem; ++i)
             for(int d=0; d<n_dim; ++d) 
-                buffer[ns*n_elem*n_dim+i*n_dim+d] = arr[ns](d,i);
+                buffer[i*n_dim+d] = arr(d,i);
 }
 
 
-//! Pair of value and derivative SysArray's 
+//! Pair of value and derivative VecArray's 
 struct CoordArray {
-    SysArray value;  //!< Array containing value elements
-    SysArray deriv;  //!< Array containing derivative slots
+    VecArray value;  //!< Array containing value elements
+    VecArray deriv;  //!< Array containing derivative slots
 
-    //! Initialize from value and derivative SysArray's
-    CoordArray(SysArray value_, SysArray deriv_):
+    //! Initialize from value and derivative VecArray's
+    CoordArray(VecArray value_, VecArray deriv_):
         value(value_), deriv(deriv_) {}
 };
 
@@ -77,12 +65,12 @@ struct Coord
     public:
         Coord(): i_slot(0), deriv_arr(nullptr,0) {};
 
-        //! Initialize by specifying a coordinate array, a specific system, and the location within the coordinate array
-        Coord(CoordArray arr, int system, CoordPair c):
-            i_slot(c.slot), deriv_arr(arr.deriv[system])
+        //! Initialize by specifying a coordinate array and the location within the coordinate array
+        Coord(CoordArray arr, CoordPair c):
+            i_slot(c.slot), deriv_arr(arr.deriv)
         {
             for(int nd=0; nd<N_DIM; ++nd) 
-                v[nd] = arr.value[system](nd,c.index);
+                v[nd] = arr.value(nd,c.index);
 
             for(int no=0; no<N_DIM_OUTPUT; ++no) 
                 for(int nd=0; nd<N_DIM; ++nd) 
@@ -166,7 +154,7 @@ struct TempCoord
 };
 
 
-//! Coordinate read from SysArray without derivative information
+//! Coordinate read from VecArray without derivative information
 template <int N_DIM>
 struct StaticCoord
 {
@@ -175,11 +163,11 @@ struct StaticCoord
 
     StaticCoord() {};
 
-    //! Initialize by specifying a SysArray, a specific system, and the location within the SysArray
-    StaticCoord(SysArray value, int ns, int index)
+    //! Initialize by specifying a VecArray and the location within the VecArray
+    StaticCoord(VecArray value, int index)
     {
         for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = value[ns](nd,index);
+            v[nd] = value(nd,index);
     }
 
     //! Extract first 3 dimensions of the value as a float3
@@ -192,7 +180,7 @@ struct StaticCoord
 };
 
 
-//! Coordinate that is read and written to SysArray, but with no derivative information
+//! Coordinate that is read and written to VecArray, but with no derivative information
 template <int N_DIM>
 struct MutableCoord
 {
@@ -210,10 +198,10 @@ struct MutableCoord
 
         MutableCoord(): value_arr(nullptr,0) {};
 
-        //! Initialize by specifying a SysArray, a specific system, and the location within the SysArray
-        MutableCoord(SysArray arr, int system, int index, Init init = ReadValue):
+        //! Initialize by specifying a VecArray and the location within the VecArray
+        MutableCoord(VecArray arr, int index, Init init = ReadValue):
             i_slot(index),
-            value_arr(arr[system])
+            value_arr(arr)
         {
             for(int nd=0; nd<N_DIM; ++nd) 
                 v[nd] = init==ReadValue ? value_arr(nd,i_slot) : 0.f;
@@ -239,7 +227,7 @@ struct MutableCoord
             return *this;
         }
 
-        //! Write the value to the SysArray
+        //! Write the value to the VecArray
         void flush() {
             for(int nd=0; nd<N_DIM; ++nd) 
                 value_arr(nd,i_slot) = v[nd];

@@ -26,7 +26,7 @@ struct RigidPlacementNode: public CoordNode {
 
     vector<PlaceParam> params;
     LayeredPeriodicSpline2D<n_pos_dim> spline;
-    SysArrayStorage rama_deriv;
+    VecArrayStorage rama_deriv;
 
     RigidPlacementNode(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
         CoordNode(get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
@@ -37,7 +37,7 @@ struct RigidPlacementNode: public CoordNode {
                 get_dset_size(4, grp, "placement_data")[1],
                 get_dset_size(4, grp, "placement_data")[2]),
 
-        rama_deriv(1, 2*n_pos_dim, n_elem) // first is all phi deriv then all psi deriv
+        rama_deriv(2*n_pos_dim, n_elem) // first is all phi deriv then all psi deriv
     {
         // verify that the signature is as expected
         int n_pos_dim_input = 0;
@@ -77,7 +77,7 @@ struct RigidPlacementNode: public CoordNode {
         if(logging(LOG_EXTENSIVE)) {
             // FIXME prepend the logging with the class name for disambiguation
             default_logger->add_logger<float>("placement_pos", {n_elem, n_pos_dim}, [&](float* buffer) {
-                    auto pos = coords().value[0];
+                    auto pos = coords().value;
                     for(int ne: range(n_elem))
                         for(int d: range(n_pos_dim))
                             buffer[ne*n_pos_dim + d] = pos(d,ne);});
@@ -95,11 +95,11 @@ struct RigidPlacementNode: public CoordNode {
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
         const float shift = M_PI_F;
 
-        VecArray affine_pos = alignment.coords().value[0];
-        VecArray rama_pos   = rama.coords().value[0];
-        VecArray pos        = coords().value[0];
-        VecArray phi_d      = rama_deriv[0];
-        VecArray psi_d      = rama_deriv[0].shifted(n_pos_dim);
+        VecArray affine_pos = alignment.coords().value;
+        VecArray rama_pos   = rama.coords().value;
+        VecArray pos        = coords().value;
+        VecArray phi_d      = rama_deriv;
+        VecArray psi_d      = rama_deriv.shifted(n_pos_dim);
 
         for(int ne: range(n_elem)) {
             auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
@@ -149,11 +149,11 @@ struct RigidPlacementNode: public CoordNode {
     virtual void propagate_deriv() {
         Timer timer(string("placement_deriv"));
 
-        VecArray pos   = coords().value[0];
-        VecArray accum = slot_machine.accum_array()[0];
-        VecArray r_accum = rama.slot_machine.accum_array()[0];
-        VecArray a_accum = alignment.slot_machine.accum_array()[0];
-        VecArray affine_pos = alignment.coords().value[0];
+        VecArray pos   = coords().value;
+        VecArray accum = slot_machine.accum_array();
+        VecArray r_accum = rama.slot_machine.accum_array();
+        VecArray a_accum = alignment.slot_machine.accum_array();
+        VecArray affine_pos = alignment.coords().value;
 
         vector<Vec<n_pos_dim>> sens(n_elem);
         for(auto &s: sens) s = make_zero<n_pos_dim>();
@@ -167,8 +167,8 @@ struct RigidPlacementNode: public CoordNode {
             auto d = sens[ne];
 
             auto rd = make_vec2(
-                        dot(d, load_vec<n_pos_dim>(rama_deriv[0].shifted(0),ne)),
-                        dot(d, load_vec<n_pos_dim>(rama_deriv[0].shifted(n_pos_dim),ne)));
+                        dot(d, load_vec<n_pos_dim>(rama_deriv.shifted(0),ne)),
+                        dot(d, load_vec<n_pos_dim>(rama_deriv.shifted(n_pos_dim),ne)));
 
             store_vec(r_accum, params[ne].rama_residue.slot, rd);
 

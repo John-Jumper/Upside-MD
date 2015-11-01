@@ -31,6 +31,8 @@ struct VecArray {
     float* v;
     int component_offset;
 
+    VecArray(): v(nullptr), component_offset(0) {}
+
     VecArray(float* v_, int component_offset_):
         v(v_), component_offset(component_offset_) {}
 
@@ -61,58 +63,40 @@ inline void swap(VecArray &a, VecArray &b) {
 }
 
 
-struct SysArray {
-    float* v;
-    int system_offset;
-    int component_offset;
-
-    SysArray(float* v_, int system_offset_, int component_offset_):
-        v(v_), system_offset(system_offset_), component_offset(component_offset_) {}
-    SysArray():
-        v(nullptr), system_offset(0), component_offset(0) {}
-    
-    VecArray operator[](int ns) {
-        return VecArray(v + ns*system_offset, component_offset);
-    }
-
-    const VecArray operator[](int ns) const {
-        return VecArray(v + ns*system_offset, component_offset);
-    }
-};
-
-
-struct SysArrayStorage {
-    int n_system;
+struct VecArrayStorage {
     int n_dim;
     int n_elem;
 
     int component_offset;
-    int system_offset;
     std::unique_ptr<float[], std::default_delete<float[]>> storage;
 
-    SysArrayStorage(): SysArrayStorage(0,0,0) {}
+    VecArrayStorage(): VecArrayStorage(0,0) {}
 
-    SysArrayStorage(int n_system_, int n_dim_, int n_elem_):
-        n_system(n_system_), n_dim(n_dim_), n_elem(n_elem_),
-        component_offset(n_elem),               // FIXME add padding for SIMD alignment
-        system_offset(n_dim*component_offset),  // FIXME add padding for NUMA alignment
-        storage(new float[n_system*system_offset])
+    VecArrayStorage(int n_dim_, int n_elem_):
+        n_dim(n_dim_), n_elem(n_elem_),
+        component_offset(n_elem),
+        storage(new float[n_dim*component_offset])
     {}
 
-    SysArray       array()       {return SysArray(storage.get(), system_offset, component_offset);}
-    const SysArray array() const {return SysArray(storage.get(), system_offset, component_offset);}
+    operator VecArray() {return VecArray(storage.get(), component_offset);}
+    VecArray shifted(int shift_amount) {
+        VecArray a = *this;
+        return a.shifted(shift_amount);
+    }
 
-    void reset(int n_system_, int n_dim_, int n_elem_) {
-        n_system = n_system_;
+    void reset(int n_dim_, int n_elem_) {
         n_dim = n_dim_;
         n_elem = n_elem_;
         component_offset = n_elem;
-        system_offset = n_dim*component_offset;
-        storage.reset(new float[n_system*n_dim*n_elem]);
+        storage.reset(new float[n_dim*component_offset]);
     }
 
-    VecArray       operator[](int ns)       {return array()[ns];}
-    const VecArray operator[](int ns) const {return array()[ns];}
+    float& operator()(int i_comp, int i_elem) {
+        return storage.get()[i_comp*component_offset + i_elem];
+    }
+    const float& operator()(int i_comp, int i_elem) const {
+        return storage.get()[i_comp*component_offset + i_elem];
+    }
 };
 
 
@@ -130,13 +114,6 @@ static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
     for(int d=0; d<n_dim; ++d) 
         for(int ne=0; ne<n_elem; ++ne) 
             v(d,ne) = fill_value;
-}
-
-
-static void fill(SysArray s, int n_system, int n_dim, int n_elem, float value) {
-    for(int ns=0; ns<n_system; ++ns) {
-        fill(s[ns], n_dim, n_elem, value);
-    }
 }
 
 

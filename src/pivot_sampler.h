@@ -91,10 +91,9 @@ struct PivotSampler {
     };
 
     void execute_random_pivot(float* delta_lprob, 
-            uint32_t seed, uint64_t n_round, SysArray pos) const {
-        int ns = 0;
+            uint32_t seed, uint64_t n_round, VecArray pos) const {
         Timer timer(std::string("random_pivot"));
-        RandomGenerator random(seed, PIVOT_MOVE_RANDOM_STREAM, ns, n_round);
+        RandomGenerator random(seed, PIVOT_MOVE_RANDOM_STREAM, 0, n_round);
         float4 random_values = random.uniform_open_closed();
 
         // pick a random pivot location
@@ -120,11 +119,11 @@ struct PivotSampler {
 
         // find deviation from old rama
         float3 d1,d2,d3,d4;
-        float3 prevC = StaticCoord<3>(pos, ns, p.rama_atom[0]).f3();
-        float3 N     = StaticCoord<3>(pos, ns, p.rama_atom[1]).f3();
-        float3 CA    = StaticCoord<3>(pos, ns, p.rama_atom[2]).f3();
-        float3 C     = StaticCoord<3>(pos, ns, p.rama_atom[3]).f3();
-        float3 nextN = StaticCoord<3>(pos, ns, p.rama_atom[4]).f3();
+        float3 prevC = StaticCoord<3>(pos, p.rama_atom[0]).f3();
+        float3 N     = StaticCoord<3>(pos, p.rama_atom[1]).f3();
+        float3 CA    = StaticCoord<3>(pos, p.rama_atom[2]).f3();
+        float3 C     = StaticCoord<3>(pos, p.rama_atom[3]).f3();
+        float3 nextN = StaticCoord<3>(pos, p.rama_atom[4]).f3();
 
         float2 old_rama = make_vec2(
                 dihedral_germ(prevC,N,CA,C, d1,d2,d3,d4),
@@ -146,7 +145,7 @@ struct PivotSampler {
         float psi_U[9]; axis_angle_to_rot(psi_U, delta_rama.y(), normalized(C -CA));
 
         {
-            MutableCoord<3> y(pos, ns, p.rama_atom[3]);  // C
+            MutableCoord<3> y(pos, p.rama_atom[3]);  // C
             float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin); // unnecessary but harmless
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
             y.set_value(after_phi);
@@ -154,7 +153,7 @@ struct PivotSampler {
         }
 
         {
-            MutableCoord<3> y(pos, ns, p.rama_atom[4]);  // nextN
+            MutableCoord<3> y(pos, p.rama_atom[4]);  // nextN
             float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin);
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
             y.set_value(after_phi);
@@ -162,14 +161,14 @@ struct PivotSampler {
         }
 
         for(int na=p.pivot_range[0]; na<p.pivot_range[1]; ++na) {
-            MutableCoord<3> y(pos, ns, na);
+            MutableCoord<3> y(pos, na);
             float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin);
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
             y.set_value(after_phi);
             y.flush();
         }
 
-        delta_lprob[ns] = new_lprob - old_lprob;
+        *delta_lprob = new_lprob - old_lprob;
     }
 
     void pivot_monte_carlo_step(
@@ -178,22 +177,21 @@ struct PivotSampler {
             const float temperature,
             DerivEngine& engine) 
     {
-        SysArray pos_sys = engine.pos->coords().value;
+        VecArray pos_sys = engine.pos->coords().value;
 
         std::vector<float> pos_copy = engine.pos->output;
-        std::vector<float> delta_lprob(1);
+        float delta_lprob;
 
         engine.compute(PotentialAndDerivMode);
-        std::vector<float> old_potential = engine.potential;
+        float old_potential = engine.potential[0];
 
-        execute_random_pivot(delta_lprob.data(), seed, round, engine.pos->coords().value);
+        execute_random_pivot(&delta_lprob, seed, round, engine.pos->coords().value);
 
         engine.compute(PotentialAndDerivMode);
-        std::vector<float> new_potential = engine.potential;
+        float new_potential = engine.potential[0];
 
-        int ns = 0;
-        float lboltz_diff = delta_lprob[ns] - (1.f/temperature) * (new_potential[ns]-old_potential[ns]);
-        RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, ns, round);
+        float lboltz_diff = delta_lprob - (1.f/temperature) * (new_potential-old_potential);
+        RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, 0, round);
         pivot_stats.n_attempt++;
 
         if(lboltz_diff >= 0.f || expf(lboltz_diff) >= random.uniform_open_closed().x()) {
@@ -201,9 +199,9 @@ struct PivotSampler {
         } else {
             // If we reject the pivot, we must reverse it
             std::copy_n(
-                    pos_copy.data() + ns*pos_sys.system_offset, 
-                    pos_sys.system_offset, 
-                    pos_sys[ns].v);
+                    pos_copy.data(),
+                    engine.pos->n_atom*3,
+                    pos_sys.v);
         }
     }
 

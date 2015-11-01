@@ -70,7 +70,7 @@ struct PosSpring : public PotentialNode
         if(pot) *pot = 0.f;
         for(int nt=0; nt<n_elem; ++nt) {
             PosSpringParams p = params[nt];
-            Coord<3> x1(posc, 0, p.atom[0]);
+            Coord<3> x1(posc, p.atom[0]);
             float3 disp = x1.f3() - make_vec3(p.x,p.y,p.z);
             if(pot) *pot += 0.5f * p.spring_constant * mag2(disp);
             x1.set_deriv(p.spring_constant * disp);
@@ -78,7 +78,7 @@ struct PosSpring : public PotentialNode
         }
     }
     double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
@@ -137,22 +137,22 @@ struct RamaCoordParams {
 };
 
 void rama_coord(
-        const SysArray output,
+        const VecArray output,
         const CoordArray pos,
         const RamaCoordParams* params,
         const int n_term) 
 {
     for(int nt=0; nt<n_term; ++nt) {
-        MutableCoord<2> rama_pos(output, 0, nt);
+        MutableCoord<2> rama_pos(output, nt);
 
         bool has_prev = params[nt].atom[0].index != index_t(-1);
         bool has_next = params[nt].atom[4].index != index_t(-1);
 
-        Coord<3,2> prev_C(pos, 0, has_prev ? params[nt].atom[0] : CoordPair(0,0));
-        Coord<3,2> N     (pos, 0, params[nt].atom[1]);
-        Coord<3,2> CA    (pos, 0, params[nt].atom[2]);
-        Coord<3,2> C     (pos, 0, params[nt].atom[3]);
-        Coord<3,2> next_N(pos, 0, has_next ? params[nt].atom[4] : CoordPair(0,0));
+        Coord<3,2> prev_C(pos, has_prev ? params[nt].atom[0] : CoordPair(0,0));
+        Coord<3,2> N     (pos, params[nt].atom[1]);
+        Coord<3,2> CA    (pos, params[nt].atom[2]);
+        Coord<3,2> C     (pos, params[nt].atom[3]);
+        Coord<3,2> next_N(pos, has_next ? params[nt].atom[4] : CoordPair(0,0));
 
         {
             float3 d1,d2,d3,d4;
@@ -235,7 +235,7 @@ struct RamaCoord : public CoordNode
 
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("rama", {n_elem,2}, [&](float* buffer) {
-                    copy_sys_array_to_buffer(coords().value, 1, n_elem,2, buffer);});
+                    copy_vec_array_to_buffer(coords().value, n_elem,2, buffer);});
         }
     }
 
@@ -252,13 +252,13 @@ struct RamaCoord : public CoordNode
         Timer timer(string("rama_coord_deriv"));
         reverse_autodiff<2,3,0>(
                 slot_machine.accum_array(), 
-                pos.slot_machine.accum_array(), SysArray(), 
+                pos.slot_machine.accum_array(), VecArray(), 
                 slot_machine.deriv_tape.data(), autodiff_params.data(), 
                 slot_machine.deriv_tape.size(), 
                 n_elem);
     }
     virtual double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term), ANGULAR_VALUE);
     }
 };
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
@@ -292,7 +292,7 @@ struct DistSpring : public PotentialNode
         if(logging(LOG_DETAILED))
             default_logger->add_logger<float>("nonbonded_spring_energy", {1}, [&](float* buffer) {
                     float pot = 0.f;
-                    VecArray x = pos.coords().value[0];
+                    VecArray x = pos.coords().value;
 
                     for(int nt=0; nt<n_elem; ++nt) {
                     if(bonded_atoms[nt]) continue;  // don't count bonded spring energy
@@ -314,8 +314,8 @@ struct DistSpring : public PotentialNode
 
         for(int nt=0; nt<n_elem; ++nt) {
             DistSpringParams p = params[nt];
-            Coord<3> x1(posc, 0, p.atom[0]);
-            Coord<3> x2(posc, 0, p.atom[1]);
+            Coord<3> x1(posc, p.atom[0]);
+            Coord<3> x2(posc, p.atom[1]);
 
             float3 disp = x1.f3() - x2.f3();
             float3 deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
@@ -329,7 +329,7 @@ struct DistSpring : public PotentialNode
         }
     }
     double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
@@ -374,7 +374,7 @@ struct CavityRadial : public PotentialNode
 
         for(int nt=0; nt<n_term; ++nt) {
             CavityRadialParams p = params[nt];
-            Coord<3> x(posc, 0, p.id);
+            Coord<3> x(posc, p.id);
 
             float r2 = mag2(x.f3());
             if(r2>sqr(p.radius)) {
@@ -392,9 +392,7 @@ struct CavityRadial : public PotentialNode
     }
 
     double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
-        for(auto &p: params) coord_pairs.back().push_back(p.id);
-        return compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
     }
 };
 static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
@@ -434,7 +432,7 @@ struct ZFlatBottom : public PotentialNode
 
         for(int nt=0; nt<n_term; ++nt) {
             ZFlatBottomParams p = params[nt];
-            Coord<3> atom_pos(posc, 0, p.id);
+            Coord<3> atom_pos(posc, p.id);
             
             float z = atom_pos.f3().z();
             float3 deriv = make_vec3(0.f,0.f,0.f);
@@ -451,7 +449,7 @@ struct ZFlatBottom : public PotentialNode
     double test_value_deriv_agreement() {
         vector<vector<CoordPair>> coord_pairs(1);
         for(auto &p: params) coord_pairs.back().push_back(p.id);
-        return compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
@@ -489,9 +487,9 @@ struct AngleSpring : public PotentialNode
 
         for(int nt=0; nt<n_elem; ++nt) {
             AngleSpringParams p = params[nt];
-            Coord<3> atom1(posc, 0, p.atom[0]);
-            Coord<3> atom2(posc, 0, p.atom[1]);
-            Coord<3> atom3(posc, 0, p.atom[2]);
+            Coord<3> atom1(posc, p.atom[0]);
+            Coord<3> atom2(posc, p.atom[1]);
+            Coord<3> atom3(posc, p.atom[2]);
 
             float3 x1 = atom1.f3() - atom3.f3(); float inv_d1 = inv_mag(x1); float3 x1h = x1*inv_d1;
             float3 x2 = atom2.f3() - atom3.f3(); float inv_d2 = inv_mag(x2); float3 x2h = x2*inv_d2;
@@ -510,7 +508,7 @@ struct AngleSpring : public PotentialNode
         }
     }
     double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
@@ -573,10 +571,10 @@ struct DihedralSpring : public PotentialNode
         if(pot) *pot = 0.f;
 
         for(int nt=0; nt<n_elem; ++nt) {
-            Coord<3> x1(posc, 0, params[nt].atom[0]);
-            Coord<3> x2(posc, 0, params[nt].atom[1]);
-            Coord<3> x3(posc, 0, params[nt].atom[2]);
-            Coord<3> x4(posc, 0, params[nt].atom[3]);
+            Coord<3> x1(posc, params[nt].atom[0]);
+            Coord<3> x2(posc, params[nt].atom[1]);
+            Coord<3> x3(posc, params[nt].atom[2]);
+            Coord<3> x4(posc, params[nt].atom[3]);
             dihedral_spring_body(pot, x1,x2,x3,x4, params[nt]);
             x1.flush();
             x2.flush();
@@ -585,7 +583,7 @@ struct DihedralSpring : public PotentialNode
         }
     }
     double test_value_deriv_agreement() {
-        return compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
+        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params,potential_term));
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");
@@ -593,24 +591,23 @@ static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring"
 
 struct ConstantCoord : public CoordNode
 {
-    SysArrayStorage value;
+    VecArrayStorage value;
 
     ConstantCoord(hid_t grp):
-        CoordNode(get_dset_size(3, grp, "value")[1], 
-                  get_dset_size(3, grp, "value")[2]),
-        value(1, elem_width, n_elem)
+        CoordNode(get_dset_size(3, grp, "value")[0], 
+                  get_dset_size(3, grp, "value")[1]),
+        value(elem_width, n_elem)
     {
-        traverse_dset<3,float>(grp, "value", [&](size_t ns, size_t ne, size_t nd, float x) {
-                value[ns](nd,ne) = x;});
+        traverse_dset<2,float>(grp, "value", [&](size_t ne, size_t nd, float x) {
+                value(nd,ne) = x;});
     }
 
     virtual void compute_value(ComputeMode mode) {
-        VecArray to   = coords().value[0];
-        VecArray from = value[0];
+        VecArray to   = coords().value;
 
         for(int nd: range(elem_width))
             for(int ne: range(n_elem))
-                to(nd,ne) = from(nd,ne);
+                to(nd,ne) = value(nd,ne);
     }
 
     virtual void propagate_deriv() {}
@@ -619,10 +616,9 @@ struct ConstantCoord : public CoordNode
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {
         vector<float> p; p.reserve(n_elem*elem_width);
-        auto v = value[0];
         for(int ne: range(n_elem))
             for(int d: range(elem_width))
-                p.push_back(v(d,ne));
+                p.push_back(value(d,ne));
         return p;
     }
 
@@ -630,10 +626,9 @@ struct ConstantCoord : public CoordNode
 
     virtual void set_param(const std::vector<float>& new_param) {
         if(new_param.size() != size_t(n_elem*elem_width)) throw string("invalid size to set_param");
-        auto v = value[0];
         for(int ne: range(n_elem))
             for(int d: range(elem_width))
-                v(d,ne) = new_param[ne*elem_width + d];
+                value(d,ne) = new_param[ne*elem_width + d];
     }
 #endif
 

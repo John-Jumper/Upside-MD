@@ -107,17 +107,17 @@ struct EnvironmentCoverage : public CoordNode {
             default_logger->add_logger<float>("environment_vector", {n_elem, n_restype}, [&](float* buffer) {
                     for(int ne: range(n_elem))
                         for(int rt: range(n_restype))
-                            buffer[ne*n_restype+rt] = coords().value[0](rt,ne);});
+                            buffer[ne*n_restype+rt] = coords().value(rt,ne);});
         }
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("environment_vector"));
-        VecArray env = coords().value[0];
+        VecArray env = coords().value;
         fill(env, n_restype, n_elem, 0.f);
 
         // Compute coverage and its derivative
-        igraph.compute_edges(0, [&](int ne, float cov,
+        igraph.compute_edges([&](int ne, float cov,
                     int index1, unsigned type1, unsigned id1,
                     int index2, unsigned type2, unsigned id2) {
                 env(type2,index1) += cov;});
@@ -126,7 +126,7 @@ struct EnvironmentCoverage : public CoordNode {
     virtual void propagate_deriv() {
         Timer timer(string("environment_vector_deriv"));
         vector<float> sens(n_elem*n_restype, 0.f);
-        VecArray accum = slot_machine.accum_array()[0];
+        VecArray accum = slot_machine.accum_array();
 
         for(auto tape_elem: slot_machine.deriv_tape)
             for(int rec=0; rec<int(tape_elem.output_width); ++rec)
@@ -134,14 +134,14 @@ struct EnvironmentCoverage : public CoordNode {
                     sens[tape_elem.atom*n_restype+rt] += accum(rt, tape_elem.loc+rec);
 
         // Push coverage derivatives
-        for(int ned: range(igraph.n_edge[0])) {
+        for(int ned: range(igraph.n_edge)) {
             int sc_num0 = igraph.edge_indices[2*ned + 0];
             int sc_num1 = igraph.edge_indices[2*ned + 1];
             int sc_idx0 = igraph.param1[sc_num0].index;
             int sc_type1= igraph.types2[sc_num1];
-            igraph.use_derivative(0, ned, sens[sc_idx0*n_restype+sc_type1]);
+            igraph.use_derivative(ned, sens[sc_idx0*n_restype+sc_type1]);
         }
-        igraph.propagate_derivatives(0);
+        igraph.propagate_derivatives();
     }
 
 #ifdef PARAM_DERIV
@@ -179,7 +179,7 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
 
         if(logging(LOG_DETAILED))
             default_logger->add_logger<float>("simple_environment_potential", {n_elem}, [&](float* buffer) {
-                VecArray ev = env_vector.coords().value[0];
+                VecArray ev = env_vector.coords().value;
                 for(int ne: range(n_elem)) {
                     buffer[ne] = 0.f;
                     for(int rt: range(n_restype))
@@ -192,7 +192,7 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
         Timer timer("simple_environment");
 
         if(mode==PotentialAndDerivMode) {
-            VecArray ev = env_vector.coords().value[0];
+            VecArray ev = env_vector.coords().value;
             float pot = 0.f;
             for(int ne: range(n_elem))
                 for(int rt: range(n_restype))
@@ -200,7 +200,7 @@ struct SimpleEnvironmentEnergy : public PotentialNode {
             potential[0] = pot;
         }
 
-        VecArray vec_accum = env_vector.coords().deriv[0];
+        VecArray vec_accum = env_vector.coords().deriv;
         for(int ne: range(n_elem))
             for(int rt: range(n_restype))
                 vec_accum(rt,slots[ne]) = coeff[ne*n_restype+rt];
@@ -274,8 +274,8 @@ struct EnvironmentEnergy : public CoordNode {
     virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("environment_energy"));
 
-        VecArray v = env_vector.coords().value[0];  // only support 1 system
-        VecArray e = coords().value[0];
+        VecArray v = env_vector.coords().value;  // only support 1 system
+        VecArray e = coords().value;
 
         for(int ne: range(n_elem)) for(int d: range(n_restype)) input(ne,d) = v(d,ne);
 
@@ -307,7 +307,7 @@ struct EnvironmentEnergy : public CoordNode {
         Timer timer(string("environment_energy_deriv"));
 
         sens = VectorXf::Zero(n_elem);
-        VecArray accum = slot_machine.accum_array()[0];
+        VecArray accum = slot_machine.accum_array();
 
         for(auto tape_elem: slot_machine.deriv_tape)
             for(int rec=0; rec<int(tape_elem.output_width); ++rec)
@@ -324,7 +324,7 @@ struct EnvironmentEnergy : public CoordNode {
 
         input = layer1 * weight0.transpose();
 
-        VecArray vec_accum = env_vector.coords().deriv[0];
+        VecArray vec_accum = env_vector.coords().deriv;
         for(int ne: range(n_elem))
             for(int rt: range(n_restype))
                 vec_accum(rt,slots[ne]) = sens[ne] * input(ne,rt);

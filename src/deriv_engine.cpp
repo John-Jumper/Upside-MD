@@ -136,7 +136,7 @@ void DerivEngine::compute(ComputeMode mode) {
 }
 
 
-void DerivEngine::integration_cycle(SysArray mom, float dt, float max_force, IntegratorType type) {
+void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, IntegratorType type) {
     // integrator from Predescu et al., 2012
     // http://dx.doi.org/10.1080/00268976.2012.681311
 

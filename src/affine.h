@@ -93,14 +93,14 @@ struct AffineCoord
 
     AffineCoord() {};
 
-    //! Initialize from coordinate array, system index, and an index into the coordinate array
-    AffineCoord(const CoordArray arr, int system, const CoordPair &c):
+    //! Initialize from coordinate array and an index into the coordinate array
+    AffineCoord(const CoordArray arr, const CoordPair &c):
         i_slot(c.slot),
-        deriv_arr(arr.deriv[system])
+        deriv_arr(arr.deriv)
     {
         float q[4];
-        for(int nd=0; nd<3; ++nd) t[nd] = arr.value[system](nd,  c.index);
-        for(int nd=0; nd<4; ++nd) q[nd] = arr.value[system](nd+3,c.index);
+        for(int nd=0; nd<3; ++nd) t[nd] = arr.value(nd,  c.index);
+        for(int nd=0; nd<4; ++nd) q[nd] = arr.value(nd+3,c.index);
 
         // FIXME remove normalization
         float norm_factor = 1.f/sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
