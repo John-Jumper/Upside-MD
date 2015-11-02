@@ -114,8 +114,8 @@ struct Infer_H_O : public CoordNode
         if(logging(LOG_EXTENSIVE)) {
             default_logger->add_logger<float>("virtual", {n_elem, 3}, [&](float* buffer) {
                     for(int nv=0; nv<n_virtual; ++nv) {
-                        StaticCoord<6> x(coords().value, nv);
-                        for(int d=0; d<3; ++d) buffer[nv*3 + d] = x.v[d];
+                        auto x = load_vec<6>(coords().value, nv);
+                        for(int d=0; d<3; ++d) buffer[nv*3 + d] = x[d];
                     }
                 });
         }
@@ -295,7 +295,7 @@ namespace {
             float3 displace_unitvec = inv_dist*displace;
             float  cos_coverage_angle = dot(rHN,displace_unitvec);
 
-            float2 wide_cover = clamped_deBoor_value_and_deriv(p.v+2, dist_coord, n_knot);
+            float2 wide_cover   = clamped_deBoor_value_and_deriv(p.v+2, dist_coord, n_knot);
             float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2+n_knot, dist_coord, n_knot);
 
             float2 angular_sigmoid = compact_sigmoid(p[0]-cos_coverage_angle, p[1]);

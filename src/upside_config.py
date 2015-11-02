@@ -864,7 +864,7 @@ def write_rotamer(fasta, interaction_library, damping):
             (['environment_energy'] if 'environment_energy' in t.root.input.potential else [])
             )
     g._v_attrs.max_iter = 1000
-    g._v_attrs.tol      = 1e-4
+    g._v_attrs.tol      = 1e-3
     g._v_attrs.damping  = damping
     g._v_attrs.iteration_chunk_size = 2
 

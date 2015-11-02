@@ -272,9 +272,9 @@ void reverse_autodiff(
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            auto val = StaticCoord<my_width>(accum, tape_elem.loc + rec);
+            auto val = load_vec<my_width>(accum, tape_elem.loc + rec);
             for(int d=0; d<my_width; ++d)
-                sens[tape_elem.atom].v[d] += val.v[d];
+                sens[tape_elem.atom].v[d] += val[d];
         }
     }
 
@@ -344,9 +344,9 @@ std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordP
     for(unsigned no=0; no<coord_pairs.size(); ++no) {
         for(auto cp: coord_pairs[no]) {
             for(int eo=0; eo<elem_width_output; ++eo) {
-                StaticCoord<NDIM_INPUT> d(accum_array, cp.slot+eo);
+                auto d = load_vec<NDIM_INPUT>(accum_array, cp.slot+eo);
                 for(int i=0; i<NDIM_INPUT; ++i) {
-                    jacobian[eo*coord_pairs.size()*input_size + no*input_size + i*(input_size/NDIM_INPUT) + cp.index] += d.v[i];
+                    jacobian[eo*coord_pairs.size()*input_size + no*input_size + i*(input_size/NDIM_INPUT) + cp.index] += d[i];
                 }
             }
         }

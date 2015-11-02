@@ -161,14 +161,14 @@ void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, Int
 template <int ndim>
 struct ComputeMyDeriv {
     const float* accum;
-    vector<StaticCoord<ndim>> deriv;
+    vector<Vec<ndim>> deriv;
 
     ComputeMyDeriv(const std::vector<float> &accum_, int n_atom):
         accum(accum_.data()), deriv(n_atom)
     {zero();}
 
-    void add_pair(const CoordPair &cp) { deriv.at(cp.index) += StaticCoord<ndim>(accum, cp.slot); }
-    void zero() { for(auto &a: deriv) for(int i=0; i<ndim; ++i) a.v[i] = 0.f; }
+    void add_pair(const CoordPair &cp) { deriv.at(cp.index) += load_vec<ndim>(accum, cp.slot); }
+    void zero() { for(auto &a: deriv) for(int i=0; i<ndim; ++i) a[i] = 0.f; }
     void print(const char* nm) { 
         for(int nr=0; nr<(int)deriv.size(); ++nr) {
             printf("%-12s %2i", nm,nr);

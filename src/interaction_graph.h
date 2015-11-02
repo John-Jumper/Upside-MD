@@ -354,7 +354,7 @@ struct BetweenInteractionGraph {
             n_edge = ne;
         }
 
-        // First find all the edges
+        // Now compute value
         {
             // Timer timer(std::string("edge_computation"));
 

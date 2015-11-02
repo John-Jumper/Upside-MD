@@ -154,32 +154,6 @@ struct TempCoord
 };
 
 
-//! Coordinate read from VecArray without derivative information
-template <int N_DIM>
-struct StaticCoord
-{
-    const static int n_dim = N_DIM; //!< number of dimensions for the coordinate
-    float v[N_DIM];  //!< value of the coordinate
-
-    StaticCoord() {};
-
-    //! Initialize by specifying a VecArray and the location within the VecArray
-    StaticCoord(VecArray value, int index)
-    {
-        for(int nd=0; nd<N_DIM; ++nd) 
-            v[nd] = value(nd,index);
-    }
-
-    //! Extract first 3 dimensions of the value as a float3
-    float3 f3() const {
-        return make_vec3(v[0], v[1], v[2]);
-    }
-
-    //! Add another StaticCoord's value to this object's value
-    StaticCoord<N_DIM>& operator+=(const StaticCoord<N_DIM> &o) {for(int i=0; i<N_DIM; ++i) v[i]+=o.v[i]; return *this;}
-};
-
-
 //! Coordinate that is read and written to VecArray, but with no derivative information
 template <int N_DIM>
 struct MutableCoord

@@ -4,25 +4,23 @@
 #include "md_export.h"
 #include <cmath>
 
-template <typename MutableCoordT, typename StaticCoordT>
 void
 integration_stage_body(
-        MutableCoordT &mom,
-        MutableCoordT &pos,
-        StaticCoordT  &deriv,
+        MutableCoord<3> &mom,
+        MutableCoord<3> &pos,
+        Vec<3>  &deriv,
         float vel_factor,
         float pos_factor, 
         float max_force)
 {
     // assumes unit mass for all particles
-    float3 f = deriv.f3();
     if(max_force) {
-        float f_mag = mag(f)+1e-6f;  // ensure no NaN when mag(f)==0.
+        float f_mag = mag(deriv)+1e-6f;  // ensure no NaN when mag(deriv)==0.
         float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
-        f *= scale_factor;
+        deriv *= scale_factor;
     }
 
-    mom.set_value(mom.f3() - vel_factor*f);
+    mom.set_value(mom.f3() - vel_factor*deriv);
     pos.set_value(pos.f3() + pos_factor*mom.f3());
 }
 
@@ -39,7 +37,7 @@ integration_stage(
     for(int na=0; na<n_atom; ++na) {
         MutableCoord<3> p(mom,   na);
         MutableCoord<3> x(pos,   na);
-        StaticCoord <3> d(deriv, na);
+        auto d = load_vec<3>(deriv, na);
         integration_stage_body(p, x, d, vel_factor, pos_factor, max_force);
         x.flush();
         p.flush();
@@ -61,7 +59,7 @@ void deriv_accumulation(
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            coords[tape_elem.atom] += StaticCoord<3>(accum_buffer, tape_elem.loc + rec).f3();
+            coords[tape_elem.atom] += load_vec<3>(accum_buffer, tape_elem.loc + rec);
         }
     }
 
@@ -72,7 +70,7 @@ void
 recenter(VecArray pos, bool xy_recenter_only, int n_atom)
 {
     float3 center = make_vec3(0.f, 0.f, 0.f);
-    for(int na=0; na<n_atom; ++na) center += StaticCoord<3>(pos,na).f3();
+    for(int na=0; na<n_atom; ++na) center += load_vec<3>(pos,na);
     center /= float(n_atom);
 
     if(xy_recenter_only) center.z() = 0.f;

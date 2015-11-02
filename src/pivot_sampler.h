@@ -119,11 +119,11 @@ struct PivotSampler {
 
         // find deviation from old rama
         float3 d1,d2,d3,d4;
-        float3 prevC = StaticCoord<3>(pos, p.rama_atom[0]).f3();
-        float3 N     = StaticCoord<3>(pos, p.rama_atom[1]).f3();
-        float3 CA    = StaticCoord<3>(pos, p.rama_atom[2]).f3();
-        float3 C     = StaticCoord<3>(pos, p.rama_atom[3]).f3();
-        float3 nextN = StaticCoord<3>(pos, p.rama_atom[4]).f3();
+        float3 prevC = load_vec<3>(pos, p.rama_atom[0]);
+        float3 N     = load_vec<3>(pos, p.rama_atom[1]);
+        float3 CA    = load_vec<3>(pos, p.rama_atom[2]);
+        float3 C     = load_vec<3>(pos, p.rama_atom[3]);
+        float3 nextN = load_vec<3>(pos, p.rama_atom[4]);
 
         float2 old_rama = make_vec2(
                 dihedral_germ(prevC,N,CA,C, d1,d2,d3,d4),

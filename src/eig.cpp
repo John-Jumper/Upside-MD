@@ -395,9 +395,9 @@ affine_reverse_autodiff(
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            auto val = StaticCoord<6>(affine_accum, tape_elem.loc + rec);
+            auto val = load_vec<6>(affine_accum, tape_elem.loc + rec);
             for(int d=0; d<6; ++d)
-                torque_sens[tape_elem.atom].v[d] += val.v[d];
+                torque_sens[tape_elem.atom].v[d] += val[d];
         }
     }
 
