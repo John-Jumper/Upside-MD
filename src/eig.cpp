@@ -390,19 +390,17 @@ affine_reverse_autodiff(
         int n_tape,
         int n_res)
 {
-    std::vector<TempCoord<6>> torque_sens(n_res);
+    std::vector<Vec<6>> torque_sens(n_res);
 
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            auto val = load_vec<6>(affine_accum, tape_elem.loc + rec);
-            for(int d=0; d<6; ++d)
-                torque_sens[tape_elem.atom].v[d] += val[d];
+             torque_sens[tape_elem.atom] += load_vec<6>(affine_accum, tape_elem.loc + rec);
         }
     }
 
     for(int na=0; na<n_res; ++na) {
-        float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na].v[d];
+        float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na][d];
 
         float q[4]; for(int d=0; d<4; ++d) q[d] = affine(d+3,na);
 

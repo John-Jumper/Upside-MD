@@ -268,13 +268,11 @@ void reverse_autodiff(
         int n_tape,
         int n_atom)
 {
-    std::vector<TempCoord<my_width>> sens(n_atom);
+    std::vector<Vec<my_width>> sens(n_atom);
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
         for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            auto val = load_vec<my_width>(accum, tape_elem.loc + rec);
-            for(int d=0; d<my_width; ++d)
-                sens[tape_elem.atom].v[d] += val[d];
+            sens[tape_elem.atom] += load_vec<my_width>(accum, tape_elem.loc + rec);
         }
     }
 
@@ -283,7 +281,7 @@ void reverse_autodiff(
             for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
                 for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
                     MutableCoord<width1> c(deriv1, p[na].slots1[nsl]+sens_dim);
-                    for(int d=0; d<width1; ++d) c.v[d] *= sens[na].v[sens_dim];
+                    for(int d=0; d<width1; ++d) c.v[d] *= sens[na][sens_dim];
                     c.flush();
                 }
             }
@@ -293,7 +291,7 @@ void reverse_autodiff(
             for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
                 for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
                     MutableCoord<width2> c(deriv2, p[na].slots2[nsl]+sens_dim);
-                    for(int d=0; d<width2; ++d) c.v[d] *= sens[na].v[sens_dim];
+                    for(int d=0; d<width2; ++d) c.v[d] *= sens[na][sens_dim];
                     c.flush();
                 }
             }

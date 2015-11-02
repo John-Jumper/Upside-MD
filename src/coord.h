@@ -124,36 +124,6 @@ struct Coord
 };
 
 
-//! Temporary coordinate that is discarded after use
-template <int N_DIM>
-struct TempCoord
-{
-    const static int n_dim = N_DIM;  //!< number of dimensions for the coordinate
-    float v[N_DIM];  //!< value of the coordinate
-
-    //! Default constructor initializes the value to 0.
-    TempCoord() { for(int nd=0; nd<N_DIM; ++nd) v[nd] = 0.f; }
-
-    //! Extract first 3 dimensions of the value as a float3
-    float3 f3() const { return make_vec3(v[0], v[1], v[2]); }
-
-    //! Set first 3 dimensions of the value as a float3
-    void set_value(float3 val) {
-        v[0] = val.x();
-        v[1] = val.y();
-        v[2] = val.z();
-    }
-
-    //! Add float3 to first 3 dimensions of coordinate
-    TempCoord<N_DIM>& operator+=(const float3 &o) {
-        v[0] += o.x();
-        v[1] += o.y();
-        v[2] += o.z();
-        return *this;
-    }
-};
-
-
 //! Coordinate that is read and written to VecArray, but with no derivative information
 template <int N_DIM>
 struct MutableCoord
