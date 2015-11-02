@@ -280,9 +280,7 @@ void reverse_autodiff(
         if(width1) {
             for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
                 for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    MutableCoord<width1> c(deriv1, p[na].slots1[nsl]+sens_dim);
-                    for(int d=0; d<width1; ++d) c.v[d] *= sens[na][sens_dim];
-                    c.flush();
+                    update_vec_scale<width1>(deriv1, p[na].slots1[nsl]+sens_dim, sens[na][sens_dim]);
                 }
             }
         }
@@ -290,9 +288,7 @@ void reverse_autodiff(
         if(width2) {
             for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
                 for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    MutableCoord<width2> c(deriv2, p[na].slots2[nsl]+sens_dim);
-                    for(int d=0; d<width2; ++d) c.v[d] *= sens[na][sens_dim];
-                    c.flush();
+                    update_vec_scale<width2>(deriv2, p[na].slots2[nsl]+sens_dim, sens[na][sens_dim]);
                 }
             }
         }

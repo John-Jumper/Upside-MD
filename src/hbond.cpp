@@ -25,9 +25,9 @@ struct NH_CO_Params {
 
 namespace {
 
-template <typename MutableCoordT, typename CoordT>
+template <typename CoordT>
 void infer_x_body(
-        MutableCoordT &hbond_pos,
+        Vec<6> &hbond_pos,
         CoordT &prev_c,
         CoordT &curr_c,
         CoordT &next_c,
@@ -71,12 +71,12 @@ void infer_x_body(
     }
 
     // set values
-    hbond_pos.v[0] = curr_c.v[0] - bond_length*disp.x();
-    hbond_pos.v[1] = curr_c.v[1] - bond_length*disp.y();
-    hbond_pos.v[2] = curr_c.v[2] - bond_length*disp.z();
-    hbond_pos.v[3] = -disp.x();
-    hbond_pos.v[4] = -disp.y();
-    hbond_pos.v[5] = -disp.z();
+    hbond_pos[0] = curr_c.v[0] - bond_length*disp.x();
+    hbond_pos[1] = curr_c.v[1] - bond_length*disp.y();
+    hbond_pos[2] = curr_c.v[2] - bond_length*disp.z();
+    hbond_pos[3] = -disp.x();
+    hbond_pos[4] = -disp.y();
+    hbond_pos[5] = -disp.z();
 }
 
 }
@@ -127,14 +127,14 @@ struct Infer_H_O : public CoordNode
         auto HN_OC = coords().value;
         auto posc  = pos.coords();
         for(int nt=0; nt<n_virtual; ++nt) {
-            MutableCoord<6> hbond_pos(HN_OC, nt);
-            Coord<3,6>      prev_c(posc, params[nt].atom[0]);
-            Coord<3,6>      curr_c(posc, params[nt].atom[1]);
-            Coord<3,6>      next_c(posc, params[nt].atom[2]);
+            Vec<6>     hbond_pos;
+            Coord<3,6> prev_c(posc, params[nt].atom[0]);
+            Coord<3,6> curr_c(posc, params[nt].atom[1]);
+            Coord<3,6> next_c(posc, params[nt].atom[2]);
 
             infer_x_body(hbond_pos, prev_c,curr_c,next_c, params[nt].bond_length);
 
-            hbond_pos.flush();
+            store_vec(HN_OC, nt, hbond_pos);
             prev_c.flush();
             curr_c.flush();
             next_c.flush();

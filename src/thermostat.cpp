@@ -12,9 +12,8 @@ void OrnsteinUhlenbeckThermostat::apply(VecArray mom, int n_atom) {
 
     for(int na=0; na<n_atom; ++na) {
         RandomGenerator random(random_seed, THERMOSTAT_RANDOM_STREAM, na, n_invocations);
-        MutableCoord<3> p(mom, na);
-        p.set_value(mom_scale*p.f3() + noise_scale*random.normal3());
-        p.flush();
+        auto p = load_vec<3>(mom, na);
+        store_vec(mom, na, mom_scale*p + noise_scale*random.normal3());
     }
     n_invocations++;
 }

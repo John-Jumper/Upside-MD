@@ -143,7 +143,7 @@ void rama_coord(
         const int n_term) 
 {
     for(int nt=0; nt<n_term; ++nt) {
-        MutableCoord<2> rama_pos(output, nt);
+        Vec<2> rama_pos;
 
         bool has_prev = params[nt].atom[0].index != index_t(-1);
         bool has_next = params[nt].atom[4].index != index_t(-1);
@@ -157,11 +157,11 @@ void rama_coord(
         {
             float3 d1,d2,d3,d4;
             if(has_prev) {
-                rama_pos.v[0] = dihedral_germ(
+                rama_pos[0] = dihedral_germ(
                         prev_C.f3(), N.f3(), CA.f3(), C.f3(),
                         d1, d2, d3, d4);
             } else {
-                rama_pos.v[0] = -1.3963f;  // -80 degrees
+                rama_pos[0] = -1.3963f;  // -80 degrees
                 d1 = d2 = d3 = d4 = make_vec3(0.f,0.f,0.f);
             }
 
@@ -175,11 +175,11 @@ void rama_coord(
         {
             float3 d2,d3,d4,d5;
             if(has_next) {
-                rama_pos.v[1] = dihedral_germ(
+                rama_pos[1] = dihedral_germ(
                         N.f3(), CA.f3(), C.f3(), next_N.f3(),
                         d2, d3, d4, d5);
             } else {
-                rama_pos.v[1] = -1.3963f;  // -80 degrees
+                rama_pos[1] = -1.3963f;  // -80 degrees
                 d2 = d3 = d4 = d5 = make_vec3(0.f,0.f,0.f);
             }
 
@@ -190,7 +190,7 @@ void rama_coord(
             next_N.set_deriv(1,d5);
         }
 
-        rama_pos.flush();
+        store_vec(output, nt, rama_pos);
         if(has_prev) prev_C.flush();
         N .flush();
         CA.flush();

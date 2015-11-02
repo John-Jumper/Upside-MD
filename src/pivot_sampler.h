@@ -145,27 +145,24 @@ struct PivotSampler {
         float psi_U[9]; axis_angle_to_rot(psi_U, delta_rama.y(), normalized(C -CA));
 
         {
-            MutableCoord<3> y(pos, p.rama_atom[3]);  // C
-            float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin); // unnecessary but harmless
+            auto y = load_vec<3>(pos, p.rama_atom[3]);  // C
+            float3 after_psi = psi_origin + apply_rotation(psi_U, y        -psi_origin); // unnecessary but harmless
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
-            y.set_value(after_phi);
-            y.flush();
+            store_vec(pos, p.rama_atom[3], after_phi);
         }
 
         {
-            MutableCoord<3> y(pos, p.rama_atom[4]);  // nextN
-            float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin);
+            auto y = load_vec<3>(pos, p.rama_atom[4]);  // nextN
+            float3 after_psi = psi_origin + apply_rotation(psi_U, y        -psi_origin);
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
-            y.set_value(after_phi);
-            y.flush();
+            store_vec(pos, p.rama_atom[4], after_phi);
         }
 
         for(int na=p.pivot_range[0]; na<p.pivot_range[1]; ++na) {
-            MutableCoord<3> y(pos, na);
-            float3 after_psi = psi_origin + apply_rotation(psi_U, y.f3()   -psi_origin);
+            auto y = load_vec<3>(pos, na);
+            float3 after_psi = psi_origin + apply_rotation(psi_U, y        -psi_origin);
             float3 after_phi = phi_origin + apply_rotation(phi_U, after_psi-phi_origin);
-            y.set_value(after_phi);
-            y.flush();
+            store_vec(pos, na, after_phi);
         }
 
         *delta_lprob = new_lprob - old_lprob;

@@ -417,9 +417,7 @@ affine_reverse_autodiff(
 
         for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
             for(int sens_dim=0; sens_dim<7; ++sens_dim) {
-                MutableCoord<3> c(pos_deriv, p[na].slots1[nsl]+sens_dim);
-                for(int d=0; d<3; ++d) c.v[d] *= sens[sens_dim];
-                c.flush();
+                update_vec_scale<3>(pos_deriv, p[na].slots1[nsl]+sens_dim, sens[sens_dim]);
             }
         }
     }
@@ -454,14 +452,14 @@ struct AffineAlignment : public CoordNode
         auto posc = pos.coords();
 
         for(int nr=0; nr<n_elem; ++nr) {
-            MutableCoord<7> rigid_body_coord(rigid_body, nr);
+            Vec<7> rigid_body_coord;
 
             Coord<3,7> x1(posc, params[nr].atom[0]);
             Coord<3,7> x2(posc, params[nr].atom[1]);
             Coord<3,7> x3(posc, params[nr].atom[2]);
 
             float my_deriv[3*3*7];
-            three_atom_alignment(rigid_body_coord.v,my_deriv, x1.v,x2.v,x3.v, params[nr].ref_geom);
+            three_atom_alignment(rigid_body_coord.v, my_deriv, x1.v,x2.v,x3.v, params[nr].ref_geom);
 
             for(int quat_dim=0; quat_dim<7; ++quat_dim) {
                 for(int atom_dim=0; atom_dim<3; ++atom_dim) {
@@ -471,7 +469,7 @@ struct AffineAlignment : public CoordNode
                 }
             }
 
-            rigid_body_coord.flush();
+            store_vec(rigid_body, nr, rigid_body_coord);
             x1.flush();
             x2.flush();
             x3.flush();

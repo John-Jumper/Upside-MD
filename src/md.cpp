@@ -5,26 +5,6 @@
 #include <cmath>
 
 void
-integration_stage_body(
-        MutableCoord<3> &mom,
-        MutableCoord<3> &pos,
-        Vec<3>  &deriv,
-        float vel_factor,
-        float pos_factor, 
-        float max_force)
-{
-    // assumes unit mass for all particles
-    if(max_force) {
-        float f_mag = mag(deriv)+1e-6f;  // ensure no NaN when mag(deriv)==0.
-        float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
-        deriv *= scale_factor;
-    }
-
-    mom.set_value(mom.f3() - vel_factor*deriv);
-    pos.set_value(pos.f3() + pos_factor*mom.f3());
-}
-
-void
 integration_stage(
         VecArray mom,
         VecArray pos,
@@ -35,12 +15,18 @@ integration_stage(
         int n_atom)
 {
     for(int na=0; na<n_atom; ++na) {
-        MutableCoord<3> p(mom,   na);
-        MutableCoord<3> x(pos,   na);
+        // assumes unit mass for all particles
+
         auto d = load_vec<3>(deriv, na);
-        integration_stage_body(p, x, d, vel_factor, pos_factor, max_force);
-        x.flush();
-        p.flush();
+        if(max_force) {
+            float f_mag = mag(d)+1e-6f;  // ensure no NaN when mag(deriv)==0.
+            float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
+            d *= scale_factor;
+        }
+
+        auto p = load_vec<3>(mom, na) - vel_factor*d;
+        store_vec (mom, na, p);
+        update_vec(pos, na, pos_factor*p);
     }
 }
 
@@ -52,9 +38,8 @@ void deriv_accumulation(
         int n_tape,
         int n_atom)
 {
-    std::vector<MutableCoord<3>> coords;
-    coords.reserve(n_atom);
-    for(int na=0; na<n_atom; ++na) coords.emplace_back(deriv, na, MutableCoord<3>::Zero);
+    std::vector<Vec<3>> coords(n_atom);
+    for(int na=0; na<n_atom; ++na) coords[na] = make_zero<3>();
 
     for(int nt=0; nt<n_tape; ++nt) {
         auto tape_elem = tape[nt];
@@ -63,7 +48,7 @@ void deriv_accumulation(
         }
     }
 
-    for(int na=0; na<n_atom; ++na) coords[na].flush();
+    for(int na=0; na<n_atom; ++na) store_vec(deriv, na, coords[na]);
 }
 
 void
@@ -75,9 +60,6 @@ recenter(VecArray pos, bool xy_recenter_only, int n_atom)
 
     if(xy_recenter_only) center.z() = 0.f;
 
-    for(int na=0; na<n_atom; ++na) {
-        MutableCoord<3> x(pos,na);
-        x.set_value(x.f3() - center);
-        x.flush();
-    }
+    for(int na=0; na<n_atom; ++na)
+        update_vec(pos, na, -center);
 }

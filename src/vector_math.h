@@ -149,7 +149,7 @@ template <int ndim, typename ScalarT = float>
 struct
 // alignas(std::alignment_of<ScalarT>::value)  // GCC 4.8.1 does not like this line
  Vec {
-    ScalarT v[ndim];
+    ScalarT v[ndim>=1 ? ndim : 1];  // avoid 0-size arrays since this is not allowed
 
     ScalarT&       x()       {return           v[0];}
     const ScalarT& x() const {return           v[0];}
@@ -195,6 +195,11 @@ template <int D>
 inline void store_vec(VArray& a, int idx, const Vec<D,float>& r) {
     #pragma unroll
     for(int d=0; d<D; ++d) a(d,idx) = r[d];
+}
+
+template <int D, typename multype>
+inline void update_vec_scale(VecArray a, int idx, const multype &r) {
+    store_vec(a,idx, load_vec<D>(a,idx) * r);
 }
 
 template <int D>
