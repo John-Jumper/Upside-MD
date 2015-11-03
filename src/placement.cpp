@@ -98,8 +98,6 @@ struct RigidPlacementNode: public CoordNode {
         VecArray affine_pos = alignment.coords().value;
         VecArray rama_pos   = rama.coords().value;
         VecArray pos        = coords().value;
-        VecArray phi_d      = rama_deriv;
-        VecArray psi_d      = rama_deriv.shifted(n_pos_dim);
 
         for(int ne: range(n_elem)) {
             auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
@@ -117,8 +115,8 @@ struct RigidPlacementNode: public CoordNode {
             for(PlaceType type: signature) {
                 switch(type) {
                     case PlaceType::SCALAR:
-                        phi_d(j,ne) = val[j*3+0] * scale_x;
-                        psi_d(j,ne) = val[j*3+1] * scale_y;
+                        rama_deriv(j,ne)           = val[j*3+0] * scale_x;
+                        rama_deriv(n_pos_dim+j,ne) = val[j*3+1] * scale_y;
                         pos  (j,ne) = val[j*3+2];
                         j += 1;
                         break;
@@ -130,12 +128,15 @@ struct RigidPlacementNode: public CoordNode {
                         // from GCC at the time of writing.
                         if(n_pos_dim >= 3) { 
                             // point and vector differ only in shifting the final output
-                            store_vec(phi_d.shifted(j), ne, scale_x * apply_rotation(U, READ3(j,0)));
-                            store_vec(psi_d.shifted(j), ne, scale_y * apply_rotation(U, READ3(j,1)));
+                            auto my_phi_deriv = scale_x * apply_rotation(U, READ3(j,0));
+                            auto my_psi_deriv = scale_y * apply_rotation(U, READ3(j,1));
+                            auto my_pos = (type==PlaceType::POINT
+                                    ? apply_affine  (U,t, READ3(j,2))
+                                    : apply_rotation(U,   READ3(j,2)));
 
-                            store_vec(pos.shifted(j), ne, (type==PlaceType::POINT
-                                        ? apply_affine  (U,t, READ3(j,2))
-                                        : apply_rotation(U,   READ3(j,2))));
+                            for(int k: range(3)) rama_deriv(          j+k,ne) = my_phi_deriv[k];
+                            for(int k: range(3)) rama_deriv(n_pos_dim+j+k,ne) = my_psi_deriv[k];
+                            for(int k: range(3)) pos       (          j+k,ne) = my_pos[k];
 
                             j += 3;
                         }
@@ -166,9 +167,10 @@ struct RigidPlacementNode: public CoordNode {
         for(int ne: range(n_elem)) {
             auto d = sens[ne];
 
+            auto my_rama_deriv = load_vec<2*n_pos_dim>(rama_deriv, ne);
             auto rd = make_vec2(
-                        dot(d, load_vec<n_pos_dim>(rama_deriv.shifted(0),ne)),
-                        dot(d, load_vec<n_pos_dim>(rama_deriv.shifted(n_pos_dim),ne)));
+                        dot(d, extract<        0,  n_pos_dim>(my_rama_deriv)),
+                        dot(d, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
 
             store_vec(r_accum, params[ne].rama_residue.slot, rd);
 
@@ -186,7 +188,7 @@ struct RigidPlacementNode: public CoordNode {
                     case PlaceType::POINT:
                         // see note in compute_value for why this if-statement is unnecessary but harmless
                         if(n_pos_dim >= 3) { 
-                            auto x  = load_vec<3>(pos.shifted(j), ne);
+                            auto x  = make_vec3(pos(j+0,ne), pos(j+1,ne), pos(j+2,ne));
                             auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
 
                             // torque relative to the residue center

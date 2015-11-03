@@ -36,10 +36,6 @@ struct VecArray {
     VecArray(float* v_, int component_offset_):
         v(v_), component_offset(component_offset_) {}
 
-    VecArray shifted(int shift_amount) {
-        return VecArray(v + shift_amount*component_offset, component_offset);
-    }
-
     float& operator()(int i_comp, int i_elem) {
         return v[i_comp*component_offset + i_elem];
     }
@@ -79,10 +75,6 @@ struct VecArrayStorage {
     {}
 
     operator VecArray() {return VecArray(storage.get(), component_offset);}
-    VecArray shifted(int shift_amount) {
-        VecArray a = *this;
-        return a.shifted(shift_amount);
-    }
 
     void reset(int n_dim_, int n_elem_) {
         n_dim = n_dim_;
