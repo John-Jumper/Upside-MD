@@ -136,13 +136,12 @@ struct EdgeHolder {
                 int ne, float prob_val,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
-            // if(prob_val!=1.f) printf("prob nonzero %i %f %i %i %i %i\n", ne,prob_val,id1,rot1,id2,rot2);
             // really I could take n_rot1 and n_rot2 as parameters so I didn't have to do a read 
             // of a number I already know
             unsigned pr = (id1<<16) + id2;  // this limits me to 65k residues, but that is enough I think
-            auto ei = nodes_to_edge.find(pr);
 
             unsigned idx;
+            auto ei = nodes_to_edge.find(pr);
             if(ei == nodes_to_edge.end()) {
                 idx = n_edge;
                 nodes_to_edge[pr] = n_edge;
