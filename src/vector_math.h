@@ -8,15 +8,37 @@
 #include <cassert>
 #include <algorithm>
 
-struct VArray {
-    const int n_elem;
-    const int elem_width;
-    std::unique_ptr<float[]> x;
 
-    VArray(int elem_width_, int n_elem_):
+struct VecArray {
+    float* x;
+    int elem_width;
+
+    VecArray(): x(nullptr), elem_width(0) {}
+
+    VecArray(float* x_, int elem_width_):
+        x(x_), elem_width(elem_width_) {}
+
+    float& operator()(int i_comp, int i_elem) {
+        return x[i_comp+ i_elem*elem_width];
+    }
+
+    const float& operator()(int i_comp, int i_elem) const {
+        return x[i_comp + i_elem*elem_width];
+    }
+};
+
+
+struct VecArrayStorage {
+    int n_elem;
+    int elem_width;
+    std::unique_ptr<float[], std::default_delete<float[]>> x;
+
+    VecArrayStorage(int elem_width_, int n_elem_):
         n_elem(n_elem_), elem_width(elem_width_),
         x(new float[n_elem*elem_width]) {}
 
+    VecArrayStorage(): VecArrayStorage(1,1) {}
+
     float& operator()(int i_comp, int i_elem) {
         return x[i_elem*elem_width + i_comp];
     }
@@ -24,81 +46,70 @@ struct VArray {
     const float& operator()(int i_comp, int i_elem) const {
         return x[i_elem*elem_width + i_comp];
     }
-};
 
+    operator VecArray() {return VecArray(x.get(), elem_width);}
 
-struct VecArray {
-    float* v;
-    int component_offset;
-
-    VecArray(): v(nullptr), component_offset(0) {}
-
-    VecArray(float* v_, int component_offset_):
-        v(v_), component_offset(component_offset_) {}
-
-    float& operator()(int i_comp, int i_elem) {
-        return v[i_comp*component_offset + i_elem];
-    }
-
-    const float& operator()(int i_comp, int i_elem) const {
-        return v[i_comp*component_offset + i_elem];
+    void reset(int n_dim_, int n_elem_) {
+        elem_width = n_dim_;
+        n_elem = n_elem_;
+        x.reset(new float[n_elem*elem_width]);
     }
 };
 
 
-inline void swap(VArray& a, VArray& b) {
+inline void swap(VecArrayStorage& a, VecArrayStorage& b) {
     assert(a.n_elem==b.n_elem);
     assert(a.elem_width==b.elem_width);
     a.x.swap(b.x);
 }
 
 
-inline void swap(VecArray &a, VecArray &b) {
-    { auto tmp=a.v; a.v=b.v; b.v=tmp; }
-    { auto tmp=a.component_offset; a.component_offset=b.component_offset; b.component_offset=tmp; }
-}
+// inline void swap(VecArray &a, VecArray &b) {
+//     { auto tmp=a.v; a.v=b.v; b.v=tmp; }
+//     { auto tmp=a.component_offset; a.component_offset=b.component_offset; b.component_offset=tmp; }
+// }
 
 
-struct VecArrayStorage {
-    int n_dim;
-    int n_elem;
+// struct VecArrayStorage {
+//     int n_dim;
+//     int n_elem;
+// 
+//     int component_offset;
+//     std::unique_ptr<float[], std::default_delete<float[]>> storage;
+// 
+//     VecArrayStorage(): VecArrayStorage(0,0) {}
+// 
+//     VecArrayStorage(int n_dim_, int n_elem_):
+//         n_dim(n_dim_), n_elem(n_elem_),
+//         component_offset(n_elem),
+//         storage(new float[n_dim*component_offset])
+//     {}
+// 
+//     operator VecArray() {return VecArray(storage.get(), component_offset);}
+// 
+//     void reset(int n_dim_, int n_elem_) {
+//         n_dim = n_dim_;
+//         n_elem = n_elem_;
+//         component_offset = n_elem;
+//         storage.reset(new float[n_dim*component_offset]);
+//     }
+// 
+//     float& operator()(int i_comp, int i_elem) {
+//         return storage.get()[i_comp*component_offset + i_elem];
+//     }
+//     const float& operator()(int i_comp, int i_elem) const {
+//         return storage.get()[i_comp*component_offset + i_elem];
+//     }
+// };
 
-    int component_offset;
-    std::unique_ptr<float[], std::default_delete<float[]>> storage;
 
-    VecArrayStorage(): VecArrayStorage(0,0) {}
-
-    VecArrayStorage(int n_dim_, int n_elem_):
-        n_dim(n_dim_), n_elem(n_elem_),
-        component_offset(n_elem),
-        storage(new float[n_dim*component_offset])
-    {}
-
-    operator VecArray() {return VecArray(storage.get(), component_offset);}
-
-    void reset(int n_dim_, int n_elem_) {
-        n_dim = n_dim_;
-        n_elem = n_elem_;
-        component_offset = n_elem;
-        storage.reset(new float[n_dim*component_offset]);
-    }
-
-    float& operator()(int i_comp, int i_elem) {
-        return storage.get()[i_comp*component_offset + i_elem];
-    }
-    const float& operator()(int i_comp, int i_elem) const {
-        return storage.get()[i_comp*component_offset + i_elem];
-    }
-};
-
-
-static void copy(VArray& v_src, VArray& v_dst) {
+static void copy(VecArrayStorage& v_src, VecArrayStorage& v_dst) {
     assert(v_src.n_elem==v_dst.n_elem);
     assert(v_src.elem_width==v_dst.elem_width);
     std::copy_n(v_src.x.get(), v_src.n_elem*v_src.elem_width, v_dst.x.get()); 
 }
 
-static void fill(VArray& v, float fill_value) {
+static void fill(VecArrayStorage& v, float fill_value) {
     std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
 }
 
@@ -160,6 +171,14 @@ typedef Vec<2,float> float2;
 typedef Vec<3,float> float3;
 typedef Vec<4,float> float4;
 
+// template <int D>
+// inline Vec<D,float> load_vec(const VecArray& a, int idx) {
+//     Vec<D,float> r;
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) r[d] = a(d,idx);
+//     return r;
+// }
+
 template <int D>
 inline Vec<D,float> load_vec(const VecArray& a, int idx) {
     Vec<D,float> r;
@@ -168,23 +187,21 @@ inline Vec<D,float> load_vec(const VecArray& a, int idx) {
     return r;
 }
 
-template <int D>
-inline Vec<D,float> load_vec(const VArray& a, int idx) {
-    Vec<D,float> r;
-    #pragma unroll
-    for(int d=0; d<D; ++d) r[d] = a(d,idx);
-    return r;
-}
 
+// template <int D>
+// inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) a(d,idx) = r[d];
+// }
 
 template <int D>
-inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
+inline void store_vec(VecArrayStorage& a, int idx, const Vec<D,float>& r) {
     #pragma unroll
     for(int d=0; d<D; ++d) a(d,idx) = r[d];
 }
 
 template <int D>
-inline void store_vec(VArray& a, int idx, const Vec<D,float>& r) {
+inline void store_vec(VecArray& a, int idx, const Vec<D,float>& r) {
     #pragma unroll
     for(int d=0; d<D; ++d) a(d,idx) = r[d];
 }
@@ -194,12 +211,7 @@ inline void update_vec_scale(VecArray a, int idx, const multype &r) {
     store_vec(a,idx, load_vec<D>(a,idx) * r);
 }
 
-template <int D>
-inline void update_vec(VecArray a, int idx, const Vec<D> &r) {
-    store_vec(a,idx, load_vec<D>(a,idx) + r);
-}
-
-template <int D>
+template <int D, typename VArray>
 inline void update_vec(VArray& a, int idx, const Vec<D> &r) {
     store_vec(a,idx, load_vec<D>(a,idx) + r);
 }

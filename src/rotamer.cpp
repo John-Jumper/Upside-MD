@@ -21,10 +21,10 @@ struct NodeHolder {
         const int n_rot;
         const int n_elem;
 
-        VArray prob;
+        VecArrayStorage prob;
 
-        VArray cur_belief;
-        VArray old_belief;
+        VecArrayStorage cur_belief;
+        VecArrayStorage old_belief;
 
         NodeHolder(int n_rot_, int n_elem_):
             n_rot(n_rot_),
@@ -104,10 +104,10 @@ struct EdgeHolder {
         struct EdgeLoc {int edge_num, dim, ne;};
 
         // FIXME include numerical stability data (basically scale each probability in a sane way)
-        VArray prob;
-        VArray cur_belief;
-        VArray old_belief;
-        VArray marginal;
+        VecArrayStorage prob;
+        VecArrayStorage cur_belief;
+        VecArrayStorage old_belief;
+        VecArrayStorage marginal;
 
         vector<pair<int,int>> edge_indices;
         unordered_map<unsigned,unsigned> nodes_to_edge;
@@ -161,7 +161,7 @@ struct EdgeHolder {
 
         void move_edge_prob_to_node2() {
             // FIXME assert n_rot1 == 1
-            VArray& p = nodes2.prob;
+            VecArray p = nodes2.prob;
             for(int ne: range(n_edge)) {
                 int nr = edge_indices[ne].second;
                 for(int no: range(n_rot2)) p(no,nr) *= prob(no,ne);
@@ -235,11 +235,11 @@ struct EdgeHolder {
         void update_beliefs(float damping) {
             // FIXME ASSERT(n_rot1 == N_ROT1)
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
-            VArray& vec_old_node_belief1 = nodes1.old_belief;
-            VArray& vec_cur_node_belief1 = nodes1.cur_belief;
+            VecArray vec_old_node_belief1 = nodes1.old_belief;
+            VecArray vec_cur_node_belief1 = nodes1.cur_belief;
 
-            VArray& vec_old_node_belief2 = nodes2.old_belief;
-            VArray& vec_cur_node_belief2 = nodes2.cur_belief;
+            VecArray vec_old_node_belief2 = nodes2.old_belief;
+            VecArray vec_cur_node_belief2 = nodes2.cur_belief;
 
             for(int ne: range(n_edge)) {
                 int n1 = edge_indices[ne].first;

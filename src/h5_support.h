@@ -14,12 +14,12 @@ namespace h5 {
 
 //! \cond
 template <typename T> // DO NOT ADD BOOL TO THIS TYPE -- unwitting users might hit vector<bool>
-inline const hid_t select_predtype () { return T::NO_SPECIALIZATION_AVAILABLE; }
-template<> inline const hid_t select_predtype<float> (){ return H5T_NATIVE_FLOAT;  }
-template<> inline const hid_t select_predtype<double>(){ return H5T_NATIVE_DOUBLE; }
-template<> inline const hid_t select_predtype<int>   (){ return H5T_NATIVE_INT;    }
-template<> inline const hid_t select_predtype<long>  (){ return H5T_NATIVE_LONG;    }
-template<> inline const hid_t select_predtype<unsigned>(){ return H5T_NATIVE_UINT;    }
+inline hid_t select_predtype () { return T::NO_SPECIALIZATION_AVAILABLE; }
+template<> inline hid_t select_predtype<float> (){ return H5T_NATIVE_FLOAT;  }
+template<> inline hid_t select_predtype<double>(){ return H5T_NATIVE_DOUBLE; }
+template<> inline hid_t select_predtype<int>   (){ return H5T_NATIVE_INT;    }
+template<> inline hid_t select_predtype<long>  (){ return H5T_NATIVE_LONG;    }
+template<> inline hid_t select_predtype<unsigned>(){ return H5T_NATIVE_UINT;    }
 //! \endcond
 
 int h5_noerr(int i); //!< if i<0 (signalling failed H5 function), throw an error

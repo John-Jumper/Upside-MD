@@ -174,8 +174,6 @@ struct PivotSampler {
             const float temperature,
             DerivEngine& engine) 
     {
-        VecArray pos_sys = engine.pos->coords().value;
-
         std::vector<float> pos_copy = engine.pos->output;
         float delta_lprob;
 
@@ -195,10 +193,10 @@ struct PivotSampler {
             pivot_stats.n_success++;
         } else {
             // If we reject the pivot, we must reverse it
-            std::copy_n(
-                    pos_copy.data(),
-                    engine.pos->n_atom*3,
-                    pos_sys.v);
+            std::copy(
+                    begin(pos_copy),
+                    end  (pos_copy),
+                    begin(engine.pos->output));
         }
     }
 

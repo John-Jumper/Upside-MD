@@ -137,7 +137,7 @@ struct RamaCoordParams {
 };
 
 void rama_coord(
-        const VecArray output,
+              VecArray output,
         const CoordArray pos,
         const RamaCoordParams* params,
         const int n_term) 

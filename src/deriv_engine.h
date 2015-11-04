@@ -38,7 +38,7 @@ struct SlotMachine
     }
 
     VecArray accum_array() { 
-        return VecArray(accum.data(), n_slot); 
+        return VecArray(accum.data(), width); 
     }
 };
 
@@ -108,7 +108,7 @@ struct CoordNode : public DerivComputation
         output(n_elem*elem_width), 
         slot_machine(elem_width, n_elem) {}
     virtual CoordArray coords() {
-        return CoordArray(VecArray(output.data(), n_elem), slot_machine.accum_array());
+        return CoordArray(VecArray(output.data(), elem_width), slot_machine.accum_array());
     }
 };
 
@@ -142,10 +142,10 @@ struct Pos : public CoordNode
     virtual void propagate_deriv();
     virtual double test_value_deriv_agreement() {return 0.;};
     CoordArray coords() {
-        return CoordArray(VecArray(output.data(), n_atom), slot_machine.accum_array());
+        return CoordArray(VecArray(output.data(), 3), slot_machine.accum_array());
     }
     VecArray deriv_array() {
-        return VecArray(deriv.data(), n_atom);
+        return VecArray(deriv.data(), 3);
     }
 };
 

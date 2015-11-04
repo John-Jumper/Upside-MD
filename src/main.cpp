@@ -157,12 +157,12 @@ struct ReplicaExchange {
 
         // swap coordinates and the associated system indices
         auto coord_swap = [&](int ns1, int ns2) {
-            VecArray value1 = systems[ns1].engine.pos->coords().value;
-            VecArray value2 = systems[ns2].engine.pos->coords().value;
+            auto& value1 = systems[ns1].engine.pos->output;
+            auto& value2 = systems[ns2].engine.pos->output;
             swap_ranges(
-                    value1.v,  
-                    value1.v + 3*value1.component_offset,
-                    value2.v);
+                    begin(value1),
+                    end  (value1),
+                    begin(value2));
             swap(replica_indices[ns1], replica_indices[ns2]);
         };
 

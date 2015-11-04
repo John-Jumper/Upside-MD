@@ -104,7 +104,7 @@ struct AffineCoord
 
         // FIXME remove normalization
         float norm_factor = 1.f/sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
-        for(int d=0; d<4; ++d) q[d] *= norm_factor;
+        for(int i=0; i<4; ++i) q[i] *= norm_factor;
         quat_to_rot(U,q);
 
         for(int ndo=0; ndo<NDIM_OUTPUT; ++ndo) for(int nd=0; nd<6; ++nd) d[ndo][nd] = 0.f;
