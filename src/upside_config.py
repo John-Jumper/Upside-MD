@@ -840,11 +840,11 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     grp = t.create_group(potential, 'placement_rotamer')
     grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
-    create_array(grp, 'signature',       np.array(['point']))
+    create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
-    create_array(grp, 'placement_data',  placement_pos[...,:3])
+    create_array(grp, 'placement_data',  placement_pos[...,:6])
     create_array(grp, 'beadtype_seq',    beadtype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
 

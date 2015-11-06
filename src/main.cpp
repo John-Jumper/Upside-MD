@@ -386,7 +386,7 @@ try {
         int n_system = systems.size();
 
         #pragma omp critical
-        for(int ns=0; ns<n_system; ++ns) {
+        for(int ns=0; ns<n_system; ++ns) try {
             System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
             sys->random_seed = base_random_seed + ns;
 
@@ -500,6 +500,12 @@ try {
                                 "This is not what you want.  Consider --disable-recentering.");
                 }
             }
+        } catch(const string &e) {
+            fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
+            exit(1);
+        } catch(...) {
+            fprintf(stderr, "\n\nERROR: unknown error\n");
+            exit(1);
         }
         default_logger = shared_ptr<H5Logger>();  // FIXME kind of a hack for the ugly global variable
 

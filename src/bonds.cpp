@@ -594,8 +594,8 @@ struct ConstantCoord : public CoordNode
     VecArrayStorage value;
 
     ConstantCoord(hid_t grp):
-        CoordNode(get_dset_size(3, grp, "value")[0], 
-                  get_dset_size(3, grp, "value")[1]),
+        CoordNode(get_dset_size(2, grp, "value")[0], 
+                  get_dset_size(2, grp, "value")[1]),
         value(elem_width, n_elem)
     {
         traverse_dset<2,float>(grp, "value", [&](size_t ne, size_t nd, float x) {

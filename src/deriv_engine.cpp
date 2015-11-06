@@ -36,6 +36,12 @@ bool is_prefix(const std::string& s1, const std::string& s2) {
     return s1 == s2.substr(0,s1.size());
 }
 
+void check_elem_width_lower_bound(const CoordNode& node, int elem_width_lower_bound) {
+    if(node.elem_width < elem_width_lower_bound) 
+        throw std::string("expected argument with width at least ") + std::to_string(elem_width_lower_bound) + 
+            " but received argument with width " + std::to_string(node.elem_width);
+}
+
 void check_elem_width(const CoordNode& node, int expected_elem_width) {
     if(node.elem_width != expected_elem_width) 
         throw std::string("expected argument with width ") + std::to_string(expected_elem_width) + 

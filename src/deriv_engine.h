@@ -220,6 +220,7 @@ NodeCreationMap& node_creation_map();
 bool is_prefix(const std::string& s1, const std::string& s2);
 void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn);
 void check_elem_width(const CoordNode& node, int expected_elem_width);
+void check_elem_width_lower_bound(const CoordNode& node, int elem_width_lower_bound);
 void check_arguments_length(const ArgList& arguments, int n_expected);
 
 template <typename NodeClass, int n_args>

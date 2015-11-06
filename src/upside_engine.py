@@ -152,7 +152,7 @@ def freeze_nodes(new_h5_path, old_h5_path, nodes_to_freeze, additional_nodes_to_
         for nm,value in freeze.items():
             g = tn.create_group(tn.root.input.potential, 'constant_'+nm)
             g._v_attrs.arguments = []
-            tn.create_array(g, 'value', obj=value[None])  # add extra dimension for system
+            tn.create_array(g, 'value', obj=value)
 
         for node in tn.root.input.potential:
             node._v_attrs.arguments = np.array(
