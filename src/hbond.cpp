@@ -273,9 +273,10 @@ namespace {
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_knot = 18;
-        constexpr static const float inv_dx = 1.f/0.5f;
-        constexpr static const int n_param=4+2*n_knot, n_dim1=7, n_dim2=6, n_deriv=10;
+        constexpr static const int n_knot = 18, n_knot_angular=15;
+        // FIXME ensure that the spline argument is correctly bounded
+        constexpr static const float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-2)/2.f;
+        constexpr static const int n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, n_deriv=10;
 
         static float cutoff(const Vec<n_param> &p) {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
@@ -299,17 +300,17 @@ namespace {
             float  cos_coverage_angle1 = dot(rHN, displace_unitvec);
             float  cos_coverage_angle2 = dot(rSC,-displace_unitvec);
 
-            float2 wide_cover   = clamped_deBoor_value_and_deriv(p.v+4,        dist_coord, n_knot);
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+4+n_knot, dist_coord, n_knot);
+            float2 wide_cover   = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular,        dist_coord, n_knot);
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
 
-            float2 angular_sigmoid1 = compact_sigmoid(p[0]-cos_coverage_angle1, p[1]);
-            float2 angular_sigmoid2 = compact_sigmoid(p[2]-cos_coverage_angle2, p[3]);
+            float2 angular_sigmoid1 = deBoor_value_and_deriv(p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
             float  angular_weight   = angular_sigmoid1.x() * angular_sigmoid2.x();
 
             // negative sign on angular_deriv is due to -cos_coverage_angle
             float radial_deriv   = inv_dx*(wide_cover.y() + angular_weight*narrow_cover.y());
-            float angular_deriv1 = -angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
-            float angular_deriv2 = -angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
+            float angular_deriv1 = angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
+            float angular_deriv2 = angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
 
             float3 col0, col1, col2;
             hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
@@ -355,29 +356,27 @@ namespace {
             float  cos_coverage_angle1 = dot(rHN, displace_unitvec);
             float  cos_coverage_angle2 = dot(rSC,-displace_unitvec);
 
-            float2 angular_sigmoid1 = compact_sigmoid(p[0]-cos_coverage_angle1, p[1]);
-            float2 angular_sigmoid2 = compact_sigmoid(p[2]-cos_coverage_angle2, p[3]);
+            float2 angular_sigmoid1 = deBoor_value_and_deriv(p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
 
             // wide_cover derivative
             int starting_bin;
             float result[4];
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+4, dist_coord, n_knot);
-            for(int i: range(4)) d_param[4+starting_bin+i] = result[i];
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2*n_knot_angular, dist_coord, n_knot);
+            for(int i: range(4)) d_param[2*n_knot_angular+starting_bin+i] = result[i];
 
             // narrow_cover derivative
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+4+n_knot, dist_coord, n_knot);
-            for(int i: range(4)) d_param[4+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
+            for(int i: range(4)) d_param[2*n_knot_angular+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
 
             // angular_sigmoid derivatives
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+4+n_knot, dist_coord, n_knot);
-            float angular_sigmoid1_s=(p[0]-cos_coverage_angle1)*compact_sigmoid((p[0]-cos_coverage_angle1)*p[1],1.f).y();
-            float angular_sigmoid2_s=(p[2]-cos_coverage_angle2)*compact_sigmoid((p[2]-cos_coverage_angle2)*p[3],1.f).y();
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
 
-            d_param[0] = narrow_cover.x() * angular_sigmoid2.x() * angular_sigmoid1.y();
-            d_param[1] = narrow_cover.x() * angular_sigmoid2.x() * angular_sigmoid1_s;
+            deBoor_coeff_deriv(&starting_bin, result, p.v+n_knot_angular, (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            for(int i: range(4)) d_param[starting_bin+i] = angular_sigmoid2.x()*narrow_cover.x()*result[i];
 
-            d_param[2] = narrow_cover.x() * angular_sigmoid1.x() * angular_sigmoid2.y();
-            d_param[3] = narrow_cover.x() * angular_sigmoid1.x() * angular_sigmoid2_s;
+            deBoor_coeff_deriv(&starting_bin, result, p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            for(int i: range(4)) d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
 
             float prefactor = sqr(1.f-hb_pos[6]);
             d_param *= prefactor;
