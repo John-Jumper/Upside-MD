@@ -37,7 +37,7 @@ void infer_x_body(
     // Bond direction is a unit vector
     // curr is the N or C atom
     // This algorithm assumes perfect 120 degree bond angles
-    
+
     float3 prev = prev_c.f3() - curr_c.f3(); float prev_invmag = inv_mag(prev); prev *= prev_invmag;
     float3 next = next_c.f3() - curr_c.f3(); float next_invmag = inv_mag(next); next *= next_invmag;
     float3 disp = prev+next;                 float disp_invmag = inv_mag(disp); disp *= disp_invmag;
@@ -97,7 +97,7 @@ struct Infer_H_O : public CoordNode
         int n_dep = 3;
         auto don = h5_obj(H5Gclose, H5Gopen2(grp, "donors",    H5P_DEFAULT));
         auto acc = h5_obj(H5Gclose, H5Gopen2(grp, "acceptors", H5P_DEFAULT));
-        
+
         check_size(don.get(), "id",          n_donor,    n_dep);
         check_size(don.get(), "bond_length", n_donor);
         check_size(acc.get(), "id",          n_acceptor, n_dep);
@@ -144,10 +144,10 @@ struct Infer_H_O : public CoordNode
     virtual void propagate_deriv() {
         Timer timer(string("infer_H_O_deriv"));
         reverse_autodiff<6,3,0>(
-                slot_machine.accum_array(), 
-                pos.slot_machine.accum_array(), VecArray(), 
-                slot_machine.deriv_tape.data(), autodiff_params.data(), 
-                slot_machine.deriv_tape.size(), 
+                slot_machine.accum_array(),
+                pos.slot_machine.accum_array(), VecArray(),
+                slot_machine.deriv_tape.data(), autodiff_params.data(),
+                slot_machine.deriv_tape.size(),
                 n_virtual);}
 
     virtual double test_value_deriv_agreement() {
@@ -159,9 +159,9 @@ static RegisterNodeType<Infer_H_O,1>  infer_node("infer_H_O");
 
 #define radial_cutoff2 (3.5f*3.5f)
 // angular cutoff at 90 degrees
-#define angular_cutoff (0.f)    
+#define angular_cutoff (0.f)
 
-float2 hbond_radial_potential(float input) 
+float2 hbond_radial_potential(float input)
 {
     const float outer_barrier    = 2.5f;
     const float inner_barrier    = 1.4f;   // barrier to prevent H-O overlap
@@ -177,7 +177,7 @@ float2 hbond_radial_potential(float input)
 }
 
 
-float2 hbond_angular_potential(float dotp) 
+float2 hbond_angular_potential(float dotp)
 {
     const float wall_dp = 0.682f;  // half-height is at 47 degrees
     const float inv_dp_width = 1.f/0.05f;
@@ -192,7 +192,7 @@ float hbond_score(
         float3& dH, float3& dO, float3& drHN, float3& drOC)
 {
     float3 HO = H-O;
-    
+
     float magHO2 = mag2(HO) + 1e-6; // a bit of paranoia to avoid division by zero later
     float invHOmag = rsqrt(magHO2);
     float magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
@@ -237,11 +237,11 @@ namespace {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) { 
+        static bool exclude_by_id(unsigned id1, unsigned id2) {
             return false; // no exclusions
         }
 
-        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p,
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
             float3 dH,dO,drHN,drOC;
 
@@ -263,7 +263,7 @@ namespace {
             d2 = extract<6,12>(d_base);
         }
 
-        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p,
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
             for(int np: range(n_param)) d_param[np] = -1.f;
         }
@@ -282,11 +282,11 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) { 
+        static bool exclude_by_id(unsigned id1, unsigned id2) {
             return false; // no exclusions
         }
 
-        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
+        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
             float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
@@ -307,9 +307,9 @@ namespace {
             float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
             float  angular_weight   = angular_sigmoid1.x() * angular_sigmoid2.x();
 
-            float radial_deriv   = inv_dx*(wide_cover.y() + angular_weight*narrow_cover.y());
-            float angular_deriv1 = angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
-            float angular_deriv2 = angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
+            float radial_deriv   = inv_dx     * (wide_cover.y() + angular_weight*narrow_cover.y());
+            float angular_deriv1 = inv_dtheta * angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
+            float angular_deriv2 = inv_dtheta * angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
 
             float3 col0, col1, col2;
             hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
@@ -339,7 +339,7 @@ namespace {
             store<3,6>(d_sc,  extract<7,10>(d_base));
         }
 
-        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p, 
+        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
             d_param = make_zero<n_param>();
 
@@ -384,7 +384,7 @@ namespace {
 }
 
 
-struct ProteinHBond : public CoordNode 
+struct ProteinHBond : public CoordNode
 {
     CoordNode& infer;
     BetweenInteractionGraph<ProteinHBondInteraction> igraph;
