@@ -10,7 +10,8 @@ import scipy.optimize as opt
 import threading
 import concurrent.futures
 
-n_angular = 4
+n_knot_angular = 15
+n_angular = 2*n_knot_angular
 n_restype = 24
 n_knot = 18
 
@@ -29,6 +30,9 @@ def unpack_param_maker():
         x = read_param((n_restype,n_restype))
         return 0.5*(x + x.T)
 
+    def read_angular_spline(read_func):
+        return [T.exp(read_func()) for i in range(n_knot_angular)]
+
     def read_clamped_spline(read_func):
         c0 = read_func()
         c1 = read_func()
@@ -46,11 +50,13 @@ def unpack_param_maker():
     def read_cov():
         return read_param((2,n_restype))
 
-    cov_angle1       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
-    cov_angle1_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
-    cov_angle2       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
-    cov_angle2_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
-    cov_param = ([cov_angle1, cov_angle1_scale, cov_angle2, cov_angle2_scale] + 
+    # cov_angle1       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
+    # cov_angle1_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
+    # cov_angle2       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
+    # cov_angle2_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
+    # cov_param = ([cov_angle1, cov_angle1_scale, cov_angle2, cov_angle2_scale] + 
+    #         read_clamped_spline(read_cov) + read_clamped_spline(read_cov))
+    cov_param = (read_angular_spline(read_cov) + read_angular_spline(read_cov) +
             read_clamped_spline(read_cov) + read_clamped_spline(read_cov))
 
     cov = T.stack(*cov_param).transpose((1,2,0))

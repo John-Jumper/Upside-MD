@@ -275,7 +275,7 @@ namespace {
         // first group is donors; second group is acceptors
         constexpr static const int n_knot = 18, n_knot_angular=15;
         // FIXME ensure that the spline argument is correctly bounded
-        constexpr static const float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-2)/2.f;
+        constexpr static const float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
         constexpr static const int n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, n_deriv=10;
 
         static float cutoff(const Vec<n_param> &p) {
@@ -307,7 +307,6 @@ namespace {
             float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
             float  angular_weight   = angular_sigmoid1.x() * angular_sigmoid2.x();
 
-            // negative sign on angular_deriv is due to -cos_coverage_angle
             float radial_deriv   = inv_dx*(wide_cover.y() + angular_weight*narrow_cover.y());
             float angular_deriv1 = angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
             float angular_deriv2 = angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
@@ -375,7 +374,7 @@ namespace {
             deBoor_coeff_deriv(&starting_bin, result, p.v+n_knot_angular, (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
             for(int i: range(4)) d_param[starting_bin+i] = angular_sigmoid2.x()*narrow_cover.x()*result[i];
 
-            deBoor_coeff_deriv(&starting_bin, result, p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            deBoor_coeff_deriv(&starting_bin, result, p.v,                (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
             for(int i: range(4)) d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
 
             float prefactor = sqr(1.f-hb_pos[6]);

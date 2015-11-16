@@ -304,55 +304,51 @@ void push_vector(vector<float>& a, const RowVector3f& v) {
 }
 
 int get_beads(const std::string& rname, vector<float>& centers, vector<float>& direcs, MatrixX3f &pos) {
-    auto pc = [&](const RowVector3f& v) {push_vector(centers, v);};
+    int n_bead = 0;
+    auto pc = [&](const RowVector3f& v) {push_vector(centers, v); n_bead++;};
     auto pd = [&](const RowVector3f& v) {push_vector(direcs,  v.normalized());};
 
     if(rname == "GLY") {
         pc(pos.row(1));
         pd(pos.row(1)  - 0.5f*(pos.row(0) + pos.row(2)));
-        return 1;
     } else if(rname == "ALA"){
         pc(pos.row(4));
         pd(pos.row(4) - pos.row(1));
-        return 1;
     } else if(rname == "GLU") {
         pc(pos.bottomRows(pos.rows()-6).colwise().mean());
         pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
-        return 1;
     } else if(rname == "LYS") {
         pc(pos.row(8)); // NZ atom
         pc(pos.row(6)); // CD atom
         pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
         pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
-        return 2;
     } else if(rname == "ARG") {
         pc((1.f/3.f)*(pos.row(7)+pos.row(9)+pos.row(10))); // center of nitrogens
         pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
-        return 1;
+    } else if(rname == "ASP") {
+        pc(pos.row(5)); // CG atom
+        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
     } else if(rname == "THR") {
         pc(pos.row(5)); // atom 5 is OG1 
         pc(pos.row(6)); // atom 6 is CG1
         pd(pos.row(5)-pos.row(4)); // CB->OG1 bond vector
         pd(pos.row(6)-pos.row(4)); // CB->CG1 bond vector
-        return 2;
     } else if(rname == "TRP") {
         pc((1.f/6.f)*(pos.row(7)+pos.row(9)+pos.row(10)+pos.row(11)+pos.row(12)+pos.row(13))); // 2nd aromatic ring
         pc(pos.row(8)); // atom 8 is NE1
         pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
         pd(pos.row(8)-pos.row(4)); // CB->NE1 bond vector
-        return 2;
     } else if(rname == "TYR") {
         pc((1.f/6.f)*(pos.row(5)+pos.row(6)+pos.row(7)+pos.row(8)+pos.row(9)+pos.row(10))); // aromatic ring
         pc(pos.row(11)); // atom 11 is OH
         pd(pos.row( 5)-pos.row(4)); // CB->CG bond vector
         pd(pos.row(11)-pos.row(4)); // CB->OH bond vector
-        return 2;
     } else {
-        pc(pos.bottomRows(pos.rows()-5).colwise().mean());
-        pd(pos.row(5)-pos.row(4)); // CB->CG bond vector
-        return 1;
+        RowVector3f rest = pos.bottomRows(pos.rows()-5).colwise().mean();
+        pc(rest);
+        pd(rest-pos.row(4)); // CB->rest bond vector
     }
-    return -1;
+    return n_bead;
 }
 
 int main(int argc, char** argv) try {
