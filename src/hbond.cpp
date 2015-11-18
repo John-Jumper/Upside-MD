@@ -231,9 +231,10 @@ namespace {
     struct ProteinHBondInteraction {
         // inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
         // first group is donors; second group is acceptors
-        constexpr static const int n_param=6, n_dim1=6, n_dim2=6, n_deriv=12;
+        constexpr static const bool symmetric=false;
+        constexpr static const int n_param=6, n_dim1=6, n_dim2=6, simd_width=1;
 
-        static float cutoff(const Vec<n_param> &p) {
+        static float cutoff(const float* p) {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
         }
 
@@ -241,7 +242,7 @@ namespace {
             return false; // no exclusions
         }
 
-        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p,
+        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
             float3 dH,dO,drHN,drOC;
 
@@ -250,35 +251,33 @@ namespace {
             float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
 
             float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
-            store<0, 3>(d_base, dH   * deriv_prefactor);
-            store<3, 6>(d_base, drHN * deriv_prefactor);
-            store<6, 9>(d_base, dO   * deriv_prefactor);
-            store<9,12>(d_base, drOC * deriv_prefactor);
+            store<0,3>(d1, dH   * deriv_prefactor);
+            store<3,6>(d1, drHN * deriv_prefactor);
+            store<0,3>(d2, dO   * deriv_prefactor);
+            store<3,6>(d2, drOC * deriv_prefactor);
 
             return hb_log;
         }
 
-        static void expand_deriv(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const Vec<n_deriv> &d_base) {
-            d1 = extract<0, 6>(d_base);
-            d2 = extract<6,12>(d_base);
-        }
-
-        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p,
+        static void param_deriv(Vec<n_param> &d_param, const float* p,
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
             for(int np: range(n_param)) d_param[np] = -1.f;
         }
+
+        static bool is_compatible(const float* p1, const float* p2) {return true;};
     };
 
 
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
         // first group is donors; second group is acceptors
-        constexpr static const int n_knot = 18, n_knot_angular=15;
-        // FIXME ensure that the spline argument is correctly bounded
-        constexpr static const float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
-        constexpr static const int n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, n_deriv=10;
 
-        static float cutoff(const Vec<n_param> &p) {
+        constexpr static bool  symmetric = false;
+        constexpr static int   n_knot = 18, n_knot_angular=15;
+        constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, simd_width=1;
+        constexpr static float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
+
+        static float cutoff(const float* p) {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
@@ -286,7 +285,7 @@ namespace {
             return false; // no exclusions
         }
 
-        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p,
+        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
             float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
@@ -297,14 +296,14 @@ namespace {
             float  dist_coord = dist2*(inv_dist*inv_dx);
             float3 displace_unitvec = inv_dist*displace;
 
-            float  cos_coverage_angle1 = dot(rHN, displace_unitvec);
-            float  cos_coverage_angle2 = dot(rSC,-displace_unitvec);
+            float  cos_cov_angle1 = dot(rHN, displace_unitvec);
+            float  cos_cov_angle2 = dot(rSC,-displace_unitvec);
 
-            float2 wide_cover   = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular,        dist_coord, n_knot);
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
+            float2 wide_cover   = clamped_deBoor_value_and_deriv(p+2*n_knot_angular,        dist_coord, n_knot);
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p+2*n_knot_angular+n_knot, dist_coord, n_knot);
 
-            float2 angular_sigmoid1 = deBoor_value_and_deriv(p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
-            float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid1 = deBoor_value_and_deriv(p,               (cos_cov_angle1+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid2 = deBoor_value_and_deriv(p+n_knot_angular,(cos_cov_angle2+1.f)*inv_dtheta+1.f);
             float  angular_weight   = angular_sigmoid1.x() * angular_sigmoid2.x();
 
             float radial_deriv   = inv_dx     * (wide_cover.y() + angular_weight*narrow_cover.y());
@@ -323,23 +322,17 @@ namespace {
             float coverage = wide_cover.x() + angular_weight*narrow_cover.x();
             float prefactor = sqr(1.f-hb_pos[6]);
 
-            store<0,3>(d_base, prefactor * d_displace);
-            store<3,6>(d_base, prefactor * d_rHN);
-            d_base[6] = -coverage * (1.f-hb_pos[6])*2.f;
-            store<7,10>(d_base, prefactor * d_rSC);
+            store<0,3>(d1, -(prefactor * d_displace));
+            store<3,6>(d1, prefactor * d_rHN);
+            d1[6] = -coverage * (1.f-hb_pos[6])*2.f;
+
+            store<0,3>(d2, prefactor * d_displace);
+            store<3,6>(d2, prefactor * d_rSC);
 
             return prefactor * coverage;
         }
 
-        static void expand_deriv(Vec<n_dim1> &d_hb, Vec<n_dim2> &d_sc, const Vec<n_deriv> &d_base) {
-            store<0,3>(d_hb, -extract<0, 3>(d_base));  // opposite of d_sc by Newton's third
-            store<3,6>(d_hb,  extract<3, 6>(d_base));
-            d_hb[6] = d_base[6];
-            store<0,3>(d_sc,  extract<0, 3>(d_base));
-            store<3,6>(d_sc,  extract<7,10>(d_base));
-        }
-
-        static void param_deriv(Vec<n_param> &d_param, const Vec<n_param> &p,
+        static void param_deriv(Vec<n_param> &d_param, const float* p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
             d_param = make_zero<n_param>();
 
@@ -352,34 +345,38 @@ namespace {
             float  dist_coord = dist2*(inv_dist*inv_dx);
             float3 displace_unitvec = inv_dist*displace;
 
-            float  cos_coverage_angle1 = dot(rHN, displace_unitvec);
-            float  cos_coverage_angle2 = dot(rSC,-displace_unitvec);
+            float  cos_cov_angle1 = dot(rHN, displace_unitvec);
+            float  cos_cov_angle2 = dot(rSC,-displace_unitvec);
 
-            float2 angular_sigmoid1 = deBoor_value_and_deriv(p.v,                (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
-            float2 angular_sigmoid2 = deBoor_value_and_deriv(p.v+n_knot_angular, (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid1 = deBoor_value_and_deriv(p,                (cos_cov_angle1+1.f)*inv_dtheta+1.f);
+            float2 angular_sigmoid2 = deBoor_value_and_deriv(p+n_knot_angular, (cos_cov_angle2+1.f)*inv_dtheta+1.f);
 
             // wide_cover derivative
             int starting_bin;
             float result[4];
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2*n_knot_angular, dist_coord, n_knot);
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular, dist_coord, n_knot);
             for(int i: range(4)) d_param[2*n_knot_angular+starting_bin+i] = result[i];
 
             // narrow_cover derivative
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
-            for(int i: range(4)) d_param[2*n_knot_angular+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
+            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular+n_knot, dist_coord, n_knot);
+            for(int i: range(4)) 
+                d_param[2*n_knot_angular+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
 
             // angular_sigmoid derivatives
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p.v+2*n_knot_angular+n_knot, dist_coord, n_knot);
+            float2 narrow_cover = clamped_deBoor_value_and_deriv(p+2*n_knot_angular+n_knot, dist_coord, n_knot);
 
-            deBoor_coeff_deriv(&starting_bin, result, p.v+n_knot_angular, (cos_coverage_angle1+1.f)*inv_dtheta+1.f);
+            deBoor_coeff_deriv(&starting_bin, result, p+n_knot_angular, (cos_cov_angle1+1.f)*inv_dtheta+1.f);
             for(int i: range(4)) d_param[starting_bin+i] = angular_sigmoid2.x()*narrow_cover.x()*result[i];
 
-            deBoor_coeff_deriv(&starting_bin, result, p.v,                (cos_coverage_angle2+1.f)*inv_dtheta+1.f);
-            for(int i: range(4)) d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
+            deBoor_coeff_deriv(&starting_bin, result, p,                (cos_cov_angle2+1.f)*inv_dtheta+1.f);
+            for(int i: range(4)) 
+                d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
 
             float prefactor = sqr(1.f-hb_pos[6]);
             d_param *= prefactor;
         }
+
+        static bool is_compatible(const float* p1, const float* p2) {return true;};
     };
 }
 
@@ -387,13 +384,13 @@ namespace {
 struct ProteinHBond : public CoordNode
 {
     CoordNode& infer;
-    BetweenInteractionGraph<ProteinHBondInteraction> igraph;
+    InteractionGraph<ProteinHBondInteraction> igraph;
     int n_donor, n_acceptor, n_virtual;
 
     ProteinHBond(hid_t grp, CoordNode& infer_):
         CoordNode(get_dset_size(1,grp,"index1")[0]+get_dset_size(1,grp,"index2")[0], 7),
         infer(infer_),
-        igraph(grp, infer, infer) ,
+        igraph(grp, &infer, &infer) ,
         n_donor   (igraph.n_elem1),
         n_acceptor(igraph.n_elem2),
         n_virtual (n_donor+n_acceptor)
@@ -419,11 +416,14 @@ struct ProteinHBond : public CoordNode
         }
 
         // Compute protein hbonding score and its derivative
-        igraph.compute_edges([&](int ne, float hb_log,
-                    int index1, unsigned type1, unsigned id1,
-                    int index2, unsigned type2, unsigned id2) {
-                vs(6,index1) += hb_log;
-                vs(6,index2) += hb_log;});
+        igraph.compute_edges();
+        for(int ne=0; ne<igraph.n_edge; ++ne) {
+            int nd = igraph.edge_indices1[ne];
+            int na = igraph.edge_indices2[ne];
+            float hb_log = igraph.edge_value[ne];
+            vs(6,nd)         += hb_log;
+            vs(6,na+n_donor) += hb_log;
+        }
 
         for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
     }
@@ -443,37 +443,36 @@ struct ProteinHBond : public CoordNode
             sens[nv][6] *= 1.f-hb(6,nv);
 
         // Push protein HBond derivatives
-        for(int ned: range(igraph.n_edge)) {
-            int don_idx = igraph.param1[igraph.edge_indices[2*ned + 0]].index;
-            int acc_idx = igraph.param2[igraph.edge_indices[2*ned + 1]].index;
-            igraph.use_derivative(ned,  sens[don_idx][6] + sens[acc_idx][6]);
+        for(int ne: range(igraph.n_edge)) {
+            int don_idx = igraph.edge_indices1[ne];
+            int acc_idx = igraph.edge_indices2[ne];
+            igraph.edge_sensitivity[ne] = sens[don_idx][6] + sens[acc_idx+n_donor][6];
         }
+        igraph.propagate_derivatives();
 
         // pass through derivatives on all other components
-        VecArray pd1 = igraph.pos_deriv1;
+        VecArray pd1 = igraph.pos_node1->coords().deriv;
         for(int nd: range(n_donor)) {
             // the last component is taken care of by the edge loop
-            update_vec(pd1, nd, extract<0,6>(sens[nd]));
+            update_vec(pd1, igraph.loc1[nd].slot, extract<0,6>(sens[nd]));
         }
-        VecArray pd2 = igraph.pos_deriv2;
+        VecArray pd2 = igraph.pos_node2->coords().deriv;
         for(int na: range(n_acceptor)) {  // acceptor loop
             // the last component is taken care of by the edge loop
-            update_vec(pd2, na, extract<0,6>(sens[na+n_donor]));
+            update_vec(pd2, igraph.loc2[na].slot, extract<0,6>(sens[na+n_donor]));
         }
-
-        igraph.propagate_derivatives();
     }
 };
 static RegisterNodeType<ProteinHBond,1> hbond_node("protein_hbond");
 
 
 struct HBondCoverage : public CoordNode {
-    BetweenInteractionGraph<HBondCoverageInteraction> igraph;
+    InteractionGraph<HBondCoverageInteraction> igraph;
     int n_sc;
 
     HBondCoverage(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
         CoordNode(get_dset_size(1,grp,"index2")[0], 1),
-        igraph(grp, infer_, sidechains_),
+        igraph(grp, &infer_, &sidechains_),
         n_sc(igraph.n_elem2) {}
 
     virtual void compute_value(ComputeMode mode) {
@@ -482,10 +481,10 @@ struct HBondCoverage : public CoordNode {
         for(int nc: range(n_sc)) cov(0,nc) = 0.f;
 
         // Compute coverage and its derivative
-        igraph.compute_edges([&](int ne, float en,
-                    int index1, unsigned type1, unsigned id1,
-                    int index2, unsigned type2, unsigned id2) {
-                cov(0,index2) += en;});
+        igraph.compute_edges();
+        for(int ne=0; ne<igraph.n_edge; ++ne) {
+            cov(0, igraph.edge_indices2[ne]) += igraph.edge_value[ne];
+        }
     }
 
     virtual void propagate_deriv() {
@@ -498,11 +497,8 @@ struct HBondCoverage : public CoordNode {
                 sens[tape_elem.atom] += accum(0, tape_elem.loc+rec);
 
         // Push coverage derivatives
-        for(int ned: range(igraph.n_edge)) {
-            int sc_num = igraph.edge_indices[2*ned + 1];
-            int sc_idx = igraph.param2[sc_num].index;
-            igraph.use_derivative(ned, sens[sc_idx]);
-        }
+        for(int ne: range(igraph.n_edge))
+            igraph.edge_sensitivity[ne] = sens[igraph.edge_indices2[ne]];
         igraph.propagate_derivatives();
     }
 

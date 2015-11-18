@@ -276,12 +276,13 @@ struct EdgeHolder {
 
 
 template <typename BT>
-array<int,UPPER_ROT> calculate_n_elem(WithinInteractionGraph<BT> &igraph) {
+array<int,UPPER_ROT> calculate_n_elem(InteractionGraph<BT> &igraph) {
     array<int,UPPER_ROT> result; // 0-rot is included
     for(int& i: result) i=0;
 
     unordered_map<unsigned,set<unsigned>> unique_ids;
-    for(unsigned id: igraph.id) {
+    for(int ne: range(igraph.n_elem1)) {
+        unsigned id = igraph.id1[ne];
         unsigned selector = (1u<<n_bit_rotamer) - 1u;
         unsigned   rot = id & selector; id >>= n_bit_rotamer;
         unsigned n_rot = id & selector; id >>= n_bit_rotamer;
@@ -301,7 +302,7 @@ struct RotamerSidechain: public PotentialNode {
     vector<CoordNode*> prob_nodes;
     int n_prob_nodes;
     vector<slot_t> prob_slot;
-    WithinInteractionGraph<BT> igraph;
+    InteractionGraph<BT> igraph;
     array<int,UPPER_ROT> n_elem_rot;
 
     NodeHolder* node_holders_matrix[UPPER_ROT];
@@ -321,7 +322,7 @@ struct RotamerSidechain: public PotentialNode {
         PotentialNode(),
         prob_nodes(prob_nodes_),
         n_prob_nodes(prob_nodes.size()),
-        igraph(open_group(grp,"pair_interaction").get(), pos_node_),
+        igraph(open_group(grp,"pair_interaction").get(), &pos_node_),
         n_elem_rot(calculate_n_elem(igraph)),
 
         nodes1(1,n_elem_rot[1]),
@@ -348,13 +349,13 @@ struct RotamerSidechain: public PotentialNode {
         edge_holders_matrix[3][3] = &edges33;
 
         for(int i: range(prob_nodes.size())) 
-            if(igraph.pos_node.n_elem != prob_nodes[i]->n_elem)
-                throw string("rotamer positions have " + to_string(igraph.pos_node.n_elem) +
+            if(igraph.pos_node1->n_elem != prob_nodes[i]->n_elem)
+                throw string("rotamer positions have " + to_string(igraph.pos_node1->n_elem) +
                         " elements but the " + to_string(i) + "-th (0-indexed) probability node has only " +
                         to_string(prob_nodes[i]->n_elem) + " elements.");
 
         // the index and the type information is already stored in the igraph
-        for(auto &x: igraph.param) {
+        for(auto &x: igraph.loc1) {
             CoordPair p; p.index = x.index;
             for(auto pn: prob_nodes) {  // must request a slot for each prob_node
                 pn->slot_machine.add_request(1, p);
@@ -414,12 +415,12 @@ struct RotamerSidechain: public PotentialNode {
         for(int i: range(n_prob_nodes)) 
             energy_1body.emplace_back(prob_nodes[i]->coords().value);
 
-        for(int n: range(igraph.n_elem)) {
-            unsigned id = igraph.id[n];
+        for(int n: range(igraph.n_elem1)) {
+            unsigned id = igraph.id1[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
-            int index = igraph.param[n].index;
+            int index = igraph.loc1[n].index;
 
             float energy = 0.f;
             for(auto &a: energy_1body) energy += a(0,index);
@@ -428,21 +429,24 @@ struct RotamerSidechain: public PotentialNode {
         }
 
         // Fill edge probabilities
-        igraph.compute_edges([&](int ne, float pot,
-                    int index1, unsigned type1, unsigned id1,
-                    int index2, unsigned type2, unsigned id2) {
-                unsigned selector = (1u<<n_bit_rotamer) - 1u;
-                if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
-                // now id2 must have a >= n_rot than id1
+        igraph.compute_edges();
 
-                unsigned   rot1 = id1 & selector; id1 >>= n_bit_rotamer;
-                unsigned   rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+        const unsigned selector = (1u<<n_bit_rotamer) - 1u;
+        for(int ne=0; ne<igraph.n_edge; ++ne) {
+            int   id1  = igraph.id1[igraph.edge_indices1[ne]];
+            int   id2  = igraph.id1[igraph.edge_indices2[ne]];
+            float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
 
-                unsigned n_rot1 = id1 & selector; id1 >>= n_bit_rotamer;
-                unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+            if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
 
-                edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, expf(-pot), id1, rot1, id2, rot2);
-                });
+            unsigned   rot1 = id1 & selector; id1 >>= n_bit_rotamer;
+            unsigned   rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+
+            unsigned n_rot1 = id1 & selector; id1 >>= n_bit_rotamer;
+            unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+
+            edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, prob, id1, rot1, id2, rot2);
+        }
 
         // for edges with a 1, we can just move it
         for(int n_rot: range(2,UPPER_ROT))
@@ -490,12 +494,12 @@ struct RotamerSidechain: public PotentialNode {
         vector<float> e3(nodes3.n_elem, 0.f);
 
         VecArray energy_1body = prob_nodes[prob_node_index]->coords().value;
-        for(int n: range(igraph.n_elem)) {
-            unsigned id = igraph.id[n];
+        for(int n: range(igraph.n_elem1)) {
+            unsigned id = igraph.id1[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
-            int index = igraph.param[n].index;
+            int index = igraph.loc1[n].index;
 
             switch(n_rot) {
                 case 1: e1[id] += nodes1.cur_belief(rot,id) * energy_1body(0,index); break;
@@ -513,7 +517,8 @@ struct RotamerSidechain: public PotentialNode {
 
         set<unsigned> known_ids;
 
-        for(unsigned id: igraph.id) {
+        for(int ne: range(igraph.n_elem1)) {
+            unsigned id = igraph.id1[ne];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             if(id&selector) continue; // only count on the 0th rotamer
             if(known_ids.find(id)!=known_ids.end()) continue; //may be multiple beads
@@ -535,11 +540,11 @@ struct RotamerSidechain: public PotentialNode {
 
     void propagate_derivatives() {
         for(auto &el: edges11.edge_loc)
-            igraph.use_derivative(el.edge_num, 1.f);
+            igraph.edge_sensitivity[el.edge_num] = 1.f;
         for(auto &el: edges13.edge_loc)
-            igraph.use_derivative(el.edge_num, nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second));
+            igraph.edge_sensitivity[el.edge_num] = nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second);
         for(auto &el: edges33.edge_loc)
-            igraph.use_derivative(el.edge_num, edges33.marginal  (el.dim, el.ne));
+            igraph.edge_sensitivity[el.edge_num] = edges33.marginal  (el.dim, el.ne);
         igraph.propagate_derivatives();
 
         vector<VecArray> deriv_1body;
@@ -547,8 +552,8 @@ struct RotamerSidechain: public PotentialNode {
         for(int i: range(n_prob_nodes)) 
             deriv_1body.emplace_back(prob_nodes[i]->coords().deriv);
 
-        for(int n: range(igraph.n_elem)) {
-            unsigned id = igraph.id[n];
+        for(int n: range(igraph.n_elem1)) {
+            unsigned id = igraph.id1[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;

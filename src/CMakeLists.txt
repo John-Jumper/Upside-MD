@@ -14,7 +14,7 @@ else()
 endif()
 
 set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
-set (DEFINES "-DNDEBUG -DR123_NO_SINCOS -Drestrict=__restrict__")
+set (DEFINES "-DCOLLECT_PROFILE -DNDEBUG -DR123_NO_SINCOS -Drestrict=__restrict__")
 set (OPT     "-O3 -ffast-math -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
 
@@ -23,7 +23,6 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
-    environment.cpp
     hbond.cpp 
     rotamer.cpp
     placement.cpp

@@ -31,7 +31,7 @@ struct VecArray {
 struct VecArrayStorage {
     int n_elem;
     int elem_width;
-    std::unique_ptr<float[], std::default_delete<float[]>> x;
+    std::unique_ptr<float[]> x;
 
     VecArrayStorage(int elem_width_, int n_elem_):
         n_elem(n_elem_), elem_width(elem_width_),
@@ -187,6 +187,15 @@ inline Vec<D,float> load_vec(const VecArray& a, int idx) {
     return r;
 }
 
+template<int D>
+inline Vec<D,float> load_vec(const float* a) {
+    Vec<D,float> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = a[d];
+    return r;
+}
+
+
 
 // template <int D>
 // inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
@@ -206,6 +215,12 @@ inline void store_vec(VecArray& a, int idx, const Vec<D,float>& r) {
     for(int d=0; d<D; ++d) a(d,idx) = r[d];
 }
 
+template <int D>
+inline void store_vec(float* a, const Vec<D,float>& r) {
+    #pragma unroll
+    for(int d=0; d<D; ++d) a[d] = r[d];
+}
+
 template <int D, typename multype>
 inline void update_vec_scale(VecArray a, int idx, const multype &r) {
     store_vec(a,idx, load_vec<D>(a,idx) * r);
@@ -214,6 +229,11 @@ inline void update_vec_scale(VecArray a, int idx, const multype &r) {
 template <int D, typename VArray>
 inline void update_vec(VArray& a, int idx, const Vec<D> &r) {
     store_vec(a,idx, load_vec<D>(a,idx) + r);
+}
+
+template <int D>
+inline void update_vec(float* a, const Vec<D> &r) {
+    store_vec(a, load_vec<D>(a) + r);
 }
 
 
@@ -679,5 +699,17 @@ static void print(const VecArray &a, int n_dim, int n_elem, const char* txt) {
         for(int nd: range(n_dim)) printf(" % .2f", a(nd,ne));
         printf("\n");
     }
+}
+
+inline int round_up(int i, int alignment) {
+    int j = i+alignment-1;
+    return j-j%alignment; // probably only efficient if alignment is a power of 2
+}
+
+template <typename T>
+static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_bytes) {
+    // round up allocation to ensure that you can also read to the end without
+    //   overstepping the array, if needed
+    return std::unique_ptr<T[]>(new T[round_up(n_elem*sizeof(T), alignment_bytes)]);
 }
 #endif

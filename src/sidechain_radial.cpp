@@ -22,55 +22,54 @@ struct SidechainRadialPairs : public PotentialNode
 {
     struct Helper {
         // params are r0_squared, scale, energy
-        constexpr static const float base_cutoff = 8.f;  
-        constexpr static int n_param=3, n_dim=3, n_deriv=3;
-        static float cutoff(const Vec<n_param> &p) {return sqrtf(p[0] + base_cutoff/p[1]);}
-        static bool is_compatible(const Vec<n_param> &p1, const Vec<n_param> &p2) {
+        constexpr static float base_cutoff = 8.f;  
+        constexpr static bool  symmetric = true;
+        constexpr static int   n_param=3, n_dim1=3, n_dim2=3, simd_width=1;
+
+        static float cutoff(const float* p) {return sqrtf(p[0] + base_cutoff/p[1]);}
+        static bool is_compatible(const float* p1, const float* p2) {
             for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
             return true;
         }
 
         static bool exclude_by_id(int id1, int id2) { return (id1-id2<2) & (id2-id1<2); } // no nearest neighbor
 
-        static float compute_edge(Vec<n_deriv> &d_base, const Vec<n_param> &p, 
-                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {
+        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p, 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
                 float3 disp = x1-x2;
                 float  z = expf(p[1] * (mag2(disp) - p[0]));
                 float  w = 1.f / (1.f + z);
 
                 float  deriv_over_r = -2.f*p[1] * p[2] * z * (w*w);
-                d_base = deriv_over_r * disp;
+                d1 = deriv_over_r * disp;
+                d2 = -d1;
                 return p[2]*w;
         };
 
-        static void expand_deriv(Vec<n_deriv> &d1, Vec<n_deriv> &d2, const Vec<n_deriv> &d_base) {
-            d1 =  d_base;
-            d2 = -d_base;
-        }
+        static void param_deriv(Vec<n_param> &d_param, const float* p, 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
 
-        static void param_deriv(Vec<n_deriv> &d_param, const Vec<n_param> &p, 
-                const Vec<n_dim> &x1, const Vec<n_dim> &x2) {}
     };
 
-    WithinInteractionGraph<Helper> igraph;
+    InteractionGraph<Helper> igraph;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
         PotentialNode(),
-        igraph(grp, bb_point_)
+        igraph(grp, &bb_point_)
     {};
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
 
-        potential = 0.f;
-        igraph.compute_edges([&](
-                    int edge_index, float value, 
-                    int index1, unsigned rt1, unsigned id1,
-                    int index2, unsigned rt2, unsigned id2) {
-                potential += value;
-                igraph.use_derivative(edge_index, 1.f);
-                });
+        igraph.compute_edges();
+        for(int ne=0; ne<igraph.n_edge; ++ne) igraph.edge_sensitivity[ne] = 1.f;
         igraph.propagate_derivatives();
+
+        if(mode==PotentialAndDerivMode) {
+            potential = 0.f;
+            for(int ne=0; ne<igraph.n_edge; ++ne) 
+                potential += igraph.edge_value[ne];
+        }
     }
 
     virtual double test_value_deriv_agreement() { return -1.f; }

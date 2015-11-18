@@ -93,6 +93,19 @@ try {
     throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
 }
 
+//! Read a scalar attribute with default value
+template<class T>
+T read_attribute(hid_t h5, const char* path, const char* attr_name, const T& default_value) 
+try {
+    T retval;
+    h5_noerr(H5LTget_attribute(h5, path, attr_name, select_predtype<T>(), &retval));
+    return retval;
+} catch(const std::string &e) {  // FIXME this should really check existence rather than use exceptions
+    return default_value;
+}
+
+
+
 //! Read an attribute containing a list of strings
 template<>
 std::vector<std::string> read_attribute<std::vector<std::string>>

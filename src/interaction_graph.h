@@ -8,488 +8,263 @@
 #include "timing.h"
 #include <algorithm>
 
-template <typename IType>
-struct WithinInteractionGraph {
-    CoordNode &pos_node;
-    int n_type;
-    int n_elem;
-    int max_n_edge;
 
-    std::vector<CoordPair> param;
+template <typename T>
+inline T* operator+(std::unique_ptr<T[]> &ptr, int i) {
+    // little function to make unique_ptr for an array do pointer arithmetic
+    return ptr.get()+i;
+}
 
-    // FIXME group these values as both must be read whenever either is read
-    std::vector<unsigned> types;   // pair type is type[0]*n_types2 + type[1]
-    std::vector<unsigned> id;  // used to avoid self-interaction
 
-    // FIXME consider padding for vector loads
-    std::vector<Vec<IType::n_param>> interaction_param;
-    std::vector<float> cutoff2;
 
-    VecArrayStorage edge_deriv;  // size (n_deriv, max_n_edge)
-    VecArrayStorage pos_deriv;
-    std::vector<int> edge_indices;
+template<typename IType>
+struct InteractionGraph{
+    constexpr static const bool symmetric = IType::symmetric;
+    constexpr static const int n_dim1     = IType::n_dim1;
+    constexpr static const int n_dim2     = IType::n_dim2;
+    constexpr static const int n_param    = IType::n_param;
+    constexpr static const int simd_width = IType::simd_width;
+
+    CoordNode* pos_node1;
+    CoordNode* pos_node2;
+    std::vector<CoordPair> loc1, loc2;
+
+    int   n_elem1, n_elem2;
+    int   n_type1, n_type2;
+    int   max_n_edge;
+    float cutoff;
 
     int n_edge;
 
-#ifdef PARAM_DERIV
-    VecArrayStorage interaction_param_deriv;
-    VecArrayStorage edge_param_deriv;
-#endif
+    std::unique_ptr<unsigned[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
+    std::unique_ptr<unsigned[]>  id1,    id2;    // used to avoid self-interaction
 
-    // It is easiest if I just get my own subgroup of the .h5 file
-    WithinInteractionGraph(hid_t grp, CoordNode& pos_node_):
-        pos_node(pos_node_),
-        n_type(h5::get_dset_size(3,grp,"interaction_param")[0]),
-        n_elem(h5::get_dset_size(1,grp,"index")[0]),
-        max_n_edge((n_elem*(n_elem-1))/2),
-        interaction_param(n_type*n_type),
-        cutoff2(n_type*n_type),
-        edge_deriv(IType::n_deriv, max_n_edge),
-        pos_deriv (IType::n_dim,   n_elem),
-        edge_indices(2*max_n_edge)
-#ifdef PARAM_DERIV
-        ,interaction_param_deriv(IType::n_param, n_type*n_type)
-        ,edge_param_deriv(IType::n_param, max_n_edge)
-#endif
+    // buffers to copy position data to ensure contiguity
+    std::unique_ptr<float[]> pos1, pos2;
+
+    // per edge data
+    std::unique_ptr<unsigned[]> edge_indices1, edge_indices2;
+    std::unique_ptr<float[]>    edge_value;
+    std::unique_ptr<float[]>    edge_deriv;  // this may become a SIMD-type vector
+    std::unique_ptr<float[]>    edge_sensitivity; // must be filled by user of this class
+
+    std::unique_ptr<float[]> interaction_param;
+
+    std::unique_ptr<float[]> pos1_deriv, pos2_deriv;
+
+    #ifdef PARAM_DERIV
+    std::vector<Vec<n_param>> edge_param_deriv;
+    VecArrayStorage           interaction_param_deriv;
+    #endif
+
+    InteractionGraph(hid_t grp, CoordNode* pos_node1_, CoordNode* pos_node2_ = nullptr):
+        pos_node1(pos_node1_), pos_node2(pos_node2_),
+
+        n_elem1(h5::get_dset_size(1,grp,symmetric?"index":"index1")[0]), 
+        n_elem2(symmetric ? n_elem1 : h5::get_dset_size(1,grp,"index2")[0]), 
+
+        n_type1(h5::get_dset_size(3,grp,"interaction_param")[0]),
+        n_type2(h5::get_dset_size(3,grp,"interaction_param")[1]),
+
+        max_n_edge(h5::read_attribute<int>(grp, ".", "max_n_edge", n_elem1*n_elem2/(symmetric?2:1))),
+
+        types1(new unsigned[n_elem1]), types2(new unsigned[n_elem2]),
+        id1   (new unsigned[n_elem1]), id2   (new unsigned[n_elem2]),
+
+        pos1(new_aligned<float>(n_elem1*n_dim1,               8)),
+        pos2(new_aligned<float>((symmetric?1:n_elem2)*n_dim2, 8)),
+
+        edge_indices1   (new_aligned<unsigned>(max_n_edge, simd_width)),
+        edge_indices2   (new_aligned<unsigned>(max_n_edge, simd_width)),
+        edge_value      (new_aligned<float>   (max_n_edge, simd_width)),
+        edge_deriv      (new_aligned<float>   (max_n_edge*(n_dim1+n_dim2), simd_width)),
+        edge_sensitivity(new_aligned<float>   (max_n_edge, simd_width)),
+
+        interaction_param(new_aligned<float>(n_type1*n_type2*n_param, simd_width)),
+
+        pos1_deriv(new_aligned<float>(n_elem1*n_dim1,               8)),
+        pos2_deriv(new_aligned<float>((symmetric?1:n_elem2)*n_dim2, 8))
+
+        #ifdef PARAM_DERIV
+        ,interaction_param_deriv(n_param, n_type1*n_type2)
+        #endif
     {
         using namespace h5;
-        check_elem_width_lower_bound(pos_node, IType::n_dim);
+        auto suffix1 = [](const char* base) {return base + std::string(symmetric?"":"1");};
+        bool s = symmetric;
 
-        check_size(grp, "interaction_param", n_type, n_type, IType::n_param);
+        std::fill(edge_sensitivity.get(), edge_sensitivity+max_n_edge, 0.f);
+
+        if(!(s ^ bool(pos_node2)))
+            throw std::string("second node must be null iff symmetric interaction");
+
+        check_elem_width_lower_bound(*pos_node1, n_dim1);
+        if(!s) check_elem_width_lower_bound(*pos_node2, n_dim2);
+
+        check_size(grp, "interaction_param", n_type1, n_type2, n_param);
         traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {
-                interaction_param[nt1*n_type+nt2][np] = x;});
+                interaction_param[(nt1*n_type2+nt2)*n_param+np] = x;});
         update_cutoffs();
 
-        check_size(grp, "index", n_elem);
-        check_size(grp, "type",  n_elem);
-        check_size(grp, "id",    n_elem);
+        check_size(grp, suffix1("index").c_str(), n_elem1); if(!s) check_size(grp, "index2", n_elem2);
+        check_size(grp, suffix1("type").c_str(),  n_elem1); if(!s) check_size(grp, "type2",  n_elem2);
+        check_size(grp, suffix1("id").c_str(),    n_elem1); if(!s) check_size(grp, "id2",    n_elem2);
 
-        traverse_dset<1,int>(grp, "index", [&](size_t nr, int x) {param.emplace_back(x,0u);});
-        traverse_dset<1,int>(grp, "type",  [&](size_t nr, int x) {types.push_back(x);});
-        traverse_dset<1,int>(grp, "id",    [&](size_t nr, int x) {id   .push_back(x);});
+        traverse_dset<1,int>(grp,suffix1("index").c_str(),[&](size_t nr,int x){loc1.emplace_back(x,0u);});
+        traverse_dset<1,int>(grp,suffix1("type" ).c_str(),[&](size_t nr,int x){types1[nr]=x;});
+        traverse_dset<1,int>(grp,suffix1("id"   ).c_str(),[&](size_t nr,int x){id1   [nr]=x;});
 
-        for(auto &p: param) pos_node.slot_machine.add_request(1, p);
-
-    }
-
-
-    // I need to be hooked to a data source of fixed size
-    template <typename F>
-    void compute_edges(F f) {
-        VecArray pos = pos_node.coords().value;
-        fill(pos_deriv, IType::n_dim, n_elem, 0.f);
-
-        #ifdef PARAM_DERIV
-        fill(interaction_param_deriv, IType::n_param, n_type*n_type, 0.f);
-        #endif
-
-        int ne = 0;
-        for(int i1: range(n_elem)) {
-            auto index1 = param[i1].index;
-            auto coord1 = load_vec<IType::n_dim>(pos, index1);
-            auto x1     = extract<0,3>(coord1);
-            auto type1  = types[i1];
-            auto id1    = id[i1];
-
-            for(int i2: range(i1+1, n_elem)) {
-                auto index2 = param[i2].index;
-                auto x2 = load_vec<3>(pos, index2);
-                auto type2 = types[i2];
-
-                int interaction_type = type1*n_type + type2;
-
-                if(!(mag2(x1-x2) < cutoff2[interaction_type])) continue;
-
-                auto id2 = id[i2];
-                if(IType::exclude_by_id(id1,id2)) continue;  // avoid self-interaction in a user defined way
-                auto coord2 = load_vec<IType::n_dim>(pos, index2);
-
-                Vec<IType::n_deriv> deriv;
-                auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
-
-                // // compute finite difference deriv to check
-                // if(IType::n_dim==3 && IType::n_param==18) {
-                //     float eps = 1e-3f;
-                //     Vec<IType::n_dim> actual_deriv1;
-                //     for(int dim: range(IType::n_dim)) {
-                //         auto dx = make_zero<IType::n_dim>();
-                //         dx[dim] = eps;
-                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1+dx,coord2);
-                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1-dx,coord2);
-                //         actual_deriv1[dim] = (vp-vm)/(2.f*eps);
-                //     }
-                //     Vec<IType::n_dim> actual_deriv2;
-                //     for(int dim: range(IType::n_dim)) {
-                //         auto dx = make_zero<IType::n_dim>();
-                //         dx[dim] = eps;
-                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2+dx);
-                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2-dx);
-                //         actual_deriv2[dim] = (vp-vm)/(2.f*eps);
-                //     }
-
-                //     IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
-                //     Vec<IType::n_dim> pred_deriv1;
-                //     Vec<IType::n_dim> pred_deriv2;
-                //     IType::expand_deriv(pred_deriv1, pred_deriv2, deriv);
-
-                //     if(max( pred_deriv1-actual_deriv1)>0.01f || 
-                //        max(-pred_deriv1+actual_deriv1)>0.01f || 
-                //        max( pred_deriv2-actual_deriv2)>0.01f || 
-                //        max(-pred_deriv2+actual_deriv2)>0.01f){
-                //         fprintf(stderr,"%i %i pred_deriv", IType::n_dim, IType::n_dim); 
-                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", pred_deriv1[i]);
-                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", pred_deriv2[i]);
-                //         fprintf(stderr,"\n");
-                //         fprintf(stderr,"%i %i actu_deriv", IType::n_dim, IType::n_dim); 
-                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", actual_deriv1[i]);
-                //         for(int i: range(IType::n_dim)) fprintf(stderr," % .2f", actual_deriv2[i]);
-                //         fprintf(stderr,"\n\n");
-                //     }
-                // }
-
-                store_vec(edge_deriv, ne, deriv);
-                edge_indices[2*ne + 0] = i1;
-                edge_indices[2*ne + 1] = i2;
-
-                f(ne, value, index1,type1,id1, index2,type2,id2);
-
-                #ifdef PARAM_DERIV
-                Vec<IType::n_param> dp;
-                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_param_deriv, ne, dp);
-                #endif
-
-                ++ne;
-            }
+        if(!s) {
+            traverse_dset<1,int>(grp,"index2",[&](size_t nr,int x){loc2.emplace_back(x,0u);});
+            traverse_dset<1,int>(grp,"type2", [&](size_t nr,int x){types2[nr]=x;});
+            traverse_dset<1,int>(grp,"id2",   [&](size_t nr,int x){id2   [nr]=x;});
+        } else {
+            for(int nr: range(n_elem2)) types2[nr] = types1[nr];
+            for(int nr: range(n_elem2)) id2   [nr] = id1   [nr];
         }
-        n_edge = ne;
-    }
 
-    void use_derivative(int edge_idx, float sensitivity) {
-        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv, edge_idx);
-        Vec<IType::n_dim> d1,d2;
-        IType::expand_deriv(d1,d2, deriv);
-        update_vec(pos_deriv, edge_indices[2*edge_idx + 0], d1);
-        update_vec(pos_deriv, edge_indices[2*edge_idx + 1], d2);
-
-        #ifdef PARAM_DERIV
-        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv, edge_idx);
-        auto type1 = types[edge_indices[2*edge_idx + 0]];
-        auto type2 = types[edge_indices[2*edge_idx + 1]];
-
-        update_vec(interaction_param_deriv, type1*n_type+type2, d);
-        #endif
-    }
-
-    void propagate_derivatives() {
-        // Finally put the data where it is needed.
-        // This function must be called exactly once after the user has finished calling 
-        // use_derivative for the round.
-
-       VecArray pos_accum = pos_node.coords().deriv;
-       for(int i: range(n_elem))
-           store_vec(pos_accum, param[i].slot, load_vec<IType::n_dim>(pos_deriv,i));
+        for       (auto &p: loc1) pos_node1->slot_machine.add_request(1, p);
+        if(!s) for(auto &p: loc2) pos_node2->slot_machine.add_request(1, p);
     }
 
     void update_cutoffs() {
-        for(int nt1: range(n_type)) {
-            for(int nt2: range(n_type)) {
-                cutoff2[nt1*n_type+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type+nt2]));
-                if(!IType::is_compatible(interaction_param[nt1*n_type+nt2], 
-                                         interaction_param[nt2*n_type+nt1])) {
+        cutoff = 0.f;
+        for(int nt1: range(n_type1)) {
+            for(int nt2: range(n_type2)) {
+                cutoff = std::max(cutoff, IType::cutoff(interaction_param+(nt1*n_type2+nt2)*n_param));
+
+                if(IType::symmetric && !IType::is_compatible(interaction_param+(nt1*n_type2+nt2)*IType::n_param, 
+                                                             interaction_param+(nt2*n_type2+nt1)*IType::n_param)){
                     throw std::string("incompatibile parameters");
                 }
             }
         }
     }
 
-#ifdef PARAM_DERIV
+    #ifdef PARAM_DERIV
     std::vector<float> get_param() const {
-        std::vector<float> ret; ret.reserve(n_type*n_type*IType::n_param);
-        for(int i: range(n_type*n_type))
-            for(int d: range(IType::n_param))
-                ret.push_back(interaction_param[i][d]);
-        return ret;
+        return {interaction_param.get(), interaction_param.get()+n_type1*n_type2*n_param};
     }
 
     std::vector<float> get_param_deriv() const {
-        std::vector<float> ret; ret.reserve(n_type*n_type*IType::n_param);
-        for(int i: range(n_type*n_type))
-            for(int d: range(IType::n_param))
+        std::vector<float> ret; ret.reserve(n_type1*n_type2*n_param);
+        for(int i: range(n_type1*n_type2))
+            for(int d: range(n_param))
                 ret.push_back(interaction_param_deriv(d,i));
         return ret;
     }
 
     void set_param(const std::vector<float>& new_param) {
-        if(new_param.size() != size_t(n_type*n_type*IType::n_param)) throw std::string("Bad params");
-        // just blast over interaction param and update cutoffs
-        for(int i: range(n_type*n_type))
-            for(int np: range(IType::n_param)) 
-                interaction_param[i][np] = new_param[i*IType::n_param + np];
+        if(new_param.size() != size_t(n_type1*n_type2*IType::n_param)) throw std::string("Bad param size");
+        std::copy(begin(new_param), end(new_param), interaction_param.get());
         update_cutoffs();
     }
-#endif
-};
+    #endif
 
-
-template <typename IType>
-struct BetweenInteractionGraph {
-    CoordNode &pos_node1, &pos_node2;
-    int n_type1, n_type2;
-    int n_elem1, n_elem2;
-    int max_n_edge;
-
-    std::vector<CoordPair> param1,param2;
-
-    // FIXME group these values as both must be read whenever either is read
-    std::vector<unsigned> types1,types2;   // pair type is type[0]*n_types2 + type[1]
-    std::vector<unsigned> id1,id2;         // used to avoid self-interaction
-
-    // FIXME consider padding for vector loads
-    std::vector<Vec<IType::n_param>> interaction_param;
-    std::vector<float> cutoff2;
-
-    VecArrayStorage edge_deriv;  // size (n_deriv, max_n_edge)
-    VecArrayStorage pos_deriv1, pos_deriv2;
-    std::vector<int> edge_indices;
-
-    int n_edge;
-
-#ifdef PARAM_DERIV
-    VecArrayStorage interaction_param_deriv;
-    VecArrayStorage edge_param_deriv;
-#endif
-
-    // It is easiest if I just get my own subgroup of the .h5 file
-    BetweenInteractionGraph(hid_t grp, CoordNode& pos_node1_, CoordNode& pos_node2_):
-        pos_node1(pos_node1_), pos_node2(pos_node2_),
-        n_type1(h5::get_dset_size(3,grp,"interaction_param")[0]), n_type2(h5::get_dset_size(3,grp,"interaction_param")[1]),
-        n_elem1(h5::get_dset_size(1,grp,"index1")[0]),            n_elem2(h5::get_dset_size(1,grp,"index2")[0]),
-        max_n_edge(n_elem1*n_elem2),
-        interaction_param(n_type1*n_type2),
-        cutoff2(n_type1*n_type2),
-        edge_deriv(IType::n_deriv, max_n_edge),
-        pos_deriv1(IType::n_dim1, n_elem1), pos_deriv2(IType::n_dim2, n_elem2),
-        edge_indices(2*max_n_edge)
-#ifdef PARAM_DERIV
-        ,interaction_param_deriv(IType::n_param, n_type1*n_type2)
-        ,edge_param_deriv(IType::n_param, max_n_edge)
-#endif
-    {
-        using namespace h5;
-        check_elem_width_lower_bound(pos_node1, IType::n_dim1);
-        check_elem_width_lower_bound(pos_node2, IType::n_dim2);
-
-        check_size(grp, "interaction_param", n_type1, n_type2, IType::n_param);
-        traverse_dset<3,float>(grp, "interaction_param", [&](size_t nt1, size_t nt2, size_t np, float x) {
-                interaction_param[nt1*n_type2+nt2][np] = x;});
-        update_cutoffs();
-
-        check_size(grp, "index1", n_elem1); check_size(grp, "index2", n_elem2);
-        check_size(grp, "type1",  n_elem1); check_size(grp, "type2",  n_elem2);
-        check_size(grp, "id1",    n_elem1); check_size(grp, "id2",    n_elem2);
-
-        traverse_dset<1,int>(grp, "index1", [&](size_t nr, int x) {param1.emplace_back(x,0u);});
-        traverse_dset<1,int>(grp, "type1",  [&](size_t nr, int x) {types1.push_back(x);});
-        traverse_dset<1,int>(grp, "id1",    [&](size_t nr, int x) {id1   .push_back(x);});
-
-        traverse_dset<1,int>(grp, "index2", [&](size_t nr, int x) {param2.emplace_back(x,0u);});
-        traverse_dset<1,int>(grp, "type2",  [&](size_t nr, int x) {types2.push_back(x);});
-        traverse_dset<1,int>(grp, "id2",    [&](size_t nr, int x) {id2   .push_back(x);});
-
-        for(auto &p: param1) pos_node1.slot_machine.add_request(1, p);
-        for(auto &p: param2) pos_node2.slot_machine.add_request(1, p);
-
-    }
-
-
-    // I need to be hooked to a data source of fixed size
-    template <typename F>
-    void compute_edges(F f) {
-        VecArray pos1 = pos_node1.coords().value;
-        VecArray pos2 = pos_node2.coords().value;
-        fill(pos_deriv1, IType::n_dim1, n_elem1, 0.f);
-        fill(pos_deriv2, IType::n_dim2, n_elem2, 0.f);
-
-        #ifdef PARAM_DERIV
-        fill(interaction_param_deriv, IType::n_param, n_type1*n_type2, 0.f);
-        #endif
-
-        struct Rec {
-            Vec<3> pos;
-            unsigned type;
-        };
-
-        std::vector<Rec> recs(n_elem2);
-        for(int i2: range(n_elem2)) {
-            auto index2 = param2[i2].index;
-            recs[i2].pos = load_vec<3>(pos2, index2);
-            recs[i2].type = types2[i2];
+    void compute_edges() {
+        // Copy in the data to packed arrays to ensure contiguity
+        {
+            VecArray posv = pos_node1->coords().value;
+            for(int ne=0; ne<n_elem1; ++ne) 
+                store_vec(pos1+ne*n_dim1, load_vec<n_dim1>(posv, loc1[ne].index));
+        }
+        if(!symmetric) {
+            VecArray posv = pos_node2->coords().value;
+            for(int ne=0; ne<n_elem2; ++ne) 
+                store_vec(pos2+ne*n_dim2, load_vec<n_dim2>(posv, loc2[ne].index));
         }
 
         // First find all the edges
-        {
-            // Timer timer(std::string("edge_finder"));
-            int ne = 0;
-            for(int i1: range(n_elem1)) {
-                auto index1 = param1[i1].index;
-                auto x1     = load_vec<3>(pos1, index1);
-                auto type1  = types1[i1];
-                auto my_id1 = id1[i1];
+        float cutoff2 = sqr(cutoff);
+        int ne = 0;
+        for(int i1=0; i1<n_elem1; ++i1) {
+            auto x1     = load_vec<3>(pos1+i1*n_dim1);
+            auto my_id1 = id1[i1];
 
-                for(int i2: range(n_elem2)) {
-                    auto rec = recs[i2];
-                    int interaction_type = type1*n_type2 + rec.type;
-                    if(mag2(x1-rec.pos) >= cutoff2[interaction_type]) continue;
+            for(int i2=symmetric?i1+1:0; i2<n_elem2; ++i2) {
+                auto x2 = load_vec<3>((symmetric?pos1:pos2)+i2*n_dim2);
+                if(!(mag2(x1-x2)<cutoff2)) continue;  // NaN-safe cutoff
 
-                    auto my_id2 = id2[i2];
-                    if(IType::exclude_by_id(my_id1,my_id2)) continue;  // avoid self-interaction in user defined way
+                auto my_id2 = (symmetric?id1:id2)[i2];
+                if(IType::exclude_by_id(my_id1,my_id2)) continue; // avoid self-interaction in user-defined way
 
-                    edge_indices[2*ne + 0] = i1;
-                    edge_indices[2*ne + 1] = i2;
-
-                    ++ne;
-                }
-            }
-            n_edge = ne;
-        }
-
-        // Now compute value
-        {
-            // Timer timer(std::string("edge_computation"));
-
-            for(int ne: range(n_edge)) {
-                int i1 = edge_indices[2*ne + 0];
-                int i2 = edge_indices[2*ne + 1];
-
-                auto index1 = param1[i1].index;
-                auto coord1 = load_vec<IType::n_dim1>(pos1, index1);
-                auto type1  = types1[i1];
-                auto my_id1 = id1[i1];
-
-                auto index2 = param2[i2].index;
-                auto coord2 = load_vec<IType::n_dim2>(pos2, index2);
-                auto type2  = types2[i2];
-                auto my_id2 = id2[i2];
-
-                int interaction_type = type1*n_type2 + type2;
-
-                Vec<IType::n_deriv> deriv;
-                auto value = IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_deriv, ne, deriv);
-                f(ne, value, index1,type1,my_id1, index2,type2,my_id2);
-
-                #ifdef PARAM_DERIV
-                Vec<IType::n_param> dp;
-                IType::param_deriv(dp, interaction_param[interaction_type], coord1, coord2);
-                store_vec(edge_param_deriv, ne, dp);
-                #endif
-
-                // // compute finite difference deriv to check
-                // if(IType::n_dim1==7 && IType::n_dim2==3) {
-                //     float eps = 1e-3f;
-                //     Vec<IType::n_dim1> actual_deriv1;
-                //     for(int dim: range(IType::n_dim1)) {
-                //         auto dx = make_zero<IType::n_dim1>();
-                //         dx[dim] = eps;
-                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1+dx,coord2);
-                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1-dx,coord2);
-                //         actual_deriv1[dim] = (vp-vm)/(2.f*eps);
-                //     }
-                //     Vec<IType::n_dim2> actual_deriv2;
-                //     for(int dim: range(IType::n_dim2)) {
-                //         auto dx = make_zero<IType::n_dim2>();
-                //         dx[dim] = eps;
-                //         auto vp = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2+dx);
-                //         auto vm = IType::compute_edge(deriv,interaction_param[interaction_type],coord1,coord2-dx);
-                //         actual_deriv2[dim] = (vp-vm)/(2.f*eps);
-                //     }
-
-                //     IType::compute_edge(deriv, interaction_param[interaction_type], coord1, coord2);
-                //     Vec<IType::n_dim1> pred_deriv1;
-                //     Vec<IType::n_dim2> pred_deriv2;
-                //     IType::expand_deriv(pred_deriv1, pred_deriv2, deriv);
-
-                //     printf("%i %i pred_deriv", IType::n_dim1, IType::n_dim2); 
-                //     for(int i: range(IType::n_dim1)) printf(" % .2f", pred_deriv1[i]);
-                //     for(int i: range(IType::n_dim2)) printf(" % .2f", pred_deriv2[i]);
-                //     printf("\n");
-                //     printf("%i %i actu_deriv", IType::n_dim1, IType::n_dim2); 
-                //     for(int i: range(IType::n_dim1)) printf(" % .2f", actual_deriv1[i]);
-                //     for(int i: range(IType::n_dim2)) printf(" % .2f", actual_deriv2[i]);
-                //     printf("\n\n");
-                // }
+                edge_indices1[ne] = i1;
+                edge_indices2[ne] = i2;
+                ++ne;
             }
         }
-    }
+        n_edge = ne;
+        // printf("n_edge for n_dim1 %i n_dim2 %i is %i\n", n_dim1, n_dim2, n_edge);
 
-
-    void use_derivative(int edge_idx, float sensitivity) {
-        auto deriv = sensitivity*load_vec<IType::n_deriv>(edge_deriv, edge_idx);
-        Vec<IType::n_dim1> d1;
-        Vec<IType::n_dim2> d2;
-        IType::expand_deriv(d1,d2, deriv);
-        update_vec(pos_deriv1, edge_indices[2*edge_idx + 0], d1);
-        update_vec(pos_deriv2, edge_indices[2*edge_idx + 1], d2);
-
+        // Compute edge values
         #ifdef PARAM_DERIV
-        auto d = sensitivity*load_vec<IType::n_param>(edge_param_deriv, edge_idx);
-        auto type1 = types1[edge_indices[2*edge_idx + 0]];
-        auto type2 = types2[edge_indices[2*edge_idx + 1]];
-        update_vec(interaction_param_deriv, type1*n_type2+type2, d);
+        edge_param_deriv.clear();
         #endif
+
+        for(int ne=0; ne<n_edge; ++ne) {
+            int i1 = edge_indices1[ne];
+            int i2 = edge_indices2[ne];
+            int interaction = types1[i1]*n_type2 + types2[i2];
+
+            auto coord1 = load_vec<n_dim1>(pos1                 +i1*n_dim1);
+            auto coord2 = load_vec<n_dim2>((symmetric?pos1:pos2)+i2*n_dim2);
+
+            Vec<n_dim1> d1;
+            Vec<n_dim2> d2;
+            edge_value[ne] = IType::compute_edge(d1,d2, interaction_param+interaction*n_param, coord1,coord2);
+            store_vec(edge_deriv + ne*(n_dim1+n_dim2),        d1);
+            store_vec(edge_deriv + ne*(n_dim1+n_dim2)+n_dim1, d2);
+
+            #ifdef PARAM_DERIV
+            edge_param_deriv.push_back(make_zero<n_param>());
+            IType::param_deriv(edge_param_deriv.back(), interaction_param+interaction*n_param, 
+                               coord1, coord2);
+            #endif
+        }
     }
+
 
     void propagate_derivatives() {
         // Finally put the data where it is needed.
-        // This function must be called exactly once after the user has finished calling 
-        // use_derivative for the round.
+        // This function must be called after the user sets edge_sensitivity
 
-       VecArray pos_accum1 = pos_node1.coords().deriv;
-       for(int i: range(n_elem1))
-           store_vec(pos_accum1, param1[i].slot, load_vec<IType::n_dim1>(pos_deriv1,i));
+        // Zero accumulation buffers
+        std::fill(pos1_deriv.get(), pos1_deriv+n_elem1*n_dim1, 0.f);
+        if(!symmetric) std::fill(pos2_deriv.get(), pos2_deriv+n_elem2*n_dim2, 0.f);
+        #ifdef PARAM_DERIV
+        fill(interaction_param_deriv, 0.f);
+        #endif
 
-       VecArray pos_accum2 = pos_node2.coords().deriv;
-       for(int i: range(n_elem2))
-           store_vec(pos_accum2, param2[i].slot, load_vec<IType::n_dim2>(pos_deriv2,i));
-    }
+        // Accumulate derivatives
+        for(int ne=0; ne<n_edge; ++ne) {
+            int i1 = edge_indices1[ne];
+            int i2 = edge_indices2[ne];
+            float sens = edge_sensitivity[ne];
 
-    void update_cutoffs() {
-        for(int nt1: range(n_type1)) {
-            for(int nt2: range(n_type2)) {
-                cutoff2[nt1*n_type2+nt2] = sqr(IType::cutoff(interaction_param[nt1*n_type2+nt2]));
-            }
+            auto d1 = sens*load_vec<n_dim1>(edge_deriv + ne*(n_dim1+n_dim2));
+            auto d2 = sens*load_vec<n_dim2>(edge_deriv + ne*(n_dim1+n_dim2)+n_dim1);
+
+            update_vec(pos1_deriv                        + i1*n_dim1, d1);
+            update_vec((symmetric?pos1_deriv:pos2_deriv) + i2*n_dim2, d2);
+
+            #ifdef PARAM_DERIV
+            auto t1 = types1[i1];
+            auto t2 = types2[i2];
+            update_vec(interaction_param_deriv, t1*n_type2+t2, sens*edge_param_deriv[ne]);
+            #endif
+        }
+
+        // Push derivatives to slots
+        {
+            VecArray pos1_accum = pos_node1->coords().deriv;
+            for(int i1=0; i1<n_elem1; ++i1)
+                store_vec(pos1_accum, loc1[i1].slot, load_vec<n_dim1>(pos1_deriv+i1*n_dim1));
+        }
+        if(!symmetric) {
+            VecArray pos2_accum = pos_node2->coords().deriv;
+            for(int i2=0; i2<n_elem2; ++i2)
+                store_vec(pos2_accum, loc2[i2].slot, load_vec<n_dim2>(pos2_deriv+i2*n_dim2));
         }
     }
-
-#ifdef PARAM_DERIV
-    std::vector<float> get_param() const {
-        std::vector<float> ret; ret.reserve(n_type1*n_type2*IType::n_param);
-        for(int i: range(n_type1*n_type2))
-            for(int d: range(IType::n_param))
-                ret.push_back(interaction_param[i][d]);
-        return ret;
-    }
-
-    std::vector<float> get_param_deriv() const {
-        std::vector<float> ret; ret.reserve(n_type1*n_type2*IType::n_param);
-        for(int i: range(n_type1*n_type2))
-            for(int d: range(IType::n_param))
-                ret.push_back(interaction_param_deriv(d,i));
-        return ret;
-    }
-
-    void set_param(const std::vector<float>& new_param) {
-        if(new_param.size() != size_t(n_type1*n_type2*IType::n_param)) throw std::string("Bad params");
-        // just blast over interaction param and update cutoffs
-        for(int i: range(n_type1*n_type2))
-            for(int np: range(IType::n_param)) 
-                interaction_param[i][np] = new_param[i*IType::n_param + np];
-        update_cutoffs();
-    }
-#endif
 };
-
-
-
 #endif
