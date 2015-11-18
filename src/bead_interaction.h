@@ -55,8 +55,6 @@ namespace {
             for(int i: range(4)) d_param[starting_bin+i] = result[i];
         }
     };
-
-
 }
 
 typedef PosDistSplineInteraction preferred_bead_type;

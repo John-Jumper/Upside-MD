@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 #include "interaction_graph.h"
+#include "spline.h"
 
 using namespace std;
 using namespace h5;
@@ -21,34 +22,47 @@ struct ContactPair {
 struct SidechainRadialPairs : public PotentialNode
 {
     struct Helper {
-        // params are r0_squared, scale, energy
-        constexpr static float base_cutoff = 8.f;  
-        constexpr static bool  symmetric = true;
-        constexpr static int   n_param=3, n_dim1=3, n_dim2=3, simd_width=1;
+        // spline-based distance interaction
+        // n_knot is the number of basis splines (including those required to get zero
+        //   derivative in the clamped spline)
+        // spline is constant over [0,dx] to avoid funniness at origin
 
-        static float cutoff(const float* p) {return sqrtf(p[0] + base_cutoff/p[1]);}
+        // Please obey these 3 conditions:
+        // should have p[1] == p[3] for origin clamp (p[0] is inv_dx)
+        // should have p[-3] == p[-1] (negative indices from the end, Python-style) for terminal clamping
+        // should have (1./6.)*p[-3] + (2./3.)*p[-2] + (1./6.)*p[-1] == 0. for continuity at cutoff
+
+        constexpr static bool  symmetric = true;
+        constexpr static int   n_knot=1, n_param=1+n_knot, n_dim1=3, n_dim2=3, simd_width=1;
+
+        static float cutoff(const float* p) {
+            const float inv_dx = p[0];
+            return (n_knot-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
+        }
+
         static bool is_compatible(const float* p1, const float* p2) {
             for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
             return true;
         }
 
-        static bool exclude_by_id(int id1, int id2) { return (id1-id2<2) & (id2-id1<2); } // no nearest neighbor
+        static bool exclude_by_id(unsigned id1, unsigned id2) {return abs(id1-id2)<3;}
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-                float3 disp = x1-x2;
-                float  z = expf(p[1] * (mag2(disp) - p[0]));
-                float  w = 1.f / (1.f + z);
+            auto inv_dx     = p[0];
+            auto disp       = x1-x2;
+            auto dist2      = mag2(disp);
+            auto inv_dist   = rsqrt(dist2+1e-7f);  // 1e-7 is divergence protection
+            auto dist_coord = dist2*(inv_dist*inv_dx);
 
-                float  deriv_over_r = -2.f*p[1] * p[2] * z * (w*w);
-                d1 = deriv_over_r * disp;
-                d2 = -d1;
-                return p[2]*w;
-        };
+            auto en = clamped_deBoor_value_and_deriv(p+1, dist_coord, n_param);
+            d1 = disp*(inv_dist*inv_dx*en.y());
+            d2 = -d1;
+            return en.x();
+        }
 
         static void param_deriv(Vec<n_param> &d_param, const float* p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
-
     };
 
     InteractionGraph<Helper> igraph;

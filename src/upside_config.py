@@ -721,7 +721,7 @@ def write_backbone_dependent_point(fasta, library):
     create_array(grp, 'placement_data',  point_map)
 
 
-def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_residues, suffix=''):
+def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
     g._v_attrs.arguments = np.array(['placement3_backbone_dependent_point'])
     for res_num in excluded_residues:
@@ -737,13 +737,7 @@ def write_sidechain_radial(fasta, library, scale_energy, scale_radius, excluded_
         create_array(g, 'index', obj=np.array(residues))
         create_array(g, 'type',  obj=np.array([resname2restype[x] for x in fasta[residues]]))
         create_array(g, 'id',    obj=np.array(residues))  # FIXME update for chain breaks
-
-        data = t.create_group(g, 'data')
-        p = np.zeros((n_type, n_type, 3))
-        p[:,:,0] = params.root.params.r0_squared[:] * scale_radius**2
-        p[:,:,1] = params.root.params.scale[:]      / scale_radius # scale has units 1/A^2
-        p[:,:,2] = params.root.params.energy[:]     * scale_energy
-        create_array(g, 'interaction_param', obj=p)
+        create_array(g, 'interaction_param', obj=params.root.interaction_param[:])
 
 
 def write_weighted_placement(fasta, placement_library):
@@ -1056,14 +1050,6 @@ def main():
             help='use sidechain radial potential library')
     parser.add_argument('--sidechain-radial-exclude-residues', default=[], type=parse_segments,
             help='Residues that do not participate in the --sidechain-radial potential (same format as --restraint-group)')
-    parser.add_argument('--sidechain-radial-scale-energy', default=1.0, type=float,
-            help='scale the sidechain radial energies')
-    parser.add_argument('--sidechain-radial-scale-inverse-energy', default=0.0, type=float,
-            help='scale the sidechain radial inverse energies (default 0.)')
-    parser.add_argument('--sidechain-radial-scale-inverse-radius', default=0.7, type=float,
-            help='scale the sidechain radial inverse energies (default 0.7)')
-    # parser.add_argument('--sidechain-library', default=None, 
-    #         help='use sidechain density potential')
     parser.add_argument('--bond-stiffness', default=48., type=float,
             help='Bond spring constant in units of energy/A^2 (default 48)')
     parser.add_argument('--angle-stiffness', default=175., type=float,
@@ -1247,15 +1233,8 @@ def main():
 
     if args.sidechain_radial:
         require_backbone_point = True
-        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_scale_energy, 1.0,
-                args.sidechain_radial_exclude_residues)
+        write_sidechain_radial(fasta_seq, args.sidechain_radial, args.sidechain_radial_exclude_residues)
 
-        if args.sidechain_radial_scale_energy != 0.:
-            write_sidechain_radial(fasta_seq, args.sidechain_radial, 
-                    -args.sidechain_radial_scale_energy*args.sidechain_radial_scale_inverse_energy, 
-                    args.sidechain_radial_scale_inverse_radius,
-                    args.sidechain_radial_exclude_residues, '_inverse')
-    
     if args.membrane_potential:
         if args.membrane_thickness is None:
             parser.error('--membrane-potential requires --membrane-thickness')
