@@ -27,7 +27,8 @@ struct SidechainRadialPairs : public PotentialNode
         //   derivative in the clamped spline)
         // spline is constant over [0,dx] to avoid funniness at origin
 
-        // Please obey these 3 conditions:
+        // Please obey these 4 conditions:
+        // p[0] = 1./dx, that is the inverse of the knot spacing
         // should have p[1] == p[3] for origin clamp (p[0] is inv_dx)
         // should have p[-3] == p[-1] (negative indices from the end, Python-style) for terminal clamping
         // should have (1./6.)*p[-3] + (2./3.)*p[-2] + (1./6.)*p[-1] == 0. for continuity at cutoff

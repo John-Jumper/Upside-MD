@@ -731,7 +731,7 @@ def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     residues = sorted(set(np.arange(len(fasta))).difference(excluded_residues))
 
     with tb.open_file(library) as params:
-        resname2restype = dict((x,i) for i,x in enumerate(params.root.params.names[:]))
+        resname2restype = dict((x,i) for i,x in enumerate(params.root.names[:]))
         n_type = len(resname2restype)
 
         create_array(g, 'index', obj=np.array(residues))
