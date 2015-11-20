@@ -194,11 +194,11 @@ struct InteractionGraph{
         // First find all the edges
         {
             Timer t1(std::string("find_edges"));
-            auto cutoff2 = Float4(sqr(cutoff));
-            int ne = 0;
 
             int32_t offset[4] = {0,1,2,3};
+            auto cutoff2 = Float4(sqr(cutoff));
 
+            int ne = 0;
             for(int32_t i1=0; i1<n_elem1; i1+=4) {
                 Float4 v0(pos1+(i1+0)*n_dim1a), // pos1 size was rounded up so that this never runs past the end
                        v1(pos1+(i1+1)*n_dim1a), 

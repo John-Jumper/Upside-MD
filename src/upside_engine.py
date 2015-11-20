@@ -36,6 +36,9 @@ calc.get_output.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 calc.get_clamped_value_and_deriv.restype  = ct.c_int
 calc.get_clamped_value_and_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
 
+calc.get_clamped_value_and_deriv_simd.restype  = ct.c_int
+calc.get_clamped_value_and_deriv_simd.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_void_p]
+
 calc.get_clamped_coeff_deriv.restype  = ct.c_int
 calc.get_clamped_coeff_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
 
@@ -54,6 +57,22 @@ def clamped_value_and_deriv(bspline_coeff, x):
                 result[i].ctypes.data, 
                 bspline_coeff.ctypes.data,
                 y): raise RuntimeError("spline evaluation error")
+    return result
+
+def clamped_value_and_deriv_simd(bspline_coeff, x):
+    x = np.asarray(x, dtype='f4')
+    assert x.shape == (4,)
+
+    bspline_coeff = np.require(bspline_coeff, dtype='f4', requirements='C')
+    assert bspline_coeff.shape == (4,bspline_coeff.shape[-1])
+
+    result = np.zeros((len(x),2), dtype='f4')
+
+    if calc.get_clamped_value_and_deriv_simd(
+            bspline_coeff.shape[-1],
+            result.ctypes.data, 
+            bspline_coeff.ctypes.data,
+            x.ctypes.data): raise RuntimeError("spline evaluation error")
     return result
 
 def clamped_coeff_deriv(bspline_coeff, x):

@@ -60,22 +60,8 @@ inline void spline_value_and_deriv(T result[2], const T* c, T fx) {
     result[1] = c[0] + fx*c[1] +        fx2*c[2] +        fx3*c[3]; // value
 }
 
-inline float clamped_spline_left(const float* bspline_coeff, int n_coeff) {
-    // for clamping with derivative continuity, you should really have bspline_coeff[0] == bspline_coeff[2]
-    return (1.f/6.f)*bspline_coeff[0] + 
-           (2.f/3.f)*bspline_coeff[1] + 
-           (1.f/6.f)*bspline_coeff[2];
-}
-
-inline float clamped_spline_right(const float* bspline_coeff, int n_coeff) {
-    // for clamping with derivative continuity, you should really have bspline_coeff[n_coeff-3] == bspline_coeff[n_coeff-1]
-    return (1.f/6.f)*bspline_coeff[n_coeff-3] + 
-           (2.f/3.f)*bspline_coeff[n_coeff-2] + 
-           (1.f/6.f)*bspline_coeff[n_coeff-1];
-}
-
 static void print_float4(const char* nm, const Float4& val) {
-    fprintf(stderr, "%s % .2f % .2f % .2f % .2f\n", nm, val.w(), val.x(), val.y(), val.z());
+    fprintf(stderr, "%s % .2f % .2f % .2f % .2f\n", nm, val.x(), val.y(), val.z(), val.w());
 }
 
 inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) {
@@ -108,9 +94,74 @@ inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) 
     Float4 d2 = (one-alpha2)*d1.right_rotate() + alpha2*d1;
     Float4 d3 = (one-alpha3)*d2.right_rotate() + alpha3*d2;
 
-    return make_vec2(c3.z(), d3.z());
+    return make_vec2(c3.w(), d3.w());
 }
 
+
+inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x) {
+    // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
+    // the first spline is centered at -1
+    // return is value then derivative
+
+    Int4 x_bin = x.truncate_to_int();  // must be at least 1
+    Float4 y = x - x.round<_MM_FROUND_TO_ZERO>();
+
+    // Read the coefficients for each slot then transpose to prepare
+    //   for vertical simd
+    Float4 c00(bspline_coeff[0]-1 + x_bin.x(), Alignment::unaligned);
+    Float4 c01(bspline_coeff[1]-1 + x_bin.y(), Alignment::unaligned);
+    Float4 c02(bspline_coeff[2]-1 + x_bin.z(), Alignment::unaligned);
+    Float4 c03(bspline_coeff[3]-1 + x_bin.w(), Alignment::unaligned);
+    transpose4(c00,c01,c02,c03);
+
+    auto one = Float4(1.f);
+
+    auto yu1 = y + Float4(2.f);
+    auto yu2 = y + one;
+    auto yu3 = y;
+
+    auto frac13 = Float4(1.f/3.f);
+    auto alpha11 = frac13*yu1;
+    auto alpha12 = frac13*yu2;
+    auto alpha13 = frac13*yu3;
+
+    auto c11 = (one-alpha11)*c00 + alpha11*c01;
+    auto d11 = c01 - c00;  // deriv coeffs for spline of order 2
+    auto c12 = (one-alpha12)*c01 + alpha12*c02;
+    auto d12 = c02 - c01;
+    auto c13 = (one-alpha13)*c02 + alpha13*c03;
+    auto d13 = c03 - c02;
+
+    auto frac12 = Float4(1.f/2.f);
+    auto alpha22 = frac12*yu2;
+    auto alpha23 = frac12*yu3;
+
+    auto c22 = (one-alpha22)*c11 + alpha22*c12;
+    auto d22 = (one-alpha22)*d11 + alpha22*d12;
+    auto c23 = (one-alpha23)*c12 + alpha23*c13;
+    auto d23 = (one-alpha23)*d12 + alpha23*d13;
+
+    auto alpha33 = yu3;
+
+    auto c33 = (one-alpha33)*c22 + alpha33*c23;
+    auto d33 = (one-alpha33)*d22 + alpha33*d23;
+
+    return make_vec2(c33, d33);
+}
+
+inline float clamped_spline_left(const float* bspline_coeff, int n_coeff) {
+    // for clamping with derivative continuity, you should really have bspline_coeff[0] == bspline_coeff[2]
+    return (1.f/6.f)*bspline_coeff[0] + 
+           (2.f/3.f)*bspline_coeff[1] + 
+           (1.f/6.f)*bspline_coeff[2];
+}
+
+inline float clamped_spline_right(const float* bspline_coeff, int n_coeff) {
+    // for clamping with derivative continuity, you should really have bspline_coeff[n_coeff-3] == bspline_coeff[n_coeff-1]
+    return (1.f/6.f)*bspline_coeff[n_coeff-3] + 
+           (2.f/3.f)*bspline_coeff[n_coeff-2] + 
+           (1.f/6.f)*bspline_coeff[n_coeff-1];
+}
 
 inline Vec<2> clamped_deBoor_value_and_deriv(const float* bspline_coeff, const float x, int n_knot) {
     if(x<=1.f)      return make_vec2(clamped_spline_left (bspline_coeff, n_knot), 0.f);
@@ -118,6 +169,41 @@ inline Vec<2> clamped_deBoor_value_and_deriv(const float* bspline_coeff, const f
     return deBoor_value_and_deriv(bspline_coeff, x);
 }
 
+inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x, int n_knot) {
+    auto one = Float4(1.f);
+    auto too_small = x<one;
+    auto too_big   = Float4(n_knot-2)<=x;
+    auto clamp_mask = too_small | too_big;
+
+    auto x_clamp = x.blendv(one, clamp_mask); // make all values in bounds to proceed with spline eval
+    auto value = deBoor_value_and_deriv(bspline_coeff, x_clamp);
+
+    if(clamp_mask.any()) { // hopefully rare
+        value.y() = value.y().blendv(Float4(), clamp_mask);  // both cases set derivative to 0
+
+        auto outer = Float4(1.f/6.f);
+        auto inner = Float4(2.f/3.f);
+        
+        Float4 c0(bspline_coeff[0], Alignment::unaligned);
+        Float4 c1(bspline_coeff[1], Alignment::unaligned);
+        Float4 c2(bspline_coeff[2], Alignment::unaligned);
+        Float4 c3(bspline_coeff[3], Alignment::unaligned);
+        transpose4(c0,c1,c2,c3);
+        auto left_clamp = outer*c0 + inner*c1 + outer*c2;
+
+        value.x() = value.x().blendv(left_clamp, too_small);
+
+        Float4 cn4(bspline_coeff[0]+n_knot-4, Alignment::unaligned);
+        Float4 cn3(bspline_coeff[1]+n_knot-4, Alignment::unaligned);
+        Float4 cn2(bspline_coeff[2]+n_knot-4, Alignment::unaligned);
+        Float4 cn1(bspline_coeff[3]+n_knot-4, Alignment::unaligned);
+        transpose4(cn4,cn3,cn2,cn1);
+        auto right_clamp = outer*cn3 + inner*cn2 + outer*cn1;
+
+        value.x() = value.x().blendv(right_clamp, too_big);
+    }
+    return value;
+}
 
 inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float* bspline_coeff, const float x) {
     // this function is not intended to be especially efficient

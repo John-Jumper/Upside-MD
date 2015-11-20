@@ -169,6 +169,20 @@ int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff
     return 0;
 }
 
+int get_clamped_value_and_deriv_simd(int N, float* result, const float* bspline_coeff, float* x) {
+    const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff+N, bspline_coeff+2*N, bspline_coeff+3*N};
+    auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(x, Alignment::unaligned), N);
+    result[0] = en.x().x();
+    result[1] = en.y().x();
+    result[2] = en.x().y();
+    result[3] = en.y().y();
+    result[4] = en.x().z();
+    result[5] = en.y().z();
+    result[6] = en.x().w();
+    result[7] = en.y().w();
+    return 0;
+}
+
 int get_clamped_coeff_deriv(int N, float* result, const float* bspline_coeff, float x) {
     int starting_bin;
     float data[4];

@@ -125,6 +125,7 @@ struct alignas(16) Float4
         Float4 operator-()                const {return _mm_sub_ps(_mm_setzero_ps(), vec);}
         Float4 operator*(const Float4 &o) const {return Float4(_mm_mul_ps  (vec, o.vec));}
         Float4 operator<(const Float4 &o) const {return Float4(_mm_cmplt_ps(vec,o.vec));}
+        Float4 operator<=(const Float4 &o) const {return Float4(_mm_cmple_ps(vec,o.vec));}
         Float4 operator!=(const Float4 &o) const {return Float4(_mm_cmpneq_ps(vec,o.vec));}
         Float4 operator==(const Float4 &o) const {return Float4(_mm_cmpeq_ps(vec,o.vec));}
         Float4 operator&(const Float4 &o) const {return Float4(_mm_and_ps(vec,o.vec));}
@@ -163,12 +164,16 @@ struct alignas(16) Float4
         }
 
         // choose from values whenever the equivalent element of mask is true
-        Float4 blendv(Float4 values, Float4 mask) {
+        Float4 blendv(Float4 values, Float4 mask) const {
             return Float4(_mm_blendv_ps(vec, values.vec, mask.vec));
         }
 
         template <int round_mode = _MM_FROUND_TO_NEAREST_INT>
         Float4 round() const {return Float4(_mm_round_ps(vec, round_mode));}
+
+        Int4 truncate_to_int() const {
+            return Int4(_mm_cvttps_epi32(vec));
+        }
 
         template <int m3, int m2, int m1, int m0>
         Float4 zero_entries() const
@@ -178,11 +183,10 @@ struct alignas(16) Float4
             return _mm_insert_ps(vec,vec, mask);
         }
 
-        // convenience function, not at all efficient
-        float w() const { float val; _MM_EXTRACT_FLOAT(val, vec, 0); return val;}
-        float x() const { float val; _MM_EXTRACT_FLOAT(val, vec, 1); return val;}
-        float y() const { float val; _MM_EXTRACT_FLOAT(val, vec, 2); return val;}
-        float z() const { float val; _MM_EXTRACT_FLOAT(val, vec, 3); return val;}
+        float x() const { float val; _MM_EXTRACT_FLOAT(val, vec, 0); return val;}
+        float y() const { float val; _MM_EXTRACT_FLOAT(val, vec, 1); return val;}
+        float z() const { float val; _MM_EXTRACT_FLOAT(val, vec, 2); return val;}
+        float w() const { float val; _MM_EXTRACT_FLOAT(val, vec, 3); return val;}
 
         friend Int4;
         friend void transpose4(Float4&, Float4&, Float4&, Float4&);
@@ -272,9 +276,9 @@ inline Float4 sane_shuffle_ps(Float4 m1, Float4 m2)
 }
 
 
-inline void transpose4(Float4 &w, Float4 &x, Float4 &y, Float4 &z)
+inline void transpose4(Float4 &x, Float4 &y, Float4 &z, Float4 &w)
 {
-    _MM_TRANSPOSE4_PS(w.vec,x.vec,y.vec,z.vec);
+    _MM_TRANSPOSE4_PS(x.vec,y.vec,z.vec,w.vec);
 }
 
 inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b) {
