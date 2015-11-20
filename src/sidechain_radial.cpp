@@ -46,7 +46,10 @@ struct SidechainRadialPairs : public PotentialNode
             return true;
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) {return abs(id1-id2)<3;}
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+            auto sequence_cutoff = Int4(2);
+            return (sequence_cutoff < id1-id2) | (sequence_cutoff < id2-id1);
+        }
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {

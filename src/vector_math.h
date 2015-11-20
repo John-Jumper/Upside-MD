@@ -243,7 +243,7 @@ static const float M_PI_F   = 3.141592653589793f;   //!< value of pi as float
 static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
 inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
-inline float sqr  (float x) {return x*x;}  //!< square a number (x^2)
+template <typename D> inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
 inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
 inline float blendv(bool b, float x, float y) {return b ? x : y;}
 
@@ -265,10 +265,10 @@ inline Vec<D,float> blendv(bool which, const Vec<D,float>& a, const Vec<D,float>
 
 
 
-inline Vec<1> make_vec1(float x                           ) {Vec<1> a; a[0]=x;                         return a;}
-inline float2 make_vec2(float x, float y                  ) {float2 a; a[0]=x; a[1]=y;                 return a;}
-inline float3 make_vec3(float x, float y, float z         ) {float3 a; a[0]=x; a[1]=y; a[2]=z;         return a;}
-inline float4 make_vec4(float x, float y, float z, float w) {float4 a; a[0]=x; a[1]=y; a[2]=z; a[3]=w; return a;}
+template<typename S> inline Vec<1,S> make_vec1(const S& x                                    ) {Vec<1,S> a; a[0]=x;                         return a;}
+template<typename S> inline Vec<2,S> make_vec2(const S& x, const S& y                        ) {Vec<2,S> a; a[0]=x; a[1]=y;                 return a;}
+template<typename S> inline Vec<3,S> make_vec3(const S& x, const S& y, const S& z            ) {Vec<3,S> a; a[0]=x; a[1]=y; a[2]=z;         return a;}
+template<typename S> inline Vec<4,S> make_vec4(const S& x, const S& y, const S& z, const S& w) {Vec<4,S> a; a[0]=x; a[1]=y; a[2]=z; a[3]=w; return a;}
 //! make float4 from float3 (as x,y,z) and scalar (as w)
 inline float4 make_vec4(float3 v, float w) { return make_vec4(v.x(),v.y(),v.z(),w); } 
 
@@ -478,11 +478,24 @@ inline S a_sqrt(const S& a) {
     return a * rsqrt(a);
 }
 
+// template <int D, typename S>
+// inline S mag2(const Vec<D,S>& a) {
+//     S m = zero<S>();
+//     #pragma unroll
+//     for(int i=0; i<D; ++i) m += sqr(a[i]);
+//     return m;
+// }
+
+inline float fmadd(float a, float b, float c) {
+    return a*b+c;
+}
+
 template <int D, typename S>
 inline S mag2(const Vec<D,S>& a) {
-    S m = zero<S>();
+    // not valid for length-0 vectors
+    S m = a[0]*a[0];
     #pragma unroll
-    for(int i=0; i<D; ++i) m += sqr(a[i]);
+    for(int i=1; i<D; ++i) m = fmadd(a[i],a[i], m);
     return m;
 }
 
@@ -701,15 +714,22 @@ static void print(const VecArray &a, int n_dim, int n_elem, const char* txt) {
     }
 }
 
-inline int round_up(int i, int alignment) {
-    int j = i+alignment-1;
-    return j-j%alignment; // probably only efficient if alignment is a power of 2
+// the function below is used to allow a version of max to be called in a constexpr context
+constexpr inline int maxint(int i, int j) {
+    return (i>j) ? i : j;
+}
+
+constexpr inline int round_up(int i, int alignment) {
+    return ((i+alignment-1)/alignment)*alignment; // probably alignment is a power of 2
 }
 
 template <typename T>
-static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_bytes) {
+static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_elems) {
     // round up allocation to ensure that you can also read to the end without
     //   overstepping the array, if needed
-    return std::unique_ptr<T[]>(new T[round_up(n_elem*sizeof(T), alignment_bytes)]);
+    T* ptr = new T[round_up(n_elem, alignment_elems)];
+    // printf("aligning %i elements at %p\n", round_up(n_elem, alignment_elems), (void*)ptr);
+    // if((unsigned long)(ptr)%(unsigned long)(alignment_elems*sizeof(T))) throw "bad alignment on string";
+    return std::unique_ptr<T[]>(ptr);
 }
 #endif

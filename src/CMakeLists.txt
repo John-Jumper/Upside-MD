@@ -10,7 +10,7 @@ set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler"
 if(${OLD_DWARF_FORMAT})
     set(DEBUG_FLAGS "-gdwarf-3")
 else()
-    set(DEBUG_FLAGS "-g")
+    set(DEBUG_FLAGS "")
 endif()
 
 set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #

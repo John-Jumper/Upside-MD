@@ -6,7 +6,6 @@
 
 namespace {
     constexpr static const int n_bit_rotamer = 4; // max number of rotamers is 2**n_bit_rotamer
-    bool exclude_by_id_base(unsigned id1, unsigned id2) {return id1>>n_bit_rotamer == id2>>n_bit_rotamer;}
 
     struct PosDistSplineInteraction {
         // spline-based distance interaction
@@ -28,8 +27,8 @@ namespace {
             return true;
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) { 
-            return exclude_by_id_base(id1,id2);
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+            return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
         }
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p, 

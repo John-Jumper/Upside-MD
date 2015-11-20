@@ -7,6 +7,7 @@
 #include "state_logger.h"
 #include "interaction_graph.h"
 #include "spline.h"
+#include "Float4.h"
 
 using namespace h5;
 using namespace std;
@@ -238,8 +239,8 @@ namespace {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) {
-            return false; // no exclusions
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+            return Int4() == Int4();  // No exclusions (all true)
         }
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
@@ -281,8 +282,8 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
-        static bool exclude_by_id(unsigned id1, unsigned id2) {
-            return false; // no exclusions
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+            return Int4() == Int4();  // No exclusions (all true)
         }
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,

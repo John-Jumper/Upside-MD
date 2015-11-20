@@ -1,5 +1,5 @@
-#ifndef __FLOAT4_H__
-#define __FLOAT4_H__
+#ifndef FLOAT4_H
+#define FLOAT4_H
 
 // Author: John Jumper
 
@@ -7,10 +7,99 @@
 #include <smmintrin.h>
 #include <immintrin.h>
     
-
 enum class Alignment {unaligned, aligned};
 
-struct Vec34;
+struct Int4;
+struct Float4;
+
+alignas(16) static uint8_t left_pack_control_vector[16*16] = {
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
+  4, 5, 6, 7, 0, 1, 2, 3, 8, 9,10,11,12,13,14,15,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
+  8, 9,10,11, 0, 1, 2, 3, 4, 5, 6, 7,12,13,14,15,
+  0, 1, 2, 3, 8, 9,10,11, 4, 5, 6, 7,12,13,14,15,
+  4, 5, 6, 7, 8, 9,10,11, 0, 1, 2, 3,12,13,14,15,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
+ 12,13,14,15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,
+  0, 1, 2, 3,12,13,14,15, 4, 5, 6, 7, 8, 9,10,11,
+  4, 5, 6, 7,12,13,14,15, 0, 1, 2, 3, 8, 9,10,11,
+  0, 1, 2, 3, 4, 5, 6, 7,12,13,14,15, 8, 9,10,11,
+  8, 9,10,11,12,13,14,15, 0, 1, 2, 3, 4, 5, 6, 7,
+  0, 1, 2, 3, 8, 9,10,11,12,13,14,15, 4, 5, 6, 7,
+  4, 5, 6, 7, 8, 9,10,11,12,13,14,15, 0, 1, 2, 3,
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15
+};
+
+
+inline int popcnt_nibble(int value) {
+    return _mm_popcnt_u32((unsigned) value);
+}
+
+
+struct alignas(16) Int4
+{
+    protected:
+        __m128i vec;
+        Int4(__m128i vec_):
+            vec(vec_)
+        {};
+
+    public:
+        Int4(): vec(_mm_setzero_si128()) {}
+
+        // constructor from aligned storage
+        explicit Int4(const int32_t* vec, Alignment align = Alignment::aligned):
+            vec(align==Alignment::aligned ? _mm_load_si128((__m128i*)vec) : _mm_loadu_si128((__m128i*)vec)) {}
+
+        // broadcast constructor
+        explicit Int4(const int32_t& val): 
+            vec(_mm_castps_si128(_mm_broadcast_ss((float*)(&val)))) {}
+
+        Int4 left_pack(int mask) {
+            return Int4(_mm_shuffle_epi8(vec, ((__m128i*)left_pack_control_vector)[mask]));
+        }
+
+        Int4 operator+(const Int4 &o) const {return Int4(_mm_add_epi32  (vec, o.vec));}
+        Int4 operator-(const Int4 &o) const {return Int4(_mm_sub_epi32  (vec, o.vec));}
+        Int4 operator-()                const {return _mm_sub_epi32(_mm_setzero_si128(), vec);}
+        Int4 operator*(const Int4 &o) const {return Int4(_mm_mul_epi32  (vec, o.vec));}
+        Int4 operator<(const Int4 &o) const {return Int4(_mm_cmplt_epi32(vec,o.vec));}
+        Int4 operator==(const Int4 &o) const {return Int4(_mm_cmpeq_epi32(vec,o.vec));}
+        Int4 operator&(const Int4 &o) const {return Int4(_mm_and_si128(vec,o.vec));}
+        Int4 operator|(const Int4 &o) const {return Int4(_mm_or_si128(vec,o.vec));}
+        Int4 operator!=(const Int4 &o) const {
+            __m128i all_zero = _mm_setzero_si128();
+            __m128i all_one  = _mm_cmpeq_epi32(all_zero, all_zero);
+            return Int4(_mm_xor_si128(all_one, _mm_cmpeq_epi32(vec,o.vec)));
+        }
+
+        int x() const {return _mm_extract_epi32(vec,0);}
+        int y() const {return _mm_extract_epi32(vec,1);}
+        int z() const {return _mm_extract_epi32(vec,2);}
+        int w() const {return _mm_extract_epi32(vec,3);}
+
+        int movemask() {return _mm_movemask_ps(_mm_castsi128_ps(vec));}
+
+        friend Float4;
+        // Float4 Int4::cast_float() const {
+        //     // bit-equivalent cast to float
+        //     return Float4(_mm_castps_si128(vec));
+        // } 
+
+        void store(int32_t* vec_, Alignment align=Alignment::aligned) const { 
+            if(align==Alignment::aligned) 
+                _mm_store_si128 ((__m128i*)vec_, vec); 
+            else 
+                _mm_storeu_si128((__m128i*)vec_,vec);
+        }
+
+        Int4 srl(int shift_count) const {return Int4(_mm_srli_epi32(vec,shift_count));} // right logical shift
+        Int4 sll(int shift_count) const {return Int4(_mm_slli_epi32(vec,shift_count));} // left  logical shift
+};
+
+
+
 
 struct alignas(16) Float4 
 {
@@ -23,18 +112,17 @@ struct alignas(16) Float4
     public:
         Float4(): vec(_mm_setzero_ps()) {}
 
-
         // constructor from aligned storage
         explicit Float4(const float* vec, Alignment align = Alignment::aligned):
             vec(align==Alignment::aligned ? _mm_load_ps(vec) : _mm_loadu_ps(vec)) {}
 
         // broadcast constructor
-        Float4(float val):   
-            vec(_mm_set1_ps(val)) {}
+        Float4(const float& val):   
+            vec(_mm_broadcast_ss(&val)) {}
 
         Float4 operator+(const Float4 &o) const {return Float4(_mm_add_ps  (vec, o.vec));}
         Float4 operator-(const Float4 &o) const {return Float4(_mm_sub_ps  (vec, o.vec));}
-        Float4 operator-()                const {return _mm_sub_ps(_mm_set1_ps(0.f), vec);}
+        Float4 operator-()                const {return _mm_sub_ps(_mm_setzero_ps(), vec);}
         Float4 operator*(const Float4 &o) const {return Float4(_mm_mul_ps  (vec, o.vec));}
         Float4 operator<(const Float4 &o) const {return Float4(_mm_cmplt_ps(vec,o.vec));}
         Float4 operator!=(const Float4 &o) const {return Float4(_mm_cmpneq_ps(vec,o.vec));}
@@ -53,7 +141,8 @@ struct alignas(16) Float4
         Float4 operator*=(const Float4 &o) {return vec = _mm_mul_ps(vec, o.vec);}
 
         int movemask() {return _mm_movemask_ps(vec);}
-        bool any() {return movemask();}
+        bool none() {__m128i v = _mm_castps_si128(vec); return  _mm_testz_si128(v,v);}
+        bool any()  {return !none();}
 
         const Float4 right_rotate() const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(2,1,0,3))); }
         const Float4 left_rotate()  const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(0,3,2,1))); }
@@ -63,13 +152,6 @@ struct alignas(16) Float4
                 _mm_store_ps(vec_, vec); 
             else 
                 _mm_storeu_ps(vec_,vec);
-        }
-
-        void store_int(int* vec_, Alignment align=Alignment::aligned) const { 
-            if(align==Alignment::aligned) 
-                _mm_store_si128((__m128i*)vec_, _mm_cvtps_epi32(vec)); 
-            else 
-                _mm_storeu_si128((__m128i*)vec_,_mm_cvtps_epi32(vec));
         }
 
         float sum() const {
@@ -102,9 +184,16 @@ struct alignas(16) Float4
         float y() const { float val; _MM_EXTRACT_FLOAT(val, vec, 2); return val;}
         float z() const { float val; _MM_EXTRACT_FLOAT(val, vec, 3); return val;}
 
+        friend Int4;
         friend void transpose4(Float4&, Float4&, Float4&, Float4&);
         template <int i3, int i2, int i1, int i0> friend Float4 shuffle_ps(Float4 m1, Float4 m2);
-        friend Vec34;
+
+        Int4 cast_int() const {
+            // bit-equivalent cast to int
+            return Int4(_mm_castps_si128(vec));
+        } 
+
+        friend inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b);
 };
 
 /*
@@ -125,7 +214,7 @@ struct alignas(32) Float8
 
         // broadcast constructor
         Float8(float val):   
-            vec(_mm256_set1_ps(val)) {}
+            vec(_mm256_broadcast_ps(val)) {}
 
         Float8 operator+(const Float8 &o) const {return Float8(_mm256_add_ps  (vec, o.vec));}
         Float8 operator-(const Float8 &o) const {return Float8(_mm256_sub_ps  (vec, o.vec));}
@@ -188,156 +277,10 @@ inline void transpose4(Float4 &w, Float4 &x, Float4 &y, Float4 &z)
     _MM_TRANSPOSE4_PS(w.vec,x.vec,y.vec,z.vec);
 }
 
-struct alignas(16) Vec34
-{
-    public:
-        Float4 x;
-        Float4 y;
-        Float4 z;
-
-        Vec34() {};
-
-        // construct from 3 memory locations
-        Vec34(const float* x, const float* y, const float* z, Alignment align = Alignment::aligned):
-            x(x,align),
-            y(y,align),
-            z(z,align) {}
-
-        // construct from 3 memory locations
-        Vec34(const Float4 &x, const Float4 &y, const Float4 &z):
-            x(x),
-            y(y),
-            z(z) {}
-
-        // construct from 3 values
-        Vec34(const float x, const float y, const float z):
-            x(x),
-            y(y),
-            z(z) {}
-
-        // construct from 1 memory location and a stride
-        Vec34(const float* pos, int stride, Alignment align = Alignment::aligned):
-            x(pos + 0*stride, align),
-            y(pos + 1*stride, align),
-            z(pos + 2*stride, align) {}
-
-        Float4 mag2() const { return (x*x + y*y) + z*z; }
-        Float4 mag () const { return mag2().sqrt(); }
-
-        Vec34 operator+(const Vec34  &o) const {return Vec34(x+o.x, y+o.y, z+o.z);}
-        Vec34 operator-(const Vec34  &o) const {return Vec34(x-o.x, y-o.y, z-o.z);}
-        Vec34 operator-()                const {return Vec34(-x, -y, -z);}
-        Vec34 operator*(const Float4 &o) const {return Vec34(x*o,   y*o,   z*o);}
-        Float4 operator==(const Vec34 &o) const {return (x==o.x) & (y==o.y) & (z==o.z);}
-        Float4 operator!=(const Vec34 &o) const {return (x!=o.x) | (y!=o.y) | (z!=o.z);}
-        Vec34 operator+=(const Vec34  &o) { x+=o.x; y+=o.y; z+=o.z; return *this; }
-
-        Vec34 left_rotate() const {
-            return Vec34(x.left_rotate(), y.left_rotate(), z.left_rotate());
-        }
-        Vec34 right_rotate() const {
-            return Vec34(x.right_rotate(), y.right_rotate(), z.right_rotate());
-        }
-
-        void store(float* x, float* y, float* z) {
-            this->x.store(x);
-            this->y.store(y);
-            this->z.store(z);
-        }
-
-        // construct from 1 memory location and a stride
-        void store(float* pos, int stride) {
-            x.store(pos + 0*stride);
-            y.store(pos + 1*stride);
-            z.store(pos + 2*stride);
-        }
-
-        Float4 sum() const {
-            __m128 xy = _mm_hadd_ps(x.vec, y.vec);            // (x[0]+x[1],     x[2]+x[3],     y[0]+y[1],     y[2]+y[3])
-            __m128 zs = _mm_hadd_ps(z.vec, _mm_setzero_ps()); // (z[0]+z[1],     z[2]+z[3],     0.,            0.)
-            return _mm_hadd_ps(xy, zs);                       // (x[0]+...+x[3], y[0]+...+y[3], z[0]+...+z[3], 0.) 
-        }
-
-};
-
-inline Vec34 operator*(const Float4 &a, const Vec34 &b) { return b*a; }
-
-
-inline Vec34 cross(const Vec34&a, const Vec34 &b) {
-    return Vec34(
-        a.y*b.z - a.z*b.y,
-        a.z*b.x - a.x*b.z,
-        a.x*b.y - a.y*b.x);
+inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b) {
+    return Float4(_mm_fmadd_ps(a1.vec,a2.vec, b.vec));
 }
 
-/*
-struct alignas(32) Vec38
-{
-    public:
-        Float8 x;
-        Float8 y;
-        Float8 z;
-
-        // construct from 3 memory locations
-        Vec38(const float* x, const float* y, const float* z, Alignment align = Alignment::aligned):
-            x(x,align),
-            y(y,align),
-            z(z,align) {}
-
-        // construct from 3 memory locations
-        Vec38(const Float8 &x, const Float8 &y, const Float8 &z):
-            x(x),
-            y(y),
-            z(z) {}
-
-        // construct from 3 values
-        Vec38(const float x, const float y, const float z):
-            x(x),
-            y(y),
-            z(z) {}
-
-        // construct from 1 memory location and a stride
-        Vec38(const float* pos, int stride, Alignment align = Alignment::aligned):
-            x(pos + 0*stride, align),
-            y(pos + 1*stride, align),
-            z(pos + 2*stride, align) {}
-
-        Float8 mag2() const
-        {
-            return (x*x + y*y) + z*z;
-        }
-
-        Vec38 operator-(const Vec38  &o) const {return Vec38(x-o.x, y-o.y, z-o.z);}
-        Vec38 operator*(const Float8 &o) const {return Vec38(x*o,   y*o,   z*o);}
-        Float8 operator==(const Vec38 &o) const {return (x==o.x) & (y==o.y) & (z==o.z);}
-        Float8 operator!=(const Vec38 &o) const {return (x!=o.x) | (y!=o.y) | (z!=o.z);}
-
-        // void left_rotate() {
-        //     x.left_rotate();
-        //     y.left_rotate();
-        //     z.left_rotate();
-        // }
-
-        // void right_rotate() {
-        //     x.right_rotate();
-        //     y.right_rotate();
-        //     z.right_rotate();
-        // }
-
-        void store(float* x, float* y, float* z) {
-            this->x.store(x);
-            this->y.store(y);
-            this->z.store(z);
-        }
-
-        // construct from 1 memory location and a stride
-        void store(float* pos, int stride) {
-            x.store(pos + 0*stride);
-            y.store(pos + 1*stride);
-            z.store(pos + 2*stride);
-        }
-
-};
-*/
+// inline int left_pack_simd(Float4 x, Float4 mask);
 
 #endif

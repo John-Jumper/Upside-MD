@@ -7,23 +7,36 @@
 #include "h5_support.h"
 #include "timing.h"
 #include <algorithm>
+#include "Float4.h"
 
 
 template <typename T>
-inline T* operator+(std::unique_ptr<T[]> &ptr, int i) {
+inline T* operator+(const std::unique_ptr<T[]>& ptr, int i) {
     // little function to make unique_ptr for an array do pointer arithmetic
     return ptr.get()+i;
 }
 
+template <typename T>
+void fill_n(std::unique_ptr<T[]> &ptr, int n_elem, const T& value) {
+    std::fill_n(ptr.get(), n_elem, value);
+}
+
+template <typename T>
+static T&& message(const std::string& s, T&& x) {
+    printf("%s", s.c_str());
+    return std::forward<T>(x);
+}
 
 
 template<typename IType>
 struct InteractionGraph{
-    constexpr static const bool symmetric = IType::symmetric;
-    constexpr static const int n_dim1     = IType::n_dim1;
-    constexpr static const int n_dim2     = IType::n_dim2;
-    constexpr static const int n_param    = IType::n_param;
-    constexpr static const int simd_width = IType::simd_width;
+    constexpr static const bool symmetric  = IType::symmetric;
+    constexpr static const int  simd_width = IType::simd_width;
+    constexpr static const int  align      = maxint(4,simd_width);
+    constexpr static const int  align_bytes= 4*align;
+    constexpr static const int  n_dim1     = IType::n_dim1, n_dim1a = round_up(n_dim1, align);
+    constexpr static const int  n_dim2     = IType::n_dim2, n_dim2a = round_up(n_dim2, align);
+    constexpr static const int  n_param    = IType::n_param;
 
     CoordNode* pos_node1;
     CoordNode* pos_node2;
@@ -36,14 +49,14 @@ struct InteractionGraph{
 
     int n_edge;
 
-    std::unique_ptr<unsigned[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
-    std::unique_ptr<unsigned[]>  id1,    id2;    // used to avoid self-interaction
+    std::unique_ptr<int32_t[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
+    std::unique_ptr<int32_t[]>  id1,    id2;    // used to avoid self-interaction
 
     // buffers to copy position data to ensure contiguity
     std::unique_ptr<float[]> pos1, pos2;
 
     // per edge data
-    std::unique_ptr<unsigned[]> edge_indices1, edge_indices2;
+    std::unique_ptr<int32_t[]>  edge_indices1, edge_indices2;
     std::unique_ptr<float[]>    edge_value;
     std::unique_ptr<float[]>    edge_deriv;  // this may become a SIMD-type vector
     std::unique_ptr<float[]>    edge_sensitivity; // must be filled by user of this class
@@ -68,22 +81,22 @@ struct InteractionGraph{
 
         max_n_edge(h5::read_attribute<int>(grp, ".", "max_n_edge", n_elem1*n_elem2/(symmetric?2:1))),
 
-        types1(new unsigned[n_elem1]), types2(new unsigned[n_elem2]),
-        id1   (new unsigned[n_elem1]), id2   (new unsigned[n_elem2]),
+        types1(new int32_t[n_elem1]), types2(new int32_t[n_elem2]),
+        id1   (new int32_t[n_elem1]), id2   (new int32_t[n_elem2]),
 
-        pos1(new_aligned<float>(n_elem1*n_dim1,               8)),
-        pos2(new_aligned<float>((symmetric?1:n_elem2)*n_dim2, 8)),
+        pos1(new_aligned<float>(round_up(n_elem1,4)*n_dim1a,             align_bytes)),
+        pos2(new_aligned<float>(round_up(symmetric?4:n_elem2,4)*n_dim2a, align_bytes)),
 
-        edge_indices1   (new_aligned<unsigned>(max_n_edge, simd_width)),
-        edge_indices2   (new_aligned<unsigned>(max_n_edge, simd_width)),
-        edge_value      (new_aligned<float>   (max_n_edge, simd_width)),
-        edge_deriv      (new_aligned<float>   (max_n_edge*(n_dim1+n_dim2), simd_width)),
-        edge_sensitivity(new_aligned<float>   (max_n_edge, simd_width)),
+        edge_indices1   (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
+        edge_indices2   (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
+        edge_value      (new_aligned<float>  (max_n_edge,                 align_bytes)),
+        edge_deriv      (new_aligned<float>  (max_n_edge*(n_dim1+n_dim2), align_bytes)),
+        edge_sensitivity(new_aligned<float>  (max_n_edge,                 align_bytes)),
 
         interaction_param(new_aligned<float>(n_type1*n_type2*n_param, simd_width)),
 
-        pos1_deriv(new_aligned<float>(n_elem1*n_dim1,               8)),
-        pos2_deriv(new_aligned<float>((symmetric?1:n_elem2)*n_dim2, 8))
+        pos1_deriv(new_aligned<float>(round_up(n_elem1,4)*n_dim1a,             maxint(4,simd_width))),
+        pos2_deriv(new_aligned<float>(round_up(symmetric?4:n_elem2,4)*n_dim2a, maxint(4,simd_width)))
 
         #ifdef PARAM_DERIV
         ,interaction_param_deriv(n_param, n_type1*n_type2)
@@ -93,7 +106,11 @@ struct InteractionGraph{
         auto suffix1 = [](const char* base) {return base + std::string(symmetric?"":"1");};
         bool s = symmetric;
 
-        std::fill(edge_sensitivity.get(), edge_sensitivity+max_n_edge, 0.f);
+        fill_n(edge_sensitivity, max_n_edge, 0.f);
+        fill_n(pos1, round_up(n_elem1,4)*n_dim1a, 1e20f); // just put dummy values far from all points
+        fill_n(pos2, round_up(symmetric?4:n_elem2,4)*n_dim2a, 1e20f);
+        fill_n(pos1_deriv, round_up(n_elem1,4)*n_dim1a, 0.f);
+        fill_n(pos2_deriv, round_up(symmetric?4:n_elem2,4)*n_dim2a, 0.f);
 
         if(!(s ^ bool(pos_node2)))
             throw std::string("second node must be null iff symmetric interaction");
@@ -166,34 +183,56 @@ struct InteractionGraph{
         {
             VecArray posv = pos_node1->coords().value;
             for(int ne=0; ne<n_elem1; ++ne) 
-                store_vec(pos1+ne*n_dim1, load_vec<n_dim1>(posv, loc1[ne].index));
+                store_vec(pos1.get()+ne*n_dim1a, load_vec<n_dim1>(posv, loc1[ne].index));
         }
         if(!symmetric) {
             VecArray posv = pos_node2->coords().value;
             for(int ne=0; ne<n_elem2; ++ne) 
-                store_vec(pos2+ne*n_dim2, load_vec<n_dim2>(posv, loc2[ne].index));
+                store_vec(pos2.get()+ne*n_dim2a, load_vec<n_dim2>(posv, loc2[ne].index));
         }
 
         // First find all the edges
-        float cutoff2 = sqr(cutoff);
-        int ne = 0;
-        for(int i1=0; i1<n_elem1; ++i1) {
-            auto x1     = load_vec<3>(pos1+i1*n_dim1);
-            auto my_id1 = id1[i1];
+        {
+            Timer t1(std::string("find_edges"));
+            auto cutoff2 = Float4(sqr(cutoff));
+            int ne = 0;
 
-            for(int i2=symmetric?i1+1:0; i2<n_elem2; ++i2) {
-                auto x2 = load_vec<3>((symmetric?pos1:pos2)+i2*n_dim2);
-                if(!(mag2(x1-x2)<cutoff2)) continue;  // NaN-safe cutoff
+            int32_t offset[4] = {0,1,2,3};
 
-                auto my_id2 = (symmetric?id1:id2)[i2];
-                if(IType::exclude_by_id(my_id1,my_id2)) continue; // avoid self-interaction in user-defined way
+            for(int32_t i1=0; i1<n_elem1; i1+=4) {
+                Float4 v0(pos1+(i1+0)*n_dim1a), // pos1 size was rounded up so that this never runs past the end
+                       v1(pos1+(i1+1)*n_dim1a), 
+                       v2(pos1+(i1+2)*n_dim1a), 
+                       v3(pos1+(i1+3)*n_dim1a);
+                transpose4(v0,v1,v2,v3); // v3 will be unused at the end
+                auto  x1 = make_vec3(v0,v1,v2);
 
-                edge_indices1[ne] = i1;
-                edge_indices2[ne] = i2;
-                ++ne;
+                auto  my_id1 = Int4(id1+i1);
+                auto  i1_vec = Int4(i1) + Int4(offset,Alignment::unaligned);
+
+                for(int32_t i2=symmetric?i1+1:0; i2<n_elem2; ++i2) {
+                    float* p = (symmetric?pos1:pos2).get()+i2*n_dim2a;
+                    auto  x2 = make_vec3(Float4(p[0]), Float4(p[1]),  Float4(p[2]));
+                    auto  my_id2 = Int4((symmetric?id1:id2)[i2]);  // might as well start the load
+                    auto near = mag2(x1-x2)<cutoff2;
+                    if(near.none()) continue;
+
+                    auto i2_vec = Int4(i2);
+                    auto pair_acceptable = IType::acceptable_id_pair(my_id1,my_id2);
+
+                    Int4 is_hit = symmetric 
+                        ? ((i1_vec<i2_vec) & near.cast_int()) & pair_acceptable
+                        :                    near.cast_int()  & pair_acceptable;
+                    int is_hit_bits = is_hit.movemask();
+
+                    // i2_vec is constant, so we don't have to left pack
+                    i2_vec                       .store(edge_indices2+ne, Alignment::unaligned);
+                    i1_vec.left_pack(is_hit_bits).store(edge_indices1+ne, Alignment::unaligned);
+                    ne += popcnt_nibble(is_hit_bits);
+                }
             }
+            n_edge = ne;
         }
-        n_edge = ne;
         // printf("n_edge for n_dim1 %i n_dim2 %i is %i\n", n_dim1, n_dim2, n_edge);
 
         // Compute edge values
@@ -206,8 +245,8 @@ struct InteractionGraph{
             int i2 = edge_indices2[ne];
             int interaction = types1[i1]*n_type2 + types2[i2];
 
-            auto coord1 = load_vec<n_dim1>(pos1                 +i1*n_dim1);
-            auto coord2 = load_vec<n_dim2>((symmetric?pos1:pos2)+i2*n_dim2);
+            auto coord1 = load_vec<n_dim1>(pos1                 +i1*n_dim1a);
+            auto coord2 = load_vec<n_dim2>((symmetric?pos1:pos2)+i2*n_dim2a);
 
             Vec<n_dim1> d1;
             Vec<n_dim2> d2;
@@ -227,10 +266,11 @@ struct InteractionGraph{
     void propagate_derivatives() {
         // Finally put the data where it is needed.
         // This function must be called after the user sets edge_sensitivity
+        Timer t(std::string("prop_deriv"));
 
         // Zero accumulation buffers
-        std::fill(pos1_deriv.get(), pos1_deriv+n_elem1*n_dim1, 0.f);
-        if(!symmetric) std::fill(pos2_deriv.get(), pos2_deriv+n_elem2*n_dim2, 0.f);
+        fill_n(pos1_deriv, n_elem1*n_dim1, 0.f);
+        if(!symmetric) fill_n(pos2_deriv, n_elem2*n_dim2, 0.f);
         #ifdef PARAM_DERIV
         fill(interaction_param_deriv, 0.f);
         #endif
