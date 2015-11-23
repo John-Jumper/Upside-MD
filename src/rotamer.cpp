@@ -91,8 +91,58 @@ struct NodeHolder {
 };
 
 
+struct SimdVecArrayStorage {
+    // AoSoA structure for holding partially transposed data
+    // makes it very easy to read Vec<n_dim,Float4> data
+
+    constexpr static const int simd_width = 4;
+    int elem_width, n_elem;
+    unique_ptr<float[]> x;
+
+    SimdVecArrayStorage(int elem_width_, int n_elem_min_):
+        elem_width(elem_width_), n_elem(round_up(n_elem_min_,simd_width)), 
+        x(new_aligned<float>(n_elem*elem_width, simd_width)) {}
+
+    float& operator()(int i_comp, int i_elem) {
+        return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
+    }
+    const float& operator()(int i_comp, int i_elem) const {
+        return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
+    }
+};
+
+template <int D>
+inline Vec<D,Float4> load_whole_vec(const SimdVecArrayStorage& a, int idx) {
+    // index must be divisible by 4
+    // assert(a.elem_width == D)
+    Vec<D,Float4> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D);
+    return r;
+}
+
+
+// FIXME remove these inefficient helper functions
+template <int D>
+inline Vec<D,float> load_vec(const SimdVecArrayStorage& a, int idx) {
+    Vec<D,float> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = a(d,idx);
+    return r;
+}
+
+template <int D>
+inline void store_vec(SimdVecArrayStorage& a, int idx, const Vec<D,float>& r) {
+    #pragma unroll
+    for(int d=0; d<D; ++d) a(d,idx) = r[d];
+}
+
+static void fill(SimdVecArrayStorage& v, float fill_value) {
+    std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
+}
+
+
 // FIXME specialize edge_holder when rot1 is 1
-// FIXME implement beliefs and swapping system
 struct EdgeHolder {
     public:
         int n_rot1, n_rot2;  // should have rot1 < rot2
@@ -103,29 +153,35 @@ struct EdgeHolder {
     public:
         struct EdgeLoc {int edge_num, dim, ne;};
 
-        // FIXME include numerical stability data (basically scale each probability in a sane way)
-        VecArrayStorage prob;
-        VecArrayStorage cur_belief;
-        VecArrayStorage old_belief;
-        VecArrayStorage marginal;
+        constexpr static int simd_width=4;
 
-        vector<pair<int,int>> edge_indices;
+        // FIXME include numerical stability data (basically scale each probability in a sane way)
+        SimdVecArrayStorage prob;
+        SimdVecArrayStorage cur_belief;
+        SimdVecArrayStorage old_belief;
+        SimdVecArrayStorage marginal;
+
+        unique_ptr<int[]> edge_indices1;
+        unique_ptr<int[]> edge_indices2;
         unordered_map<unsigned,unsigned> nodes_to_edge;
         vector<EdgeLoc> edge_loc;
 
         EdgeHolder(NodeHolder &nodes1_, NodeHolder &nodes2_, int max_n_edge):
             n_rot1(nodes1_.n_rot), n_rot2(nodes2_.n_rot),
             nodes1(nodes1_), nodes2(nodes2_),
-            prob(n_rot1*n_rot2, max_n_edge),
+            prob      (n_rot1*n_rot2, max_n_edge),
             cur_belief(n_rot1+n_rot2, max_n_edge),
             old_belief(n_rot1+n_rot2, max_n_edge),
             marginal(n_rot1*n_rot2, max_n_edge),
 
-            edge_indices(max_n_edge)
+            edge_indices1(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width)),
+            edge_indices2(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width))
         {
             edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
             fill(cur_belief, 1.f);
             fill(old_belief, 1.f);
+            fill_n(edge_indices1, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
+            fill_n(edge_indices2, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
             reset();
         }
 
@@ -145,7 +201,8 @@ struct EdgeHolder {
             if(ei == nodes_to_edge.end()) {
                 idx = n_edge;
                 nodes_to_edge[pr] = n_edge;
-                edge_indices[idx] = make_pair(int(id1),int(id2));
+                edge_indices1[idx] = id1;
+                edge_indices2[idx] = id2;
                 ++n_edge;
 
                 for(int j: range(n_rot1*n_rot2)) 
@@ -163,7 +220,7 @@ struct EdgeHolder {
             // FIXME assert n_rot1 == 1
             VecArray p = nodes2.prob;
             for(int ne: range(n_edge)) {
-                int nr = edge_indices[ne].second;
+                int nr = edge_indices2[ne];
                 for(int no: range(n_rot2)) p(no,nr) *= prob(no,ne);
             }
         }
@@ -191,9 +248,8 @@ struct EdgeHolder {
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
 
             for(int ne: range(n_edge)) {
-                auto e = edge_indices[ne];
-                auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);
-                auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, e.second);
+                auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, edge_indices1[ne]);
+                auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, edge_indices2[ne]);
 
                 // correct for self interaction
                 auto b = load_vec<N_ROT1+N_ROT2>(cur_belief, ne);
@@ -210,9 +266,8 @@ struct EdgeHolder {
 
         template<int N_ROT1, int N_ROT2>
         float edge_free_energy(int ne) {
-            auto e = edge_indices[ne];
-            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, e.first);  // really marginal
-            auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, e.second);
+            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, edge_indices1[ne]);  // really marginal
+            auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, edge_indices2[ne]);
 
             auto p  = load_vec<N_ROT1*N_ROT2>(marginal, ne);
             auto pr = load_vec<N_ROT1*N_ROT2>(prob, ne);
@@ -241,9 +296,10 @@ struct EdgeHolder {
             VecArray vec_old_node_belief2 = nodes2.old_belief;
             VecArray vec_cur_node_belief2 = nodes2.cur_belief;
 
-            for(int ne: range(n_edge)) {
-                int n1 = edge_indices[ne].first;
-                int n2 = edge_indices[ne].second;
+            // FIXME watch for ragged edges;
+            for(int ne=0; ne<n_edge; ne+=1) {
+                auto n1 = edge_indices1[ne];
+                auto n2 = edge_indices2[ne];
 
                 auto old_node_belief1 = load_vec<N_ROT1>(vec_old_node_belief1, n1);
                 auto old_node_belief2 = load_vec<N_ROT2>(vec_old_node_belief2, n2);
@@ -268,8 +324,8 @@ struct EdgeHolder {
                 store_vec(cur_belief,ne, neb);
 
                 // update our beliefs about nodes (normalization keeps us near 1)
-                store_vec(vec_cur_node_belief1, n1, normalized(cur_edge_belief1 * load_vec<N_ROT1>(vec_cur_node_belief1, n1)));
-                store_vec(vec_cur_node_belief2, n2, normalized(cur_edge_belief2 * load_vec<N_ROT2>(vec_cur_node_belief2, n2)));
+                store_vec(vec_cur_node_belief1, n1, approx_normalized(cur_edge_belief1 * load_vec<N_ROT1>(vec_cur_node_belief1, n1)));
+                store_vec(vec_cur_node_belief2, n2, approx_normalized(cur_edge_belief2 * load_vec<N_ROT2>(vec_cur_node_belief2, n2)));
             }
         }
 };
@@ -474,16 +530,14 @@ struct RotamerSidechain: public PotentialNode {
 
         for(int ne: range(edges11.n_edge)) {
             float         en = -logf(edges11.prob(0,ne));
-            pair<int,int> ei = edges11.edge_indices[ne];
-            e1[ei.first ] += 0.5*en;
-            e1[ei.second] += 0.5*en;
+            e1[edges11.edge_indices1[ne]] += 0.5*en;
+            e1[edges11.edge_indices2[ne]] += 0.5*en;
         }
 
         for(int ne: range(edges33.n_edge)) {
             float         en = edges33.edge_free_energy<3,3>(ne);
-            pair<int,int> ei = edges33.edge_indices[ne];
-            e3[ei.first ] += 0.5*en;
-            e3[ei.second] += 0.5*en;
+            e3[edges33.edge_indices1[ne]] += 0.5*en;
+            e3[edges33.edge_indices2[ne]] += 0.5*en;
         }
 
         return arrange_energies(e1,e3);
@@ -542,7 +596,7 @@ struct RotamerSidechain: public PotentialNode {
         for(auto &el: edges11.edge_loc)
             igraph.edge_sensitivity[el.edge_num] = 1.f;
         for(auto &el: edges13.edge_loc)
-            igraph.edge_sensitivity[el.edge_num] = nodes3 .cur_belief(el.dim, edges13.edge_indices[el.ne].second);
+            igraph.edge_sensitivity[el.edge_num] = nodes3 .cur_belief(el.dim, edges13.edge_indices2[el.ne]);
         for(auto &el: edges33.edge_loc)
             igraph.edge_sensitivity[el.edge_num] = edges33.marginal  (el.dim, el.ne);
         igraph.propagate_derivatives();

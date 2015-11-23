@@ -203,13 +203,6 @@ inline Vec<D,Float4> load_vec(const float* a, Alignment align) {
 }
 
 
-
-// template <int D>
-// inline void store_vec(VecArray a, int idx, const Vec<D,float>& r) {
-//     #pragma unroll
-//     for(int d=0; d<D; ++d) a(d,idx) = r[d];
-// }
-
 template <int D>
 inline void store_vec(VecArrayStorage& a, int idx, const Vec<D,float>& r) {
     #pragma unroll
@@ -255,6 +248,7 @@ inline void update_vec(float* a, const Vec<D> &r) {
 static const float M_PI_F   = 3.141592653589793f;   //!< value of pi as float
 static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
+inline float approx_rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root at lower accuracy
 inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
 template <typename D> inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
 inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
@@ -563,6 +557,9 @@ inline Vec<3,S> cross(const Vec<3,S>& a, const Vec<3,S>& b){
 
 template <int D, typename S>
 inline Vec<D,S> normalized(const Vec<D,S>& a) { return a*inv_mag(a); }
+
+template <int D, typename S>
+inline Vec<D,S> approx_normalized(const Vec<D,S>& a) {return a*approx_rsqrt(mag2(a)); }
 
 template <int D, typename S>
 inline Vec<D,S> prob_normalized(const Vec<D,S>& a) { return a*rcp(sum(a)); }

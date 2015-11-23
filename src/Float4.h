@@ -150,6 +150,10 @@ struct alignas(16) Float4
         Float4 operator==(const Float4 &o) const {return Float4(_mm_cmpeq_ps(vec,o.vec));}
         Float4 operator&(const Float4 &o) const {return Float4(_mm_and_ps(vec,o.vec));}
         Float4 operator|(const Float4 &o) const {return Float4(_mm_or_ps(vec,o.vec));}
+        Float4 approx_rsqrt() const { 
+            // 12-bit accuracy (about to about 0.02%)
+            return _mm_rsqrt_ps(vec);
+        }
         Float4 rsqrt() const { 
             // one round of newton-raphson, see online documentation for _mm_rsqrt_ps for details
             Float4 a = _mm_rsqrt_ps(vec);   // 12-bit approximation
@@ -355,6 +359,8 @@ inline Float4 min(const Float4& a, const Float4& b) {
 inline Float4 max(const Float4& a, const Float4& b) {
     return _mm_max_ps(a.vec, b.vec);
 }
+
+inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
 
 
 // inline int left_pack_simd(Float4 x, Float4 mask);
