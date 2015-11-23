@@ -267,7 +267,7 @@ struct EdgeHolder {
                 for(int i: range(N_ROT2)) neb[i+N_ROT1] = (1.f-damping)*cur_edge_belief2[i];
                 store_vec(cur_belief,ne, neb);
 
-                // update our beliefs about nodes (normalization is L2, but this still keeps us near 1)
+                // update our beliefs about nodes (normalization keeps us near 1)
                 store_vec(vec_cur_node_belief1, n1, normalized(cur_edge_belief1 * load_vec<N_ROT1>(vec_cur_node_belief1, n1)));
                 store_vec(vec_cur_node_belief2, n2, normalized(cur_edge_belief2 * load_vec<N_ROT2>(vec_cur_node_belief2, n2)));
             }

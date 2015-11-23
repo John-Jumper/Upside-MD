@@ -27,63 +27,6 @@ static T&& message(const std::string& s, T&& x) {
     return std::forward<T>(x);
 }
 
-template<int D>
-inline Vec<D,Float4> aligned_gather_vec(const float* data, const Int4& offsets) {
-    Vec<D,Float4> ret;
-
-    const float* p0 = data+offsets.x();
-    const float* p1 = data+offsets.y();
-    const float* p2 = data+offsets.z();
-    const float* p3 = data+offsets.w();
-
-    Float4 extra[3]; // scratch space to do the transpose
-
-    #pragma unroll
-    for(int d=0; d<D; d+=4) {
-        ret[d  ]                      = Float4(p0+d);
-        (d+1<D ? ret[d+1] : extra[0]) = Float4(p1+d);
-        (d+2<D ? ret[d+2] : extra[1]) = Float4(p2+d);
-        (d+3<D ? ret[d+3] : extra[2]) = Float4(p3+d);
-
-        transpose4(
-                ret[d  ],
-                (d+1<D ? ret[d+1] : extra[0]),
-                (d+2<D ? ret[d+2] : extra[1]),
-                (d+3<D ? ret[d+3] : extra[2]));
-    }
-
-    return ret;
-}
-
-template<int D>
-inline void aligned_scatter_update_vec_destructive(float* data, const Int4& offsets, Vec<D,Float4>& v) {
-    // note that this function changes the vector v
-
-    float* p0 = data+offsets.x();
-    float* p1 = data+offsets.y();
-    float* p2 = data+offsets.z();
-    float* p3 = data+offsets.w();
-
-    Float4 extra[3]; // scratch space to do the transpose
-
-    #pragma unroll
-    for(int d=0; d<D; d+=4) {
-        transpose4(
-                v[d  ],
-                (d+1<D ? v[d+1] : extra[0]),
-                (d+2<D ? v[d+2] : extra[1]),
-                (d+3<D ? v[d+3] : extra[2]));
-
-        // this writes must be done sequentially in case some of the 
-        // offsets are equal (and hence point to the same memory location)
-        (Float4(p0+d) + v[d  ]                     ).store(p0+d);
-        (Float4(p1+d) + (d+1<D ? v[d+1] : extra[0])).store(p1+d);
-        (Float4(p2+d) + (d+2<D ? v[d+2] : extra[1])).store(p2+d);
-        (Float4(p3+d) + (d+3<D ? v[d+3] : extra[2])).store(p3+d);
-    }
-}
-
-
 
 template<typename IType>
 struct InteractionGraph{
@@ -253,8 +196,6 @@ struct InteractionGraph{
 
         // First find all the edges
         {
-            Timer t1(std::string("find_edges"));
-
             int32_t offset[4] = {0,1,2,3};
             auto cutoff2 = Float4(sqr(cutoff));
 
@@ -341,7 +282,12 @@ struct InteractionGraph{
     void propagate_derivatives() {
         // Finally put the data where it is needed.
         // This function must be called after the user sets edge_sensitivity
-        Timer t(std::string("prop_deriv"));
+
+        // The edge_sensitivity of elements at location n_edge and beyond must
+        // be zero since these are not real edges.  This is an implementation detail
+        // that the user does not know about, so we will set these edge sensistitivies to 
+        // zero ourselves.
+        for(int ne=n_edge; ne<round_up(n_edge,4); ++ne) edge_sensitivity[ne] = 0.f;
 
         // Zero accumulation buffers
         fill_n(pos1_deriv, n_elem1*n_dim1a, 0.f);

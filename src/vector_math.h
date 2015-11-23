@@ -565,6 +565,9 @@ template <int D, typename S>
 inline Vec<D,S> normalized(const Vec<D,S>& a) { return a*inv_mag(a); }
 
 template <int D, typename S>
+inline Vec<D,S> prob_normalized(const Vec<D,S>& a) { return a*rcp(sum(a)); }
+
+template <int D, typename S>
 inline S dot(const Vec<D,S>& a, const Vec<D,S>& b){
     S c = a[0]*b[0];
     #pragma unroll
@@ -752,4 +755,63 @@ static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_elems) {
     // if((unsigned long)(ptr)%(unsigned long)(alignment_elems*sizeof(T))) throw "bad alignment on string";
     return std::unique_ptr<T[]>(ptr);
 }
+
+
+template<int D>
+inline Vec<D,Float4> aligned_gather_vec(const float* data, const Int4& offsets) {
+    Vec<D,Float4> ret;
+
+    const float* p0 = data+offsets.x();
+    const float* p1 = data+offsets.y();
+    const float* p2 = data+offsets.z();
+    const float* p3 = data+offsets.w();
+
+    Float4 extra[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4) {
+        ret[d  ]                      = Float4(p0+d);
+        (d+1<D ? ret[d+1] : extra[0]) = Float4(p1+d);
+        (d+2<D ? ret[d+2] : extra[1]) = Float4(p2+d);
+        (d+3<D ? ret[d+3] : extra[2]) = Float4(p3+d);
+
+        transpose4(
+                ret[d  ],
+                (d+1<D ? ret[d+1] : extra[0]),
+                (d+2<D ? ret[d+2] : extra[1]),
+                (d+3<D ? ret[d+3] : extra[2]));
+    }
+
+    return ret;
+}
+
+template<int D>
+inline void aligned_scatter_update_vec_destructive(float* data, const Int4& offsets, Vec<D,Float4>& v) {
+    // note that this function changes the vector v
+
+    float* p0 = data+offsets.x();
+    float* p1 = data+offsets.y();
+    float* p2 = data+offsets.z();
+    float* p3 = data+offsets.w();
+
+    Float4 extra[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4) {
+        transpose4(
+                v[d  ],
+                (d+1<D ? v[d+1] : extra[0]),
+                (d+2<D ? v[d+2] : extra[1]),
+                (d+3<D ? v[d+3] : extra[2]));
+
+        // this writes must be done sequentially in case some of the 
+        // offsets are equal (and hence point to the same memory location)
+        (Float4(p0+d) + v[d  ]                     ).store(p0+d);
+        (Float4(p1+d) + (d+1<D ? v[d+1] : extra[0])).store(p1+d);
+        (Float4(p2+d) + (d+2<D ? v[d+2] : extra[1])).store(p2+d);
+        (Float4(p3+d) + (d+3<D ? v[d+3] : extra[2])).store(p3+d);
+    }
+}
+
+
 #endif
