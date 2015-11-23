@@ -31,19 +31,6 @@ namespace {
             return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
         }
 
-        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p, 
-                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            auto disp       = x1-x2;
-            auto dist2      = mag2(disp);
-            auto inv_dist   = rsqrt(dist2+1e-7f);  // 1e-7 is divergence protection
-            auto dist_coord = dist2*(inv_dist*inv_dx);
-
-            auto en = clamped_deBoor_value_and_deriv(p, dist_coord, n_param);
-            d1 = disp*(inv_dist*inv_dx*en.y());
-            d2 = -d1;
-            return en.x();
-        }
-
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4], 
                 const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
             auto disp       = x1-x2;

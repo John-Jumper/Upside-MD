@@ -291,55 +291,6 @@ namespace {
             return Int4() == Int4();  // No exclusions (all true)
         }
 
-        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
-                const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
-
-
-            float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
-            float3 rHN = extract<3,6>(hb_pos);
-            float3 rSC = extract<3,6>(sc_pos);
-
-            float  dist2 = mag2(displace);
-            float  inv_dist = rsqrt(dist2);
-            float  dist_coord = dist2*(inv_dist*inv_dx);
-            float3 displace_unitvec = inv_dist*displace;
-
-            float  cos_cov_angle1 = dot(rHN, displace_unitvec);
-            float  cos_cov_angle2 = dot(rSC,-displace_unitvec);
-
-            float2 wide_cover   = clamped_deBoor_value_and_deriv(p+2*n_knot_angular,        dist_coord, n_knot);
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p+2*n_knot_angular+n_knot, dist_coord, n_knot);
-
-            float2 angular_sigmoid1 = deBoor_value_and_deriv(p,               (cos_cov_angle1+1.f)*inv_dtheta+1.f);
-            float2 angular_sigmoid2 = deBoor_value_and_deriv(p+n_knot_angular,(cos_cov_angle2+1.f)*inv_dtheta+1.f);
-            float  angular_weight   = angular_sigmoid1.x() * angular_sigmoid2.x();
-
-            float radial_deriv   = inv_dx     * (wide_cover.y() + angular_weight*narrow_cover.y());
-            float angular_deriv1 = inv_dtheta * angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
-            float angular_deriv2 = inv_dtheta * angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
-
-            float3 col0, col1, col2;
-            hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
-            float3 rXX = angular_deriv1*rHN - angular_deriv2*rSC;
-            float3 deriv_dir = make_vec3(dot(col0,rXX), dot(col1,rXX), dot(col2,rXX));
-
-            float3 d_displace = radial_deriv  * displace_unitvec + deriv_dir;
-            float3 d_rHN      =  angular_deriv1 * displace_unitvec;
-            float3 d_rSC      = -angular_deriv2 * displace_unitvec;
-
-            float coverage = wide_cover.x() + angular_weight*narrow_cover.x();
-            float prefactor = sqr(1.f-hb_pos[6]);
-
-            store<0,3>(d1, -(prefactor * d_displace));
-            store<3,6>(d1, prefactor * d_rHN);
-            d1[6] = -coverage * (1.f-hb_pos[6])*2.f;
-
-            store<0,3>(d2, prefactor * d_displace);
-            store<3,6>(d2, prefactor * d_rSC);
-
-            return prefactor * coverage;
-        }
-
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
                 const Vec<n_dim1,Float4> &hb_pos, const Vec<n_dim2,Float4> &sc_pos) {
             Float4 one(1.f);
