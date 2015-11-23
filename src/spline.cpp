@@ -4,12 +4,6 @@
 
 using namespace std;
 
-// void print_vector(const char* name, int n, const double* data) {
-//     printf("%s = np.array([", name);
-//     for(int i=0; i<n; ++i) printf("%f,", data[i]);
-//     printf("]);\n");
-// }
-
 void solve_tridiagonal_system(
         int n, 
         double* d,   // right-hand-side (length n), after function finishes, solution is stored in d
@@ -296,47 +290,3 @@ void evaluate_2d_spline(
                 fx3 * (c[12] + fy*(c[13] + fy*(c[14] + fy*c[15])));
     }
 }
-
-
-
-
-// int main() {
-//     constexpr const int Nx = 6;
-//     constexpr const int Ny = 5;
-// 
-//     double values_to_interpolate[Nx*Ny];
-//     double temp_storage[(Nx+8)*(Ny+8)*4];
-//     double coefficients[Nx*Ny*4*4];
-// 
-//     default_random_engine e1(314159);
-//     uniform_real_distribution<> uniform_dist(0.,1.);
-// 
-//     for(int i=0; i<Nx*Ny; ++i)
-//         values_to_interpolate[i] = uniform_dist(e1);
-// 
-//     print_vector("values",Nx*Ny,values_to_interpolate); 
-//     printf("values = values.reshape((%i,%i));\n", Nx, Ny);
-//     solve_periodic_2d_spline(Nx, Ny, coefficients, values_to_interpolate, temp_storage);
-//     print_vector("coefficients",Nx*Ny*4*4,coefficients);
-//     printf("coefficients = coefficients.reshape((%i,%i,4,4));\n", Nx, Ny);
-// 
-//     double pt[Nx*10*Ny*10*2];
-//     double z[Nx*10*Ny*10];
-// 
-//     for(int ix=0; ix<Nx*10; ++ix) {
-//         for(int iy=0; iy<Ny*10; ++iy) {
-//             int loc = ix*Ny*10*2 + iy*2;
-//             pt[loc+0] = ix/10.;
-//             pt[loc+1] = iy/10.;
-//         }
-//     }
-// 
-//     evaluate_2d_spline(z, Nx, Ny, coefficients, Nx*10*Ny*10, pt);
-// 
-//     print_vector("points", Nx*10*Ny*10*2, pt);
-//     printf("x,y = points.reshape((%i,%i,2)).transpose((2,0,1));\n", Nx*10, Ny*10);
-//     print_vector("z",      Nx*10*Ny*10,   z);
-//     printf("z = z.reshape((%i,%i));\n", Nx*10, Ny*10);
-// 
-//     return 0;
-// }

@@ -60,10 +60,6 @@ inline void spline_value_and_deriv(T result[2], const T* c, T fx) {
     result[1] = c[0] + fx*c[1] +        fx2*c[2] +        fx3*c[3]; // value
 }
 
-static void print_float4(const char* nm, const Float4& val) {
-    fprintf(stderr, "%s % .2f % .2f % .2f % .2f\n", nm, val.x(), val.y(), val.z(), val.w());
-}
-
 inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) {
     // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
     // the first spline is centered at -1
@@ -125,26 +121,26 @@ inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const
     auto alpha12 = frac13*yu2;
     auto alpha13 = frac13*yu3;
 
-    auto c11 = (one-alpha11)*c00 + alpha11*c01;
+    auto c11 = fmadd(one-alpha11,c00, alpha11*c01);
     auto d11 = c01 - c00;  // deriv coeffs for spline of order 2
-    auto c12 = (one-alpha12)*c01 + alpha12*c02;
+    auto c12 = fmadd(one-alpha12,c01, alpha12*c02);
     auto d12 = c02 - c01;
-    auto c13 = (one-alpha13)*c02 + alpha13*c03;
+    auto c13 = fmadd(one-alpha13,c02, alpha13*c03);
     auto d13 = c03 - c02;
 
     auto frac12 = Float4(1.f/2.f);
     auto alpha22 = frac12*yu2;
     auto alpha23 = frac12*yu3;
 
-    auto c22 = (one-alpha22)*c11 + alpha22*c12;
-    auto d22 = (one-alpha22)*d11 + alpha22*d12;
-    auto c23 = (one-alpha23)*c12 + alpha23*c13;
-    auto d23 = (one-alpha23)*d12 + alpha23*d13;
+    auto c22 = fmadd(one-alpha22,c11, alpha22*c12);
+    auto d22 = fmadd(one-alpha22,d11, alpha22*d12);
+    auto c23 = fmadd(one-alpha23,c12, alpha23*c13);
+    auto d23 = fmadd(one-alpha23,d12, alpha23*d13);
 
     auto alpha33 = yu3;
 
-    auto c33 = (one-alpha33)*c22 + alpha33*c23;
-    auto d33 = (one-alpha33)*d22 + alpha33*d23;
+    auto c33 = fmadd(one-alpha33,c22, alpha33*c23);
+    auto d33 = fmadd(one-alpha33,d22, alpha33*d23);
 
     return make_vec2(c33, d33);
 }
@@ -175,11 +171,11 @@ inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4
     auto too_big   = Float4(n_knot-2)<=x;
     auto clamp_mask = too_small | too_big;
 
-    auto x_clamp = x.blendv(one, clamp_mask); // make all values in bounds to proceed with spline eval
+    auto x_clamp = ternary(clamp_mask, one, x); // make all values in bounds to proceed with spline eval
     auto value = deBoor_value_and_deriv(bspline_coeff, x_clamp);
 
     if(clamp_mask.any()) { // hopefully rare
-        value.y() = value.y().blendv(Float4(), clamp_mask);  // both cases set derivative to 0
+        value.y() = ternary(clamp_mask, Float4(), value.y());  // both cases set derivative to 0
 
         auto outer = Float4(1.f/6.f);
         auto inner = Float4(2.f/3.f);
@@ -191,7 +187,7 @@ inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4
         transpose4(c0,c1,c2,c3);
         auto left_clamp = outer*c0 + inner*c1 + outer*c2;
 
-        value.x() = value.x().blendv(left_clamp, too_small);
+        value.x() = ternary(too_small, left_clamp, value.x());
 
         Float4 cn4(bspline_coeff[0]+n_knot-4, Alignment::unaligned);
         Float4 cn3(bspline_coeff[1]+n_knot-4, Alignment::unaligned);
@@ -200,7 +196,7 @@ inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4
         transpose4(cn4,cn3,cn2,cn1);
         auto right_clamp = outer*cn3 + inner*cn2 + outer*cn1;
 
-        value.x() = value.x().blendv(right_clamp, too_big);
+        value.x() = ternary(too_big,  right_clamp, value.x());
     }
     return value;
 }
@@ -359,7 +355,6 @@ struct LayeredClampedSpline1D {
             const float* c = coefficients.data() + (layer*(nx-1) + x_bin)*4*NDIM_VALUE;
             for(int id=0; id<NDIM_VALUE; ++id) 
                 spline_value_and_deriv(result+id*2, c+id*4, fx);
-            // printf("%i %f  %i %f  %f %f\n", layer,x, x_bin,fx, result[0], result[1]);
         }
     }
 };

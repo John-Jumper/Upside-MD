@@ -49,12 +49,22 @@ struct alignas(16) Int4
         Int4(): vec(_mm_setzero_si128()) {}
 
         // constructor from aligned storage
-        explicit Int4(const int32_t* vec, Alignment align = Alignment::aligned):
-            vec(align==Alignment::aligned ? _mm_load_si128((__m128i*)vec) : _mm_loadu_si128((__m128i*)vec)) {}
+        explicit Int4(const int32_t* vec_, Alignment align = Alignment::aligned):
+            vec(align==Alignment::aligned ? _mm_load_si128((__m128i*)vec_) : _mm_loadu_si128((__m128i*)vec_)) {}
 
         // broadcast constructor
-        explicit Int4(const int32_t& val): 
-            vec(_mm_castps_si128(_mm_broadcast_ss((float*)(&val)))) {}
+        // explicit Int4(const int32_t& val): 
+        //     vec(_mm_castps_si128(_mm_broadcast_ss((float*)(&val)))) {}
+        explicit Int4(const int val):
+            vec(_mm_set1_epi32(val)) {}
+
+        // gather constructor from offsets
+        // Not particularly efficient
+        Int4(const int32_t* base, const Int4& offsets) {
+            alignas(16) int32_t data[4] = {
+                base[offsets.x()], base[offsets.y()], base[offsets.z()], base[offsets.w()]};
+            vec = _mm_load_si128((const __m128i*)data);
+        }
 
         Int4 left_pack(int mask) {
             return Int4(_mm_shuffle_epi8(vec, ((__m128i*)left_pack_control_vector)[mask]));
@@ -63,7 +73,7 @@ struct alignas(16) Int4
         Int4 operator+(const Int4 &o) const {return Int4(_mm_add_epi32  (vec, o.vec));}
         Int4 operator-(const Int4 &o) const {return Int4(_mm_sub_epi32  (vec, o.vec));}
         Int4 operator-()                const {return _mm_sub_epi32(_mm_setzero_si128(), vec);}
-        Int4 operator*(const Int4 &o) const {return Int4(_mm_mul_epi32  (vec, o.vec));}
+        Int4 operator*(const Int4 &o) const {return Int4(_mm_mullo_epi32  (vec, o.vec));}
         Int4 operator<(const Int4 &o) const {return Int4(_mm_cmplt_epi32(vec,o.vec));}
         Int4 operator==(const Int4 &o) const {return Int4(_mm_cmpeq_epi32(vec,o.vec));}
         Int4 operator&(const Int4 &o) const {return Int4(_mm_and_si128(vec,o.vec));}
@@ -113,12 +123,22 @@ struct alignas(16) Float4
         Float4(): vec(_mm_setzero_ps()) {}
 
         // constructor from aligned storage
-        explicit Float4(const float* vec, Alignment align = Alignment::aligned):
-            vec(align==Alignment::aligned ? _mm_load_ps(vec) : _mm_loadu_ps(vec)) {}
+        explicit Float4(const float* vec_, Alignment align = Alignment::aligned):
+            vec(align==Alignment::aligned ? _mm_load_ps(vec_) : _mm_loadu_ps(vec_)) {}
 
         // broadcast constructor
-        Float4(const float& val):   
-            vec(_mm_broadcast_ss(&val)) {}
+        // Float4(const float& val):   
+        //     vec(_mm_broadcast_ss(&val)) {}
+        Float4(const float val):   
+            vec(_mm_set1_ps(val)) {}
+
+        // gather constructor from offsets
+        // Not particularly efficient
+        Float4(const float* base, const Int4& offsets) {
+            alignas(16) float data[4] = {
+                base[offsets.x()], base[offsets.y()], base[offsets.z()], base[offsets.w()]};
+            vec = _mm_load_ps(data);
+        }
 
         Float4 operator+(const Float4 &o) const {return Float4(_mm_add_ps  (vec, o.vec));}
         Float4 operator-(const Float4 &o) const {return Float4(_mm_sub_ps  (vec, o.vec));}
@@ -141,9 +161,9 @@ struct alignas(16) Float4
         Float4 operator-=(const Float4 &o) {return vec = _mm_sub_ps(vec, o.vec);}
         Float4 operator*=(const Float4 &o) {return vec = _mm_mul_ps(vec, o.vec);}
 
-        int movemask() {return _mm_movemask_ps(vec);}
-        bool none() {__m128i v = _mm_castps_si128(vec); return  _mm_testz_si128(v,v);}
-        bool any()  {return !none();}
+        int movemask() const {return _mm_movemask_ps(vec);}
+        bool none() const {__m128i v = _mm_castps_si128(vec); return  _mm_testz_si128(v,v);}
+        bool any() const  {return !none();}
 
         const Float4 right_rotate() const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(2,1,0,3))); }
         const Float4 left_rotate()  const { return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(0,3,2,1))); }
@@ -164,8 +184,10 @@ struct alignas(16) Float4
         }
 
         // choose from values whenever the equivalent element of mask is true
-        Float4 blendv(Float4 values, Float4 mask) const {
-            return Float4(_mm_blendv_ps(vec, values.vec, mask.vec));
+        // *this is the mask 
+        //   c.ternary(a,b)  ==  c ? a : b;
+        Float4 ternary(const Float4& a, const Float4& b) const {
+            return Float4(_mm_blendv_ps(b.vec, a.vec, vec));
         }
 
         template <int round_mode = _MM_FROUND_TO_NEAREST_INT>
@@ -198,6 +220,8 @@ struct alignas(16) Float4
         } 
 
         friend inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b);
+        friend inline Float4 min(const Float4& a, const Float4& b);
+        friend inline Float4 max(const Float4& a, const Float4& b);
 };
 
 /*
@@ -259,6 +283,23 @@ struct alignas(32) Float8
 };
 */
 
+static void print_vector(const char* nm, const Float4& val) {
+    printf("%s % .2f % .2f % .2f % .2f\n", nm, val.x(), val.y(), val.z(), val.w());
+}
+
+static void print_vector(const char* nm, const Int4& val) {
+    printf("%s %3i %3i %3i %3i\n", nm, val.x(), val.y(), val.z(), val.w());
+}
+
+inline Float4 rsqrt(const Float4& x) {
+    // convenience function to match float interface
+    return x.rsqrt();
+}
+inline Float4 rcp(const Float4& x) {
+    // convenience function to match float interface
+    auto r = x.rsqrt();
+    return r*r;
+}
 
 template <int i3, int i2, int i1, int i0>
 Float4 shuffle_ps(Float4 m1, Float4 m2)
@@ -284,6 +325,37 @@ inline void transpose4(Float4 &x, Float4 &y, Float4 &z, Float4 &w)
 inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b) {
     return Float4(_mm_fmadd_ps(a1.vec,a2.vec, b.vec));
 }
+
+// FIXME I should put in an efficient, approximate SSE expf
+//   but for now I will just make it work
+inline Float4 expf(const Float4& x) {
+    alignas(16) float result[4] = {expf(x.x()), expf(x.y()), expf(x.z()), expf(x.w())};
+    return Float4(result, Alignment::aligned);
+}
+
+// FIXME I should put in an efficient, approximate SSE expf
+//   but for now I will just make it work
+inline Float4 logf(const Float4& x) {
+    alignas(16) float result[4] = {logf(x.x()), logf(x.y()), logf(x.z()), logf(x.w())};
+    return Float4(result, Alignment::aligned);
+}
+
+inline bool any(const Float4& x) {return x.any();}
+inline bool none(const Float4& x) {return x.none();}
+
+inline Float4 ternary(const Float4& which, const Float4& a, const Float4& b) {
+    // compatibility with float version
+    return which.ternary(a,b);
+}
+
+inline Float4 min(const Float4& a, const Float4& b) {
+    return _mm_min_ps(a.vec, b.vec);
+}
+
+inline Float4 max(const Float4& a, const Float4& b) {
+    return _mm_max_ps(a.vec, b.vec);
+}
+
 
 // inline int left_pack_simd(Float4 x, Float4 mask);
 

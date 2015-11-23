@@ -162,15 +162,16 @@ static RegisterNodeType<Infer_H_O,1>  infer_node("infer_H_O");
 // angular cutoff at 90 degrees
 #define angular_cutoff (0.f)
 
-float2 hbond_radial_potential(float input)
+template <typename S>
+Vec<2,S> hbond_radial_potential(S input)
 {
-    const float outer_barrier    = 2.5f;
-    const float inner_barrier    = 1.4f;   // barrier to prevent H-O overlap
-    const float inv_outer_width  = 1.f/0.125f;
-    const float inv_inner_width  = 1.f/0.10f;
+    const S outer_barrier    = S(2.5f);
+    const S inner_barrier    = S(1.4f);   // barrier to prevent H-O overlap
+    const S inv_outer_width  = S(1.f/0.125f);
+    const S inv_inner_width  = S(1.f/0.10f);
 
-    float2 outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
-    float2 inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
+    Vec<2,S> outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
+    Vec<2,S> inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
 
     return make_vec2( outer_sigmoid.x() * inner_sigmoid.x(),
             - inv_outer_width * outer_sigmoid.y() * inner_sigmoid.x()
@@ -178,44 +179,47 @@ float2 hbond_radial_potential(float input)
 }
 
 
-float2 hbond_angular_potential(float dotp)
+template <typename S>
+Vec<2,S> hbond_angular_potential(S dotp)
 {
-    const float wall_dp = 0.682f;  // half-height is at 47 degrees
-    const float inv_dp_width = 1.f/0.05f;
+    const S wall_dp = S(0.682f);  // half-height is at 47 degrees
+    const S inv_dp_width = S(1.f/0.05f);
 
-    float2 v = sigmoid((dotp-wall_dp)*inv_dp_width);
+    Vec<2,S> v = sigmoid((dotp-wall_dp)*inv_dp_width);
     return make_vec2(v.x(), inv_dp_width*v.y());
 }
 
 
-float hbond_score(
-        float3   H, float3   O, float3   rHN, float3   rOC,
-        float3& dH, float3& dO, float3& drHN, float3& drOC)
+template <typename S>
+S hbond_score(
+        Vec<3,S>   H, Vec<3,S>   O, Vec<3,S>   rHN, Vec<3,S>   rOC,
+        Vec<3,S>& dH, Vec<3,S>& dO, Vec<3,S>& drHN, Vec<3,S>& drOC)
 {
-    float3 HO = H-O;
+    auto HO = H-O;
 
-    float magHO2 = mag2(HO) + 1e-6; // a bit of paranoia to avoid division by zero later
-    float invHOmag = rsqrt(magHO2);
-    float magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
+    auto magHO2 = mag2(HO) + S(1e-6f); // a bit of paranoia to avoid division by zero later
+    auto invHOmag = rsqrt(magHO2);
+    auto magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
 
-    float3 rHO = HO*invHOmag;
+    auto rHO = HO*invHOmag;
 
-    float dotHOC =  dot(rHO,rOC);
-    float dotOHN = -dot(rHO,rHN);
+    auto dotHOC =  dot(rHO,rOC);
+    auto dotOHN = -dot(rHO,rHN);
 
-    if(!((dotHOC > angular_cutoff) & (dotOHN > angular_cutoff))) {
-        dH=dO=drHN=drOC=make_zero<3>();
-        return 0.f;
+    auto within_angular_cutoff = (S(angular_cutoff) < dotHOC) & (S(angular_cutoff) < dotOHN);
+    if(none(within_angular_cutoff)) {
+        dH=dO=drHN=drOC=make_zero<3,S>();
+        return zero<S>();
     }
 
-    float2 radial   = hbond_radial_potential (magHO );  // x has val, y has deriv
-    float2 angular1 = hbond_angular_potential(dotHOC);
-    float2 angular2 = hbond_angular_potential(dotOHN);
+    auto radial   = hbond_radial_potential (magHO );  // x has val, y has deriv
+    auto angular1 = hbond_angular_potential(dotHOC);
+    auto angular2 = hbond_angular_potential(dotOHN);
 
-    float val =  radial.x() * angular1.x() * angular2.x();
-    float c0  =  radial.y() * angular1.x() * angular2.x();
-    float c1  =  radial.x() * angular1.y() * angular2.x();
-    float c2  = -radial.x() * angular1.x() * angular2.y();
+    auto val =  radial.x() * angular1.x() * angular2.x();
+    auto c0  =  radial.y() * angular1.x() * angular2.x();
+    auto c1  =  radial.x() * angular1.y() * angular2.x();
+    auto c2  = -radial.x() * angular1.x() * angular2.y();
 
     drOC = c1*rHO;
     drHN = c2*rHO;
@@ -243,15 +247,16 @@ namespace {
             return Int4() == Int4();  // No exclusions (all true)
         }
 
-        static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
-                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
-            float3 dH,dO,drHN,drOC;
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
+                const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
+            auto one = Float4(1.f);
+            Vec<3,Float4> dH,dO,drHN,drOC;
 
-            float hb = hbond_score(extract<0,3>(x1), extract<0,3>(x2), extract<3,6>(x1), extract<3,6>(x2),
+            auto hb = hbond_score(extract<0,3>(x1), extract<0,3>(x2), extract<3,6>(x1), extract<3,6>(x2),
                                    dH,               dO,               drHN,             drOC);
-            float hb_log = hb>=1.f ? -1e10f : -logf(1.f-hb);  // work in multiplicative space
+            auto hb_log = ternary(one<=hb, Float4(100.f), -logf(one-hb));  // work in multiplicative space
 
-            float deriv_prefactor = min(1.f/(1.f-hb),1e5f); // FIXME this is a mess
+            auto deriv_prefactor = min(rcp(one-hb),Float4(1e5f)); // FIXME this is a mess
             store<0,3>(d1, dH   * deriv_prefactor);
             store<3,6>(d1, drHN * deriv_prefactor);
             store<0,3>(d2, dO   * deriv_prefactor);
@@ -288,6 +293,8 @@ namespace {
 
         static float compute_edge(Vec<n_dim1> &d1, Vec<n_dim2> &d2, const float* p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
+
+
             float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
             float3 rHN = extract<3,6>(hb_pos);
             float3 rSC = extract<3,6>(sc_pos);
@@ -326,6 +333,62 @@ namespace {
             store<0,3>(d1, -(prefactor * d_displace));
             store<3,6>(d1, prefactor * d_rHN);
             d1[6] = -coverage * (1.f-hb_pos[6])*2.f;
+
+            store<0,3>(d2, prefactor * d_displace);
+            store<3,6>(d2, prefactor * d_rSC);
+
+            return prefactor * coverage;
+        }
+
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
+                const Vec<n_dim1,Float4> &hb_pos, const Vec<n_dim2,Float4> &sc_pos) {
+            Float4 one(1.f);
+            auto displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
+            auto rHN = extract<3,6>(hb_pos);
+            auto rSC = extract<3,6>(sc_pos);
+
+            auto dist2 = mag2(displace);
+            auto inv_dist = rsqrt(dist2);
+            auto dist_coord = dist2*(inv_dist*Float4(inv_dx));
+            auto displace_unitvec = inv_dist*displace;
+
+            auto cos_cov_angle1 = dot(rHN, displace_unitvec);
+            auto cos_cov_angle2 = dot(rSC,-displace_unitvec);
+
+            // Spline evaluation
+            auto angular_sigmoid1 = deBoor_value_and_deriv(p,  (cos_cov_angle1+one)*Float4(inv_dtheta)+one);
+            int o = n_knot_angular; const float* pp[4] = {p[0]+o, p[1]+o, p[2]+o, p[3]+o};
+
+            auto angular_sigmoid2 = deBoor_value_and_deriv(pp, (cos_cov_angle2+one)*Float4(inv_dtheta)+one);
+            o=n_knot_angular; pp[0]+=o; pp[1]+=o; pp[2]+=o; pp[3]+=o;
+
+            auto wide_cover   = clamped_deBoor_value_and_deriv(pp, dist_coord, n_knot);
+            o=n_knot; pp[0]+=o; pp[1]+=o; pp[2]+=o; pp[3]+=o;
+
+            auto narrow_cover = clamped_deBoor_value_and_deriv(pp, dist_coord, n_knot);
+
+            // Partition derivatives
+            auto angular_weight = angular_sigmoid1.x() * angular_sigmoid2.x();
+
+            auto radial_deriv   = Float4(inv_dx    ) * (wide_cover.y() + angular_weight*narrow_cover.y());
+            auto angular_deriv1 = Float4(inv_dtheta) * angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
+            auto angular_deriv2 = Float4(inv_dtheta) * angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
+
+            Vec<3,Float4> col0, col1, col2;
+            hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
+            auto rXX = angular_deriv1*rHN - angular_deriv2*rSC;
+            auto deriv_dir = make_vec3(dot(col0,rXX), dot(col1,rXX), dot(col2,rXX));
+
+            auto d_displace = radial_deriv  * displace_unitvec + deriv_dir;
+            auto d_rHN      =  angular_deriv1 * displace_unitvec;
+            auto d_rSC      = -angular_deriv2 * displace_unitvec;
+
+            auto coverage = wide_cover.x() + angular_weight*narrow_cover.x();
+            auto prefactor = sqr(one-hb_pos[6]);
+
+            store<0,3>(d1, -(prefactor * d_displace));
+            store<3,6>(d1,   prefactor * d_rHN);
+            d1[6] = -coverage * (one-hb_pos[6])*Float4(2.f);
 
             store<0,3>(d2, prefactor * d_displace);
             store<3,6>(d2, prefactor * d_rSC);

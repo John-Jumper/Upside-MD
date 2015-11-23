@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cassert>
 #include <algorithm>
-
+#include "Float4.h"
 
 struct VecArray {
     float* x;
@@ -194,6 +194,13 @@ inline Vec<D,float> load_vec(const float* a) {
     for(int d=0; d<D; ++d) r[d] = a[d];
     return r;
 }
+template<int D>
+inline Vec<D,Float4> load_vec(const float* a, Alignment align) {
+    Vec<D,Float4> r;
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d] = Float4(a+4*d);
+    return r;
+}
 
 
 
@@ -221,6 +228,12 @@ inline void store_vec(float* a, const Vec<D,float>& r) {
     for(int d=0; d<D; ++d) a[d] = r[d];
 }
 
+template <int D>
+inline void store_vec(float* a, const Vec<D,Float4>& r, Alignment align=Alignment::aligned) {
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d].store(a+4*d, align);
+}
+
 template <int D, typename multype>
 inline void update_vec_scale(VecArray a, int idx, const multype &r) {
     store_vec(a,idx, load_vec<D>(a,idx) * r);
@@ -245,7 +258,7 @@ static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
 template <typename D> inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
 inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
-inline float blendv(bool b, float x, float y) {return b ? x : y;}
+inline float ternary(bool b, float x, float y) {return b ? x : y;}
 
 template <int D, typename S>
 inline Vec<D,S> vec_rcp(const Vec<D,S>& x) {
@@ -430,10 +443,10 @@ inline Vec<D,S> operator-(const Vec<D,S>& a) {
 // I will assume there are functions rsqrt(s) and rcp(s) and sqrt(s) and I will write sqr(s)
 
 template <typename S>
-inline S zero() {return 0.f;} // depend on implicit conversion
+inline S zero() {return S(0.f);}
 
 template <typename S>
-inline S one () {return 1.f;} // depend on implicit conversion
+inline S one () {return S(1.f);}
 
 template <int D, typename S = float>
 inline Vec<D,S> make_zero() {
@@ -523,15 +536,18 @@ inline S sum(const Vec<D,S>& a) {
 }
 
 // derivative of (v/v_mag), which is otherwise know as a hat vector
+template<typename S>
 inline void
 hat_deriv(
-        float3 v_hat, float v_invmag, 
-        float3 &col0, float3 &col1, float3 &col2) // matrix is symmetric, so these are rows or cols
+        const Vec<3,S>& v_hat, const S& v_invmag, 
+        Vec<3,S> &col0, Vec<3,S> &col1, Vec<3,S> &col2) // matrix is symmetric, so these are rows or cols
 {
-    float s = v_invmag;
-    col0 = make_vec3(s*(1.f-v_hat.x()*v_hat.x()), s*    -v_hat.y()*v_hat.x() , s*    -v_hat.z()*v_hat.x() );
-    col1 = make_vec3(s*    -v_hat.x()*v_hat.y() , s*(1.f-v_hat.y()*v_hat.y()), s*    -v_hat.z()*v_hat.y() );
-    col2 = make_vec3(s*    -v_hat.x()*v_hat.z() , s*    -v_hat.y()*v_hat.z() , s*(1.f-v_hat.z()*v_hat.z()));
+    auto s = v_invmag;
+    auto one = S(1.f);
+
+    col0 = make_vec3(s*(one-v_hat.x()*v_hat.x()), s*    -v_hat.y()*v_hat.x() , s*    -v_hat.z()*v_hat.x() );
+    col1 = make_vec3(s*    -v_hat.x()*v_hat.y() , s*(one-v_hat.y()*v_hat.y()), s*    -v_hat.z()*v_hat.y() );
+    col2 = make_vec3(s*    -v_hat.x()*v_hat.z() , s*    -v_hat.y()*v_hat.z() , s*(one-v_hat.z()*v_hat.z()));
 }
 
 
@@ -549,10 +565,10 @@ template <int D, typename S>
 inline Vec<D,S> normalized(const Vec<D,S>& a) { return a*inv_mag(a); }
 
 template <int D, typename S>
-inline float dot(const Vec<D,S>& a, const Vec<D,S>& b){
-    S c = zero<S>();
+inline S dot(const Vec<D,S>& a, const Vec<D,S>& b){
+    S c = a[0]*b[0];
     #pragma unroll
-    for(int i=0; i<D; ++i) c += a[i]*b[i];
+    for(int i=1; i<D; ++i) c = fmadd(a[i],b[i], c);
     return c;
 }
 
@@ -561,9 +577,9 @@ template <int D, typename S>
 Vec<D,S> left_multiply_matrix(Vec<D*D,S> m, Vec<D,S> v) {
     Vec<D,S> mv;
     for(int i=0; i<D; ++i) {
-        float x = 0.f;
-        for(int j=0; j<D; ++j)
-            x += m[i*D+j] * v[j];
+        auto x = m[i*D+0]*v[0];
+        for(int j=1; j<D; ++j)
+            x = fmadd(m[i*D+j],v[j], x);
         mv[i] = x;
     }
     return mv;
@@ -573,9 +589,9 @@ template <int D, typename S>
 Vec<D,S> right_multiply_matrix(Vec<D,S> v, Vec<D*D,S> m) {
     Vec<D,S> vm;
     for(int j=0; j<D; ++j) {
-        float x = 0.f;
-        for(int i=0; i<D; ++i)
-            x += v[i]*m[i*D+j];
+        auto x = v[0]*m[0*D+j];
+        for(int i=1; i<D; ++i)
+            x = fmadd(v[i],m[i*D+j], x);
         vm[j] = x;
     }
     return vm;
@@ -584,32 +600,31 @@ Vec<D,S> right_multiply_matrix(Vec<D,S> v, Vec<D*D,S> m) {
 template <int D, typename S>
 S min(Vec<D,S> y) {
     S x = y[0];
-    for(int i=1; i<D; ++i) x = blendv((y[i]<x), y[i], x);
+    for(int i=1; i<D; ++i) x = ternary((y[i]<x), y[i], x);
     return x;
 }
 
 template <int D, typename S>
 S max(Vec<D,S> y) {
     S x = y[0];
-    for(int i=1; i<D; ++i) x = blendv((x<=y[i]), y[i], x);
+    for(int i=1; i<D; ++i) x = ternary((x<=y[i]), y[i], x);
     return x;
 }
-
-
-
-// FIXME assume implementation of blendv functions
-// I probably need a logical type to make this work right
 
 
 //! sigmoid function and its derivative 
 
 //! Value of function is 1/(1+exp(x)) and the derivative is 
 //! exp(x)/(1+exp(x))^2
-inline float2 sigmoid(float x) {
-    float z = expf(-x);
-    float w = 1.f/(1.f+z);
+template <typename S>
+inline Vec<2,S> sigmoid(S x) {
+    S z = expf(-x);
+    S w = rcp(S(1.f)+z);
     return make_vec2(w, z*w*w);
 }
+
+inline bool any(bool x) {return x;} // scalar any function is trivial
+inline bool none(bool x) {return !x;} // scalar none function is trivial
 
 
 // Sigmoid-like function that has zero derivative outside (-1/sharpness,1/sharpness)
@@ -624,8 +639,13 @@ inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
 #else
     S y = x*sharpness;
     Vec<2,S> z = make_vec2(S(0.25f)*(y+S(2.f))*(y-S(1.f))*(y-one<S>()), (sharpness*S(0.75f))*(sqr(y)-one<S>()));
-    z = blendv((y>S( 1.f)), make_vec2(zero<S>(), zero<S>()), z);
-    z = blendv((y<S(-1.f)), make_vec2(one <S>(), zero<S>()), z);
+
+    auto too_big   = y>S( 1.f);
+    auto too_small = y<S(-1.f);
+
+    // apply cutoffs
+    z.x() = ternary(too_small, one<S>(), ternary(too_big, zero<S>(), z.x()));
+    z.y() = ternary(too_small | too_big, zero<S>(), z.y());
     return z;
 #endif
 }

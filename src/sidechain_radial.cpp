@@ -19,6 +19,7 @@ struct ContactPair {
     float     energy;
 };
 
+namespace {
 struct SidechainRadialPairs : public PotentialNode
 {
     struct Helper {
@@ -65,6 +66,23 @@ struct SidechainRadialPairs : public PotentialNode
             return en.x();
         }
 
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4], 
+                const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
+            alignas(16) const float inv_dx_data[4] = {p[0][0], p[1][0], p[2][0], p[3][0]};
+
+            auto inv_dx     = Float4(inv_dx_data, Alignment::aligned);
+            auto disp       = x1-x2;
+            auto dist2      = mag2(disp);
+            auto inv_dist   = rsqrt(dist2+Float4(1e-7f));  // 1e-7 is divergence protection
+            auto dist_coord = dist2*(inv_dist*inv_dx);
+
+            const float* pp[4] = {p[0]+1, p[1]+1, p[2]+1, p[3]+1};
+            auto en = clamped_deBoor_value_and_deriv(pp, dist_coord, n_param);
+            d1 = disp*(inv_dist*inv_dx*en.y());
+            d2 = -d1;
+            return en.x();
+        }
+
         static void param_deriv(Vec<n_param> &d_param, const float* p, 
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
     };
@@ -92,6 +110,7 @@ struct SidechainRadialPairs : public PotentialNode
 
     virtual double test_value_deriv_agreement() { return -1.f; }
 };
+}
 
 
 void contact_energy(

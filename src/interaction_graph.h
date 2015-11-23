@@ -27,6 +27,63 @@ static T&& message(const std::string& s, T&& x) {
     return std::forward<T>(x);
 }
 
+template<int D>
+inline Vec<D,Float4> aligned_gather_vec(const float* data, const Int4& offsets) {
+    Vec<D,Float4> ret;
+
+    const float* p0 = data+offsets.x();
+    const float* p1 = data+offsets.y();
+    const float* p2 = data+offsets.z();
+    const float* p3 = data+offsets.w();
+
+    Float4 extra[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4) {
+        ret[d  ]                      = Float4(p0+d);
+        (d+1<D ? ret[d+1] : extra[0]) = Float4(p1+d);
+        (d+2<D ? ret[d+2] : extra[1]) = Float4(p2+d);
+        (d+3<D ? ret[d+3] : extra[2]) = Float4(p3+d);
+
+        transpose4(
+                ret[d  ],
+                (d+1<D ? ret[d+1] : extra[0]),
+                (d+2<D ? ret[d+2] : extra[1]),
+                (d+3<D ? ret[d+3] : extra[2]));
+    }
+
+    return ret;
+}
+
+template<int D>
+inline void aligned_scatter_update_vec_destructive(float* data, const Int4& offsets, Vec<D,Float4>& v) {
+    // note that this function changes the vector v
+
+    float* p0 = data+offsets.x();
+    float* p1 = data+offsets.y();
+    float* p2 = data+offsets.z();
+    float* p3 = data+offsets.w();
+
+    Float4 extra[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4) {
+        transpose4(
+                v[d  ],
+                (d+1<D ? v[d+1] : extra[0]),
+                (d+2<D ? v[d+2] : extra[1]),
+                (d+3<D ? v[d+3] : extra[2]));
+
+        // this writes must be done sequentially in case some of the 
+        // offsets are equal (and hence point to the same memory location)
+        (Float4(p0+d) + v[d  ]                     ).store(p0+d);
+        (Float4(p1+d) + (d+1<D ? v[d+1] : extra[0])).store(p1+d);
+        (Float4(p2+d) + (d+2<D ? v[d+2] : extra[1])).store(p2+d);
+        (Float4(p3+d) + (d+3<D ? v[d+3] : extra[2])).store(p3+d);
+    }
+}
+
+
 
 template<typename IType>
 struct InteractionGraph{
@@ -79,7 +136,10 @@ struct InteractionGraph{
         n_type1(h5::get_dset_size(3,grp,"interaction_param")[0]),
         n_type2(h5::get_dset_size(3,grp,"interaction_param")[1]),
 
-        max_n_edge(h5::read_attribute<int>(grp, ".", "max_n_edge", n_elem1*n_elem2/(symmetric?2:1))),
+        max_n_edge(round_up(
+                    h5::read_attribute<int>(grp, ".", "max_n_edge", 
+                        n_elem1*n_elem2/(symmetric?2:1)),
+                        4)),
 
         types1(new int32_t[n_elem1]), types2(new int32_t[n_elem2]),
         id1   (new int32_t[n_elem1]), id2   (new int32_t[n_elem2]),
@@ -232,6 +292,10 @@ struct InteractionGraph{
                 }
             }
             n_edge = ne;
+            for(int i=ne; i<round_up(ne,4); ++i) {
+                edge_indices1[i] = 0;
+                edge_indices2[i] = 0; // just put something sane here
+            }
         }
         // printf("n_edge for n_dim1 %i n_dim2 %i is %i\n", n_dim1, n_dim2, n_edge);
 
@@ -240,21 +304,32 @@ struct InteractionGraph{
         edge_param_deriv.clear();
         #endif
 
-        for(int ne=0; ne<n_edge; ++ne) {
-            int i1 = edge_indices1[ne];
-            int i2 = edge_indices2[ne];
-            int interaction = types1[i1]*n_type2 + types2[i2];
+        for(int ne=0; ne<n_edge; ne+=4) {
+            auto i1 = Int4(edge_indices1+ne);
+            auto i2 = Int4(edge_indices2+ne);
 
-            auto coord1 = load_vec<n_dim1>(pos1                 +i1*n_dim1a);
-            auto coord2 = load_vec<n_dim2>((symmetric?pos1:pos2)+i2*n_dim2a);
+            auto t1 = Int4(types1.get(),i1);
+            auto t2 = Int4(types2.get(),i2);
 
-            Vec<n_dim1> d1;
-            Vec<n_dim2> d2;
-            edge_value[ne] = IType::compute_edge(d1,d2, interaction_param+interaction*n_param, coord1,coord2);
-            store_vec(edge_deriv + ne*(n_dim1+n_dim2),        d1);
-            store_vec(edge_deriv + ne*(n_dim1+n_dim2)+n_dim1, d2);
+            auto interaction_offset = (t1*Int4(n_type2) + t2)*Int4(n_param);
+            const float* interaction_ptr[4] = {
+                interaction_param+interaction_offset.x(),
+                interaction_param+interaction_offset.y(),
+                interaction_param+interaction_offset.z(),
+                interaction_param+interaction_offset.w()};
+
+            auto coord1 = aligned_gather_vec<n_dim1>(pos1.get(),                 i1*Int4(n_dim1a));
+            auto coord2 = aligned_gather_vec<n_dim2>((symmetric?pos1:pos2).get(),i2*Int4(n_dim2a));
+
+            Vec<n_dim1,Float4> d1;
+            Vec<n_dim2,Float4> d2;
+            IType::compute_edge(d1,d2, interaction_ptr, coord1,coord2).store(edge_value+ne);
+
+            store_vec(edge_deriv + ne*(n_dim1+n_dim2),          d1);
+            store_vec(edge_deriv + ne*(n_dim1+n_dim2)+4*n_dim1, d2);
 
             #ifdef PARAM_DERIV
+            NOT UPDATED YET;
             edge_param_deriv.push_back(make_zero<n_param>());
             IType::param_deriv(edge_param_deriv.back(), interaction_param+interaction*n_param, 
                                coord1, coord2);
@@ -269,23 +344,23 @@ struct InteractionGraph{
         Timer t(std::string("prop_deriv"));
 
         // Zero accumulation buffers
-        fill_n(pos1_deriv, n_elem1*n_dim1, 0.f);
-        if(!symmetric) fill_n(pos2_deriv, n_elem2*n_dim2, 0.f);
+        fill_n(pos1_deriv, n_elem1*n_dim1a, 0.f);
+        if(!symmetric) fill_n(pos2_deriv, n_elem2*n_dim2a, 0.f);
         #ifdef PARAM_DERIV
         fill(interaction_param_deriv, 0.f);
         #endif
 
         // Accumulate derivatives
-        for(int ne=0; ne<n_edge; ++ne) {
-            int i1 = edge_indices1[ne];
-            int i2 = edge_indices2[ne];
-            float sens = edge_sensitivity[ne];
+        for(int ne=0; ne<n_edge; ne+=4) {
+            auto i1 = Int4(edge_indices1+ne);
+            auto i2 = Int4(edge_indices2+ne);
+            auto sens = Float4(edge_sensitivity+ne);
 
-            auto d1 = sens*load_vec<n_dim1>(edge_deriv + ne*(n_dim1+n_dim2));
-            auto d2 = sens*load_vec<n_dim2>(edge_deriv + ne*(n_dim1+n_dim2)+n_dim1);
+            auto d1 = sens*load_vec<n_dim1>(edge_deriv + ne*(n_dim1+n_dim2), Alignment::aligned);
+            auto d2 = sens*load_vec<n_dim2>(edge_deriv + ne*(n_dim1+n_dim2)+4*n_dim1, Alignment::aligned);
 
-            update_vec(pos1_deriv                        + i1*n_dim1, d1);
-            update_vec((symmetric?pos1_deriv:pos2_deriv) + i2*n_dim2, d2);
+            aligned_scatter_update_vec_destructive(pos1_deriv.get(),                       i1*Int4(n_dim1a), d1);
+            aligned_scatter_update_vec_destructive((symmetric?pos1_deriv:pos2_deriv).get(),i2*Int4(n_dim2a), d2);
 
             #ifdef PARAM_DERIV
             auto t1 = types1[i1];
@@ -298,12 +373,12 @@ struct InteractionGraph{
         {
             VecArray pos1_accum = pos_node1->coords().deriv;
             for(int i1=0; i1<n_elem1; ++i1)
-                store_vec(pos1_accum, loc1[i1].slot, load_vec<n_dim1>(pos1_deriv+i1*n_dim1));
+                store_vec(pos1_accum, loc1[i1].slot, load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
         }
         if(!symmetric) {
             VecArray pos2_accum = pos_node2->coords().deriv;
             for(int i2=0; i2<n_elem2; ++i2)
-                store_vec(pos2_accum, loc2[i2].slot, load_vec<n_dim2>(pos2_deriv+i2*n_dim2));
+                store_vec(pos2_accum, loc2[i2].slot, load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
         }
     }
 };
