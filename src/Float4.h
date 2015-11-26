@@ -179,12 +179,10 @@ struct alignas(16) Float4
                 _mm_storeu_ps(vec_,vec);
         }
 
-        float sum() const {
+        Float4 sum_in_all_entries() const {
+            // the sum of the vector is now in all entries
             __m128 vec2 = _mm_hadd_ps(vec,vec);
-            vec2 = _mm_hadd_ps(vec2,vec2);
-            float ret;
-            _mm_store_ss(&ret, vec2);
-            return ret;
+            return _mm_hadd_ps(vec2,vec2);
         }
 
         // choose from values whenever the equivalent element of mask is true
@@ -361,6 +359,7 @@ inline Float4 max(const Float4& a, const Float4& b) {
 }
 
 inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
+inline Float4 approx_rcp  (const Float4& x) {auto y = x.approx_rsqrt(); return y*y;}
 
 
 // inline int left_pack_simd(Float4 x, Float4 mask);

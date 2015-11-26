@@ -251,13 +251,21 @@ static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 inline float approx_rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root at lower accuracy
 inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
 template <typename D> inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
-inline float rcp  (float x) {return 1.f/x;}  //!< reciprocal of number
+inline float rcp       (float x) {return 1.f/x;}  //!< reciprocal of number
+inline float approx_rcp(float x) {return 1.f/x;}  //!< reciprocal of number
 inline float ternary(bool b, float x, float y) {return b ? x : y;}
 
 template <int D, typename S>
 inline Vec<D,S> vec_rcp(const Vec<D,S>& x) {
     Vec<D,S> y;
     for(int i=0; i<D; ++i) y[i] = rcp(x[i]);
+    return y;
+}
+
+template <int D, typename S>
+inline Vec<D,S> approx_vec_rcp(const Vec<D,S>& x) {
+    Vec<D,S> y;
+    for(int i=0; i<D; ++i) y[i] = approx_rcp(x[i]);
     return y;
 }
 
@@ -599,15 +607,19 @@ Vec<D,S> right_multiply_matrix(Vec<D,S> v, Vec<D*D,S> m) {
 
 template <int D, typename S>
 S min(Vec<D,S> y) {
+    using namespace std;
     S x = y[0];
-    for(int i=1; i<D; ++i) x = ternary((y[i]<x), y[i], x);
+    // for(int i=1; i<D; ++i) x = ternary((y[i]<x), y[i], x);
+    for(int i=1; i<D; ++i) x = min(y[i],x);
     return x;
 }
 
 template <int D, typename S>
 S max(Vec<D,S> y) {
+    using namespace std;
     S x = y[0];
-    for(int i=1; i<D; ++i) x = ternary((x<=y[i]), y[i], x);
+    // for(int i=1; i<D; ++i) x = ternary((x<=y[i]), y[i], x);
+    for(int i=1; i<D; ++i) x = max(y[i],x);
     return x;
 }
 

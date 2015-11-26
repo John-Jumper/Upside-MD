@@ -19,6 +19,7 @@ constexpr const int UPPER_ROT = 4;  // 1 more than the most possible rotamers (h
 
 struct NodeHolder {
         const int n_rot;
+        const int n_rot_pad;
         const int n_elem;
 
         VecArrayStorage prob;
@@ -28,10 +29,11 @@ struct NodeHolder {
 
         NodeHolder(int n_rot_, int n_elem_):
             n_rot(n_rot_),
+            n_rot_pad(n_rot==1 ? n_rot : round_up(n_rot,4)),
             n_elem(n_elem_),
-            prob(n_rot,n_elem),
-            cur_belief(n_rot,n_elem),
-            old_belief(n_rot,n_elem) 
+            prob      (n_rot_pad,n_elem+1),  // extra elem is used as a dummy for simd padding 
+            cur_belief(n_rot_pad,n_elem+1),  //  in the update_beliefs loop
+            old_belief(n_rot_pad,n_elem+1) 
         {
             fill(cur_belief, 1.f);
             fill(old_belief, 1.f);
@@ -51,7 +53,7 @@ struct NodeHolder {
         }
 
         template <int N_ROT>
-        void finish_belief_update(float damping) {
+        void standardize_belief_update(float damping) {
             for(int ne: range(n_elem)) {
                 auto b = load_vec<N_ROT>(cur_belief, ne);
                 b = (1.f-damping)*rcp(max(b))*b + damping*load_vec<N_ROT>(old_belief, ne);
@@ -117,10 +119,17 @@ inline Vec<D,Float4> load_whole_vec(const SimdVecArrayStorage& a, int idx) {
     // assert(a.elem_width == D)
     Vec<D,Float4> r;
     #pragma unroll
-    for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D);
+    for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D + d*4);
     return r;
 }
 
+template <int D>
+inline void store_whole_vec(SimdVecArrayStorage& a, int idx, const Vec<D,Float4>& r) {
+    // index must be divisible by 4
+    // assert(a.elem_width == D)
+    #pragma unroll
+    for(int d=0; d<D; ++d) r[d].store(a.x + idx*D + d*4);
+}
 
 // FIXME remove these inefficient helper functions
 template <int D>
@@ -140,6 +149,42 @@ inline void store_vec(SimdVecArrayStorage& a, int idx, const Vec<D,float>& r) {
 static void fill(SimdVecArrayStorage& v, float fill_value) {
     std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
 }
+
+template<int D>
+void node_update_scatter(float* data, const Int4& offsets, Vec<D,Float4>& v) {
+    return v.NOT_IMPLEMENTED_IF_D_IS_NOT_3;
+}
+
+template<>
+void node_update_scatter<3>(float* data, const Int4& offsets, Vec<3,Float4>& v) {
+    // note that this function changes the vector v
+    constexpr int D=3;
+
+    float* p0 = data+offsets.x();
+    float* p1 = data+offsets.y();
+    float* p2 = data+offsets.z();
+    float* p3 = data+offsets.w();
+
+    Float4 e[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4)
+        transpose4(
+                v[d  ],
+                (d+1<D ? v[d+1] : e[0]),
+                (d+2<D ? v[d+2] : e[1]),
+                (d+3<D ? v[d+3] : e[2]));
+
+
+    // this writes must be done sequentially in case some of the 
+    // offsets are equal (and hence point to the same memory location)
+    v[0] *= Float4(p0); (v[0] * rcp(v[0].sum_in_all_entries())).store(p0);
+    v[1] *= Float4(p1); (v[1] * rcp(v[1].sum_in_all_entries())).store(p1);
+    v[2] *= Float4(p2); (v[2] * rcp(v[2].sum_in_all_entries())).store(p2);
+    e[2] *= Float4(p3); (e[2] * rcp(e[2].sum_in_all_entries())).store(p3);
+}
+
+
 
 
 // FIXME specialize edge_holder when rot1 is 1
@@ -288,6 +333,7 @@ struct EdgeHolder {
 
         template <int N_ROT1, int N_ROT2>
         void update_beliefs(float damping) {
+            Timer timer(std::string("update_beliefs"));
             // FIXME ASSERT(n_rot1 == N_ROT1)
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
             VecArray vec_old_node_belief1 = nodes1.old_belief;
@@ -296,17 +342,18 @@ struct EdgeHolder {
             VecArray vec_old_node_belief2 = nodes2.old_belief;
             VecArray vec_cur_node_belief2 = nodes2.cur_belief;
 
-            // FIXME watch for ragged edges;
-            for(int ne=0; ne<n_edge; ne+=1) {
-                auto n1 = edge_indices1[ne];
-                auto n2 = edge_indices2[ne];
+            // note that edges in [n_edge,round_up(n_edge,4)) must be set to point to
+            //   the dummy node
+            for(int ne=0; ne<n_edge; ne+=4) {
+                auto offset1 = Int4(edge_indices1+ne) * Int4(round_up(N_ROT1,4));
+                auto offset2 = Int4(edge_indices2+ne) * Int4(round_up(N_ROT2,4));
 
-                auto old_node_belief1 = load_vec<N_ROT1>(vec_old_node_belief1, n1);
-                auto old_node_belief2 = load_vec<N_ROT2>(vec_old_node_belief2, n2);
+                auto old_node_belief1 = aligned_gather_vec<N_ROT1>(vec_old_node_belief1.x, offset1);
+                auto old_node_belief2 = aligned_gather_vec<N_ROT2>(vec_old_node_belief2.x, offset2);
 
-                auto ep = load_vec<N_ROT1*N_ROT2>(prob, ne);
+                auto ep = load_whole_vec<N_ROT1*N_ROT2>(prob, ne);
 
-                auto b = load_vec<N_ROT1+N_ROT2>(old_belief, ne);
+                auto b = load_whole_vec<N_ROT1+N_ROT2>(old_belief, ne);
                 auto old_edge_belief1 = extract<0,     N_ROT1>       (b);
                 auto old_edge_belief2 = extract<N_ROT1,N_ROT1+N_ROT2>(b);
 
@@ -315,17 +362,15 @@ struct EdgeHolder {
                 cur_edge_belief1 *= rcp(max(cur_edge_belief1)); // rescale to avoid underflow in the future
                 cur_edge_belief2 *= rcp(max(cur_edge_belief2));
 
-                // FIXME the rescaling system should be made more careful / correct
-
                 // store edge beliefs
-                Vec<N_ROT1+N_ROT2> neb = damping*load_vec<N_ROT1+N_ROT2>(old_belief,ne);
-                for(int i: range(N_ROT1)) neb[i]        = (1.f-damping)*cur_edge_belief1[i];
-                for(int i: range(N_ROT2)) neb[i+N_ROT1] = (1.f-damping)*cur_edge_belief2[i];
-                store_vec(cur_belief,ne, neb);
+                Vec<N_ROT1+N_ROT2,Float4> neb;
+                store<0,     N_ROT1>       (neb, cur_edge_belief1);
+                store<N_ROT1,N_ROT1+N_ROT2>(neb, cur_edge_belief2);
+                store_whole_vec(cur_belief,ne,neb);
 
-                // update our beliefs about nodes (normalization keeps us near 1)
-                store_vec(vec_cur_node_belief1, n1, approx_normalized(cur_edge_belief1 * load_vec<N_ROT1>(vec_cur_node_belief1, n1)));
-                store_vec(vec_cur_node_belief2, n2, approx_normalized(cur_edge_belief2 * load_vec<N_ROT2>(vec_cur_node_belief2, n2)));
+                // Update our beliefs about nodes (normalization keeps us near 1)
+                node_update_scatter(vec_cur_node_belief1.x, offset1, cur_edge_belief1);
+                node_update_scatter(vec_cur_node_belief2.x, offset2, cur_edge_belief2);
             }
         }
 };
@@ -395,6 +440,8 @@ struct RotamerSidechain: public PotentialNode {
 
         energy_fresh_relative_to_derivative(false)
     {
+        printf("Note that damping system has a (probably-good) bug.  I most likely want to "
+                "keep node change damping and remove edge_change damping.\n");
         for(int i: range(UPPER_ROT)) node_holders_matrix[i] = nullptr;
         node_holders_matrix[1] = &nodes1;
         node_holders_matrix[3] = &nodes3;
@@ -621,7 +668,7 @@ struct RotamerSidechain: public PotentialNode {
     void calculate_new_beliefs(float damping_for_this_iteration) {
         copy(nodes3.prob, nodes3.cur_belief);
         edges33.update_beliefs<3,3>(damping_for_this_iteration);
-        nodes3.finish_belief_update<3>(damping_for_this_iteration);
+        nodes3.standardize_belief_update<3>(damping_for_this_iteration);
     }
     
 
@@ -635,11 +682,17 @@ struct RotamerSidechain: public PotentialNode {
                         nh->old_belief(no,ne) = nh->prob(no,ne);
 
         fill(edges33.old_belief, 1.f);
+        // ensure dummy edges point to dummy nodes
+        for(int ne=edges33.n_edge; ne<round_up(edges33.n_edge,SimdVecArrayStorage::simd_width); ++ne) {
+            edges33.edge_indices1[ne] = nodes3.n_elem;  // self-edges are not valid, but these are just
+            edges33.edge_indices2[ne] = nodes3.n_elem;  //   dummies to fill out the simd vectors
+        }
 
         // this will fix consistent values in cur_belief for edges but put poor values in cur_belief for the nodes
-        calculate_new_beliefs(0.1f);
-        // swapping just nodes means that reasonable values are in cur_belief for both edges and nodes
-        nodes3.swap_beliefs();
+        copy(nodes3.prob, nodes3.old_belief);
+        edges33.update_beliefs<3,3>(0.1f);  // put good values in the edge beliefs
+        nodes3.swap_beliefs();  // we want the "old" values here
+        nodes3.standardize_belief_update<3>(0.f); // ensure normalization here
 
         float max_deviation = 1e10f;
         int iter = 0;
