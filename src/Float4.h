@@ -84,6 +84,15 @@ struct alignas(16) Int4
             return Int4(_mm_xor_si128(all_one, _mm_cmpeq_epi32(vec,o.vec)));
         }
 
+        bool any () const {return !_mm_testz_si128(vec,vec);}
+        bool none() const {return  _mm_testz_si128(vec,vec);}
+
+        Int4 sum_in_all_entries() const {
+            // the sum of the vector is now in all entries
+            __m128i vec2 = _mm_hadd_epi32(vec,vec);
+            return _mm_hadd_epi32(vec2,vec2);
+        }
+
         int x() const {return _mm_extract_epi32(vec,0);}
         int y() const {return _mm_extract_epi32(vec,1);}
         int z() const {return _mm_extract_epi32(vec,2);}

@@ -43,11 +43,11 @@ void TimeKeeper::print_report(int n_steps) {
     for(auto &p: sorted_records) maxlen = max(int(p.name.size()), maxlen);
 
     for(auto &p: sorted_records) {
-        printf("%*s  %6.1f us/step  (%4.1f%%, %7.2f steps/invocation, %7.1f us/invocation)\n", 
+        printf("%*s  %6.1f us/step  (%4.1f%%, %7.2f invocations/step, %7.1f us/invocation)\n", 
                 maxlen, p.name.c_str(), 
                 p.contribution*1e6, 
                 p.contribution/all_total*100.,
-                p.steps_per_invocation, 
+                1.f/p.steps_per_invocation, 
                 p.avg_time*1e6);
     }
     printf("%*s  %6.1f us/step\n", maxlen, "(total)", all_total*1e6);

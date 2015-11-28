@@ -284,6 +284,7 @@ namespace {
         constexpr static float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
 
         static float cutoff(const float* p) {
+            // return 5.f;
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 

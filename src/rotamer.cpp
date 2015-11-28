@@ -4,7 +4,6 @@
 #include <string>
 #include "h5_support.h"
 #include <algorithm>
-#include <map>
 #include "deriv_engine.h"
 #include "timing.h"
 #include <memory>
@@ -20,6 +19,79 @@ constexpr static int UPPER_ROT = 4;  // 1 more than the most possible rotamers (
 constexpr inline int ru(int i) {
     return i==1 ? i : round_up(i,4);
 }
+
+struct EdgeLocator {
+    protected:
+        int data_size;   // 2*max_partners, must be divisible by 8
+        unique_ptr<int32_t[]> locs;
+
+        void resize(int new_data_size) {
+            auto new_locs = unique_ptr<int32_t[]>(new_aligned<int32_t>(n_elem1*new_data_size,4));
+
+            int copy_size = min(data_size, new_data_size);
+            for(int ne=0; ne<n_elem1; ++ne) {
+                for(int i=0; i<new_data_size; ++i)
+                    new_locs  [ne*new_data_size + i] = i<copy_size 
+                        ? locs[ne*    data_size + i]
+                        : -1;  // -1 indicates no partner
+            }
+
+            data_size = new_data_size;
+            locs = std::move(new_locs);
+        }
+
+    public:
+        int32_t n_edge;
+        int     n_elem1;
+
+        EdgeLocator(int n_elem1_):
+            data_size(0),
+            locs(),
+            n_elem1(n_elem1_)
+        {
+            resize(40);
+            clear();
+        }
+
+        void clear() {
+            fill_n(locs.get(), n_elem1*data_size, -1u);
+            n_edge = 0u;
+        }
+
+        int32_t insert_or_find(int32_t i1, int32_t i2) {
+            int* partner_array = locs + int(i1*data_size);
+            auto constant_i2   = Int4(i2);
+            auto constant_umax = Int4(-1);
+
+            for(int j=0; j<data_size; j+=8) {
+                // first 4 entries are i2 values and second 4 entries are hash locations
+                auto candidate_i2 = Int4(partner_array+j);
+                auto hits = (constant_i2==candidate_i2);
+                if(hits.any()) {
+                    // There can be at most one hit
+                    auto hit_loc = Int4(partner_array+j+4) & hits;
+                    // we have a vector where the only nonzero entry is the hit, so the sum will move it to the 
+                    // front
+                    return hit_loc.sum_in_all_entries().x();
+                }
+
+                int end_of_array = (constant_umax == candidate_i2).movemask();
+                if(end_of_array) {
+                    // first entry is number of 3 minus 
+                    const int offset = 4-popcnt_nibble(end_of_array);
+                    partner_array[j  +offset] = i2;
+                    partner_array[j+4+offset] = n_edge++;
+                    return partner_array[j+4+offset];
+                }
+            }
+            // if we reach the end, we need to grow the table to accommodate the entry
+            // then we might as well just search again (even though we know where it will be
+            resize(2*data_size);
+            return insert_or_find(i1,i2);
+        }
+};
+
+    
 
 struct NodeHolder {
         const int n_rot;
@@ -46,7 +118,6 @@ struct NodeHolder {
             for(int i=0; i<n_elem; ++i)
                 for(int j=0; j<ru(n_rot); ++j)
                     prob(j,i) = float(j<n_rot);
-            // fill(prob, 1.f);}
         }
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
@@ -190,20 +261,22 @@ void node_update_scatter<3>(float* data, const Int4& offsets, Vec<3,Float4>& v) 
     e[2] *= Float4(p3); (e[2] * rcp(e[2].sum_in_all_entries())).store(p3);
 }
 
-
+struct EqualUnsigned {
+    bool operator()(unsigned u1, unsigned u2) const {
+        return u1==u2;
+    }
+};
 
 
 // FIXME specialize edge_holder when rot1 is 1
 struct EdgeHolder {
     public:
         int n_rot1, n_rot2;  // should have rot1 < rot2
-        int n_edge;
         NodeHolder &nodes1;
         NodeHolder &nodes2;
 
     public:
         struct EdgeLoc {int edge_num, dim, ne;};
-
         constexpr static int simd_width=4;
 
         // FIXME include numerical stability data (basically scale each probability in a sane way)
@@ -214,7 +287,8 @@ struct EdgeHolder {
 
         unique_ptr<int[]> edge_indices1;
         unique_ptr<int[]> edge_indices2;
-        unordered_map<unsigned,unsigned> nodes_to_edge;
+        // unordered_map<unsigned,unsigned> nodes_to_edge;
+        EdgeLocator nodes_to_edge;
         vector<EdgeLoc> edge_loc;
 
         EdgeHolder(NodeHolder &nodes1_, NodeHolder &nodes2_, int max_n_edge):
@@ -226,42 +300,40 @@ struct EdgeHolder {
             marginal(n_rot1*n_rot2, max_n_edge),
 
             edge_indices1(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width)),
-            edge_indices2(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width))
+            edge_indices2(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width)),
+
+            nodes_to_edge(nodes1.n_elem)
         {
+
             edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
             fill(cur_belief, 0.f);
             fill(old_belief, 0.f);
             fill_n(edge_indices1, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
             fill_n(edge_indices2, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
+            nodes_to_edge.n_edge = max_n_edge;
             reset();
         }
 
-        void reset() {n_edge=0; nodes_to_edge.clear(); edge_loc.clear();}
+        void reset() {
+            // reset the probabilities we wrote over
+            for(int idx=0; idx<nodes_to_edge.n_edge; ++idx)
+                for(int i: range(n_rot1)) 
+                    for(int j: range(n_rot2)) 
+                        prob(i*ru(n_rot2)+j,idx) = 1.f;
+
+            nodes_to_edge.clear();
+            edge_loc.clear();
+        }
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
         void add_to_edge(
                 int ne, float prob_val,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
-            // really I could take n_rot1 and n_rot2 as parameters so I didn't have to do a read 
-            // of a number I already know
-            unsigned pr = (id1<<16) + id2;  // this limits me to 65k residues, but that is enough I think
+            int idx = nodes_to_edge.insert_or_find(id1,id2);
 
-            unsigned idx;
-            auto ei = nodes_to_edge.find(pr);
-            if(ei == nodes_to_edge.end()) {
-                idx = n_edge;
-                nodes_to_edge[pr] = n_edge;
-                edge_indices1[idx] = id1;
-                edge_indices2[idx] = id2;
-                ++n_edge;
-
-                for(int i: range(n_rot1)) 
-                    for(int j: range(n_rot2)) 
-                        prob(i*ru(n_rot2)+j,idx) = 1.f;
-            } else {
-                idx = ei->second;
-            }
+            edge_indices1[idx] = id1;
+            edge_indices2[idx] = id2;
 
             int j = rot1*ru(n_rot2)+rot2;
             prob(j, idx) *= prob_val;
@@ -271,14 +343,14 @@ struct EdgeHolder {
         void move_edge_prob_to_node2() {
             // FIXME assert n_rot1 == 1
             VecArray p = nodes2.prob;
-            for(int ne: range(n_edge)) {
+            for(int ne: range(nodes_to_edge.n_edge)) {
                 int nr = edge_indices2[ne];
                 for(int no: range(n_rot2)) p(no,nr) *= prob(no,ne);
             }
         }
 
         void standardize_probs() { // FIXME should accumulate the rescaled probability
-            for(int ne: range(n_edge)) {
+            for(int ne: range(nodes_to_edge.n_edge)) {
                 float max_prob = 1e-10f;
                 for(int nd: range(n_rot1*n_rot2)) if(prob(nd,ne)>max_prob) max_prob = prob(nd,ne);
                 float inv_max_prob = rcp(max_prob);
@@ -290,7 +362,7 @@ struct EdgeHolder {
         //     FIX for padding;
         //     float dev = 0.f;
         //     for(int d: range(n_rot1+n_rot2)) 
-        //         for(int nn: range(n_edge)) 
+        //         for(int nn: range(nodes_to_edge.n_edge)) 
         //             dev = max(cur_belief(d,nn)-old_belief(d,nn), dev);
         //     return dev;
         // }
@@ -300,7 +372,7 @@ struct EdgeHolder {
             // FIXME ASSERT(n_rot1 == N_ROT1)
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
 
-            for(int ne: range(n_edge)) {
+            for(int ne: range(nodes_to_edge.n_edge)) {
                 auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, edge_indices1[ne]);
                 auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, edge_indices2[ne]);
 
@@ -344,7 +416,6 @@ struct EdgeHolder {
         }
 
         void update_beliefs33() {
-            Timer timer(std::string("update_beliefs33"));
             // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
 
             float* vec_old_node_belief1 = nodes1.old_belief.x.get();
@@ -352,6 +423,8 @@ struct EdgeHolder {
 
             float* vec_old_node_belief2 = nodes2.old_belief.x.get();
             float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
+
+            int n_edge = nodes_to_edge.n_edge;
 
             for(int ne=0; ne<n_edge; ++ne) {
                 int i1 = edge_indices1[ne]*4;
@@ -378,15 +451,15 @@ struct EdgeHolder {
                 auto cur_node_belief1 = cur_edge_belief1 * Float4(vec_cur_node_belief1 + i1);
                 auto cur_node_belief2 = cur_edge_belief2 * Float4(vec_cur_node_belief2 + i2);
 
-                // let's approximately l1 normalize everything to avoid any numerical problems later
-                auto scales_for_unit_l1 = Float4(3.f)*approx_rcp(horizontal_add(
-                        horizontal_add(cur_edge_belief1, cur_edge_belief2),
-                        horizontal_add(cur_node_belief1, cur_node_belief2)));
-                
-                cur_edge_belief1 *= scales_for_unit_l1.broadcast<0>();
-                cur_edge_belief2 *= scales_for_unit_l1.broadcast<1>();
-                cur_node_belief1 *= scales_for_unit_l1.broadcast<2>();
-                cur_node_belief2 *= scales_for_unit_l1.broadcast<3>();
+                // // let's approximately l1 normalize everything to avoid any numerical problems later
+                // auto scales_for_unit_l1 = Float4(3.f)*approx_rcp(horizontal_add(
+                //         horizontal_add(cur_edge_belief1, cur_edge_belief2),
+                //         horizontal_add(cur_node_belief1, cur_node_belief2)));
+                // 
+                // cur_edge_belief1 *= scales_for_unit_l1.broadcast<0>();
+                // cur_edge_belief2 *= scales_for_unit_l1.broadcast<1>();
+                // cur_node_belief1 *= scales_for_unit_l1.broadcast<2>();
+                // cur_node_belief2 *= scales_for_unit_l1.broadcast<3>();
 
                 // I might be able to do the normalization only every few steps if I wanted
                 cur_edge_belief1.store(cur_belief.x + ne*4*2 + 0);
@@ -597,6 +670,7 @@ struct RotamerSidechain: public PotentialNode {
         // Fill edge probabilities
         igraph.compute_edges();
 
+        {Timer timer(string("add_to_edge"));
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
         for(int ne=0; ne<igraph.n_edge; ++ne) {
             int   id1  = igraph.id1[igraph.edge_indices1[ne]];
@@ -613,6 +687,7 @@ struct RotamerSidechain: public PotentialNode {
 
             edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, prob, id1, rot1, id2, rot2);
         }
+        }
 
         // for edges with a 1, we can just move it
         for(int n_rot: range(2,UPPER_ROT))
@@ -626,8 +701,8 @@ struct RotamerSidechain: public PotentialNode {
         float en = 0.f;
         for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_energy<1>  (nn);
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
-        for(int ne: range(edges11.n_edge)) en += -logf(edges11.prob(0,ne));
-        for(int ne: range(edges33.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
+        for(int ne: range(edges11.nodes_to_edge.n_edge)) en += -logf(edges11.prob(0,ne));
+        for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
         return en;
     }
 
@@ -638,13 +713,13 @@ struct RotamerSidechain: public PotentialNode {
         for(int nn: range(nodes1 .n_elem)) {float en = nodes1.node_free_energy<1>(nn); e1[nn] += en;}
         for(int nn: range(nodes3 .n_elem)) {float en = nodes3.node_free_energy<3>(nn); e3[nn] += en;}
 
-        for(int ne: range(edges11.n_edge)) {
+        for(int ne: range(edges11.nodes_to_edge.n_edge)) {
             float         en = -logf(edges11.prob(0,ne));
             e1[edges11.edge_indices1[ne]] += 0.5*en;
             e1[edges11.edge_indices2[ne]] += 0.5*en;
         }
 
-        for(int ne: range(edges33.n_edge)) {
+        for(int ne: range(edges33.nodes_to_edge.n_edge)) {
             float         en = edges33.edge_free_energy<3,3>(ne);
             e3[edges33.edge_indices1[ne]] += 0.5*en;
             e3[edges33.edge_indices2[ne]] += 0.5*en;
@@ -746,7 +821,7 @@ struct RotamerSidechain: public PotentialNode {
 
         alignas(16) float start_belief[4] = {1.f,1.f,1.f,0.f};
         auto sb = Float4(start_belief);
-        for(int ne=0; ne<edges33.n_edge; ++ne) {
+        for(int ne=0; ne<edges33.nodes_to_edge.n_edge; ++ne) {
             sb.store(edges33.old_belief.x+ne*8+0);
             sb.store(edges33.old_belief.x+ne*8+4);
         }
