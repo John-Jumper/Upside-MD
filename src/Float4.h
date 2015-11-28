@@ -355,7 +355,11 @@ inline void transpose4(Float4 &x, Float4 &y, Float4 &z, Float4 &w)
 }
 
 inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b) {
+#ifdef __AVX2__
     return Float4(_mm_fmadd_ps(a1.vec,a2.vec, b.vec));
+#else
+    return Float4(_mm_add_ps(_mm_mul_ps(a1.vec,a2.vec), b.vec));
+#endif
 }
 
 // FIXME I should put in an efficient, approximate SSE expf
