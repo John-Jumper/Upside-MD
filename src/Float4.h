@@ -140,16 +140,36 @@ struct alignas(16) Float4
             vec = _mm_load_ps(data);
         }
 
-        Float4 operator+(const Float4 &o) const {return Float4(_mm_add_ps  (vec, o.vec));}
-        Float4 operator-(const Float4 &o) const {return Float4(_mm_sub_ps  (vec, o.vec));}
-        Float4 operator-()                const {return _mm_sub_ps(_mm_setzero_ps(), vec);}
-        Float4 operator*(const Float4 &o) const {return Float4(_mm_mul_ps  (vec, o.vec));}
-        Float4 operator<(const Float4 &o) const {return Float4(_mm_cmplt_ps(vec,o.vec));}
+        template <int i>
+        Float4 broadcast() const {
+            return Float4(_mm_shuffle_ps(vec,vec, _MM_SHUFFLE(i,i,i,i)));
+        }
+
+        template <int out_mask0, int out_mask1, int out_mask2, int out_mask3,
+                  int sum_mask0, int sum_mask1, int sum_mask2, int sum_mask3>
+        Float4 dp(const Float4& o) const {
+            return Float4(_mm_dp_ps(vec,o.vec, 
+                    (out_mask0<<0) | 
+                    (out_mask1<<1) | 
+                    (out_mask2<<2) | 
+                    (out_mask3<<3) | 
+                    (sum_mask0<<4) | 
+                    (sum_mask1<<5) | 
+                    (sum_mask2<<6) | 
+                    (sum_mask3<<7)));
+        }
+
+        Float4 operator+ (const Float4 &o) const {return Float4(_mm_add_ps  (vec, o.vec));}
+        Float4 operator- (const Float4 &o) const {return Float4(_mm_sub_ps  (vec, o.vec));}
+        Float4 operator- ()                const {return _mm_sub_ps(_mm_setzero_ps(), vec);}
+        Float4 operator* (const Float4 &o) const {return Float4(_mm_mul_ps  (vec, o.vec));}
+        Float4 operator< (const Float4 &o) const {return Float4(_mm_cmplt_ps(vec,o.vec));}
         Float4 operator<=(const Float4 &o) const {return Float4(_mm_cmple_ps(vec,o.vec));}
         Float4 operator!=(const Float4 &o) const {return Float4(_mm_cmpneq_ps(vec,o.vec));}
         Float4 operator==(const Float4 &o) const {return Float4(_mm_cmpeq_ps(vec,o.vec));}
-        Float4 operator&(const Float4 &o) const {return Float4(_mm_and_ps(vec,o.vec));}
-        Float4 operator|(const Float4 &o) const {return Float4(_mm_or_ps(vec,o.vec));}
+        Float4 operator& (const Float4 &o) const {return Float4(_mm_and_ps(vec,o.vec));}
+        Float4 operator| (const Float4 &o) const {return Float4(_mm_or_ps(vec,o.vec));}
+
         Float4 approx_rsqrt() const { 
             // 12-bit accuracy (about to about 0.02%)
             return _mm_rsqrt_ps(vec);
@@ -224,6 +244,7 @@ struct alignas(16) Float4
         friend inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b);
         friend inline Float4 min(const Float4& a, const Float4& b);
         friend inline Float4 max(const Float4& a, const Float4& b);
+        friend inline Float4 horizontal_add(const Float4& x1, const Float4& x2);
 };
 
 /*
@@ -361,7 +382,21 @@ inline Float4 max(const Float4& a, const Float4& b) {
 inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
 inline Float4 approx_rcp  (const Float4& x) {auto y = x.approx_rsqrt(); return y*y;}
 
+inline Float4 left_multiply_3x3(const Float4& row0, const Float4& row1, const Float4& row2, const Float4& x) {
+    return row0.dp<1,0,0,0, 1,1,1,0>(x) | 
+           row1.dp<0,1,0,0, 1,1,1,0>(x) | 
+           row2.dp<0,0,1,0, 1,1,1,0>(x);
+}
 
-// inline int left_pack_simd(Float4 x, Float4 mask);
+inline Float4 right_multiply_3x3(const Float4 x, const Float4& row0, const Float4& row1, const Float4& row2) {
+    auto tmp0 =       x.broadcast<0>()*row0;
+    auto tmp1 = fmadd(x.broadcast<1>(),row1, tmp0);
+    auto tmp2 = fmadd(x.broadcast<2>(),row2, tmp1);
+    return tmp2;
+}
+
+inline Float4 horizontal_add(const Float4& x1, const Float4& x2) {
+    return Float4(_mm_hadd_ps(x1.vec, x2.vec));
+}
 
 #endif
