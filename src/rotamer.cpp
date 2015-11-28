@@ -58,7 +58,8 @@ struct EdgeLocator {
             n_edge = 0u;
         }
 
-        int32_t insert_or_find(int32_t i1, int32_t i2) {
+        bool find_or_insert(int32_t &result, int32_t i1, int32_t i2) {
+            // return value is true if the result was an insert
             int* partner_array = locs + int(i1*data_size);
             auto constant_i2   = Int4(i2);
             auto constant_umax = Int4(-1);
@@ -72,7 +73,8 @@ struct EdgeLocator {
                     auto hit_loc = Int4(partner_array+j+4) & hits;
                     // we have a vector where the only nonzero entry is the hit, so the sum will move it to the 
                     // front
-                    return hit_loc.sum_in_all_entries().x();
+                    result = hit_loc.sum_in_all_entries().x();
+                    return false;
                 }
 
                 int end_of_array = (constant_umax == candidate_i2).movemask();
@@ -81,13 +83,14 @@ struct EdgeLocator {
                     const int offset = 4-popcnt_nibble(end_of_array);
                     partner_array[j  +offset] = i2;
                     partner_array[j+4+offset] = n_edge++;
-                    return partner_array[j+4+offset];
+                    result = partner_array[j+4+offset];
+                    return true;
                 }
             }
             // if we reach the end, we need to grow the table to accommodate the entry
             // then we might as well just search again (even though we know where it will be
             resize(2*data_size);
-            return insert_or_find(i1,i2);
+            return find_or_insert(result, i1,i2);
         }
 };
 
@@ -330,10 +333,11 @@ struct EdgeHolder {
                 int ne, float prob_val,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
-            int idx = nodes_to_edge.insert_or_find(id1,id2);
-
-            edge_indices1[idx] = id1;
-            edge_indices2[idx] = id2;
+            int32_t idx;
+            if(nodes_to_edge.find_or_insert(idx,id1,id2)){
+                edge_indices1[idx] = id1;
+                edge_indices2[idx] = id2;
+            }
 
             int j = rot1*ru(n_rot2)+rot2;
             prob(j, idx) *= prob_val;
@@ -670,11 +674,10 @@ struct RotamerSidechain: public PotentialNode {
         // Fill edge probabilities
         igraph.compute_edges();
 
-        {Timer timer(string("add_to_edge"));
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
         for(int ne=0; ne<igraph.n_edge; ++ne) {
-            int   id1  = igraph.id1[igraph.edge_indices1[ne]];
-            int   id2  = igraph.id1[igraph.edge_indices2[ne]];
+            int   id1  = igraph.edge_id1[ne];
+            int   id2  = igraph.edge_id2[ne];
             float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
 
             if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
@@ -686,7 +689,6 @@ struct RotamerSidechain: public PotentialNode {
             unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
 
             edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, prob, id1, rot1, id2, rot2);
-        }
         }
 
         // for edges with a 1, we can just move it

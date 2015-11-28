@@ -57,6 +57,7 @@ struct InteractionGraph{
 
     // per edge data
     std::unique_ptr<int32_t[]>  edge_indices1, edge_indices2;
+    std::unique_ptr<int32_t[]>  edge_id1,      edge_id2;
     std::unique_ptr<float[]>    edge_value;
     std::unique_ptr<float[]>    edge_deriv;  // this may become a SIMD-type vector
     std::unique_ptr<float[]>    edge_sensitivity; // must be filled by user of this class
@@ -92,6 +93,8 @@ struct InteractionGraph{
 
         edge_indices1   (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
         edge_indices2   (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
+        edge_id1        (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
+        edge_id2        (new_aligned<int32_t>(max_n_edge,                 align_bytes)),
         edge_value      (new_aligned<float>  (max_n_edge,                 align_bytes)),
         edge_deriv      (new_aligned<float>  (max_n_edge*(n_dim1+n_dim2), align_bytes)),
         edge_sensitivity(new_aligned<float>  (max_n_edge,                 align_bytes)),
@@ -214,10 +217,10 @@ struct InteractionGraph{
                 for(int32_t i2=symmetric?i1+1:0; i2<n_elem2; ++i2) {
                     float* p = (symmetric?pos1:pos2).get()+i2*n_dim2a;
                     auto  x2 = make_vec3(Float4(p[0]), Float4(p[1]),  Float4(p[2]));
-                    auto  my_id2 = Int4((symmetric?id1:id2)[i2]);  // might as well start the load
                     auto near = mag2(x1-x2)<cutoff2;
                     if(near.none()) continue;
 
+                    auto my_id2 = Int4((symmetric?id1:id2)[i2]);  // might as well start the load
                     auto i2_vec = Int4(i2);
                     auto pair_acceptable = IType::acceptable_id_pair(my_id1,my_id2);
 
@@ -226,9 +229,11 @@ struct InteractionGraph{
                         :                    near.cast_int()  & pair_acceptable;
                     int is_hit_bits = is_hit.movemask();
 
-                    // i2_vec is constant, so we don't have to left pack
+                    // i2_vec and my_id2 is constant, so we don't have to left pack
                     i2_vec                       .store(edge_indices2+ne, Alignment::unaligned);
+                    my_id2                       .store(edge_id2     +ne, Alignment::unaligned);
                     i1_vec.left_pack(is_hit_bits).store(edge_indices1+ne, Alignment::unaligned);
+                    my_id1.left_pack(is_hit_bits).store(edge_id1     +ne, Alignment::unaligned);
                     ne += popcnt_nibble(is_hit_bits);
                 }
             }
