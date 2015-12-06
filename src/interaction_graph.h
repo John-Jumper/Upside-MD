@@ -85,8 +85,8 @@ struct InteractionGraph{
                         n_elem1*n_elem2/(symmetric?2:1)),
                         4)),
 
-        types1(new int32_t[n_elem1]), types2(new int32_t[n_elem2]),
-        id1   (new int32_t[n_elem1]), id2   (new int32_t[n_elem2]),
+        types1(new_aligned<int32_t>(n_elem1,4)), types2(new_aligned<int32_t>(n_elem2,4)),
+        id1   (new_aligned<int32_t>(n_elem1,4)), id2   (new_aligned<int32_t>(n_elem2,4)),
 
         pos1(new_aligned<float>(round_up(n_elem1,4)*n_dim1a,             align_bytes)),
         pos2(new_aligned<float>(round_up(symmetric?4:n_elem2,4)*n_dim2a, align_bytes)),
@@ -145,9 +145,6 @@ struct InteractionGraph{
             for(int nr: range(n_elem2)) types2[nr] = types1[nr];
             for(int nr: range(n_elem2)) id2   [nr] = id1   [nr];
         }
-
-        for       (auto &p: loc1) pos_node1->slot_machine.add_request(1, p);
-        if(!s) for(auto &p: loc2) pos_node2->slot_machine.add_request(1, p);
     }
 
     void update_cutoffs() {
@@ -187,12 +184,12 @@ struct InteractionGraph{
     void compute_edges() {
         // Copy in the data to packed arrays to ensure contiguity
         {
-            VecArray posv = pos_node1->coords().value;
+            VecArray posv = pos_node1->output;
             for(int ne=0; ne<n_elem1; ++ne) 
                 store_vec(pos1.get()+ne*n_dim1a, load_vec<n_dim1>(posv, loc1[ne].index));
         }
         if(!symmetric) {
-            VecArray posv = pos_node2->coords().value;
+            VecArray posv = pos_node2->output;
             for(int ne=0; ne<n_elem2; ++ne) 
                 store_vec(pos2.get()+ne*n_dim2a, load_vec<n_dim2>(posv, loc2[ne].index));
         }
@@ -322,14 +319,14 @@ struct InteractionGraph{
 
         // Push derivatives to slots
         {
-            VecArray pos1_accum = pos_node1->coords().deriv;
+            VecArray pos1_sens = pos_node1->sens;
             for(int i1=0; i1<n_elem1; ++i1)
-                store_vec(pos1_accum, loc1[i1].slot, load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
+                update_vec(pos1_sens, loc1[i1].index, load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
         }
         if(!symmetric) {
-            VecArray pos2_accum = pos_node2->coords().deriv;
+            VecArray pos2_sens = pos_node2->sens;
             for(int i2=0; i2<n_elem2; ++i2)
-                store_vec(pos2_accum, loc2[i2].slot, load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
+                update_vec(pos2_sens, loc2[i2].index, load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
         }
     }
 };

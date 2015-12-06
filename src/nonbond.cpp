@@ -11,114 +11,43 @@ struct AffineParams {
     CoordPair residue;
 };
 
-struct RefPos {
-    int32_t n_atom;
-    float3  pos[4];
-};
-
 namespace {
+
+constexpr float nonbonded_atom_cutoff2 = 3.f*3.f + 0.1f*3.f;
 
 template <bool return_deriv>
 inline float
 nonbonded_kernel_or_deriv_over_r(float r_mag2)
 {
+    const float energy_scale = 4.f;
     const float wall = 3.0f;  // corresponds to vdW *diameter*
     const float wall_squared = wall*wall;  
     const float width = 0.10f;
     const float sharpness = 1.f/(wall*width);  // ensure character
 
-    const float2 V = compact_sigmoid(r_mag2-wall_squared, sharpness);
+    const float2 V = energy_scale*compact_sigmoid(r_mag2-wall_squared, sharpness);
     return return_deriv ? 2.f*V.y() : V.x();
 }
 
-
-template <typename AffineCoordT>
-inline void backbone_pairs_body(
-        float* pot_value,
-        AffineCoordT &body1,
-        AffineCoordT &body2,
-        int n_atom1, const float3* restrict rpos1,
-        int n_atom2, const float3* restrict rpos2)
-{
-    for(int i1=0; i1<n_atom1; ++i1) {
-        const float3 x1 = rpos1[i1];
-
-        for(int i2=0; i2<n_atom2; ++i2) {
-            const float3 x2 = rpos2[i2];
-
-            const float3 r = x1-x2;
-            const float r_mag2 = mag2(r);
-            if(r_mag2>4.0f*4.0f) continue;
-            const float deriv_over_r  = nonbonded_kernel_or_deriv_over_r<true> (r_mag2);
-            if(pot_value) *pot_value += nonbonded_kernel_or_deriv_over_r<false>(r_mag2);
-            const float3 g = deriv_over_r*r;
-
-            body1.add_deriv_at_location(x1,  g);
-            body2.add_deriv_at_location(x2, -g);
-        }
-    }
 }
-
-}
-
-void backbone_pairs(
-        float* potential,
-        const CoordArray rigid_body,
-        const RefPos* restrict ref_pos,
-        const AffineParams* restrict params,
-        float energy_scale,
-        float dist_cutoff,
-        int n_res)
-{
-    if(potential) potential[0] = 0.f;
-    float dist_cutoff2 = dist_cutoff*dist_cutoff;
-    vector<AffineCoord<>> coords; coords.reserve(n_res);
-    for(int nr=0; nr<n_res; ++nr) 
-        coords.emplace_back(rigid_body, params[nr].residue);
-
-    vector<int>    ref_pos_atoms (n_res);
-    vector<float3> ref_pos_coords(n_res*4);
-
-    for(int nr=0; nr<n_res; ++nr) {
-        ref_pos_atoms[nr] = ref_pos[nr].n_atom;
-        for(int na=0; na<4; ++na) ref_pos_coords[nr*4+na] = coords[nr].apply(ref_pos[nr].pos[na]);
-    }
-
-    for(int nr1=0; nr1<n_res; ++nr1) {
-        for(int nr2=nr1+2; nr2<n_res; ++nr2) {  // start interactions at i+2
-            if(mag2(coords[nr1].tf3()-coords[nr2].tf3()) < dist_cutoff2) {
-                backbone_pairs_body(
-                        (potential ? potential : nullptr),
-                        coords[nr1],        coords[nr2], 
-                        ref_pos_atoms[nr1], &ref_pos_coords[nr1*4],
-                        ref_pos_atoms[nr2], &ref_pos_coords[nr2*4]);
-            }
-        }
-    }
-
-    for(int nr=0; nr<n_res; ++nr) {
-        for(int d=0; d<6; ++d) coords[nr].d[0][d] *= energy_scale;
-        coords[nr].flush();
-    }
-    if(potential) potential[0] *= energy_scale;
-}
-
 
 struct BackbonePairs : public PotentialNode
 {
+    struct RefPos {
+        int32_t n_atom;
+        float3  pos[4];
+    };
+
     int n_residue;
     CoordNode& alignment;
     vector<AffineParams> params;
     vector<RefPos> ref_pos;
-    float energy_scale;
     float dist_cutoff;
 
     BackbonePairs(hid_t grp, CoordNode& alignment_):
         PotentialNode(),
         n_residue(get_dset_size(1, grp, "id")[0]), alignment(alignment_), 
-        params(n_residue), ref_pos(n_residue),
-        energy_scale(read_attribute<float>(grp, ".", "energy_scale")),
-        dist_cutoff (read_attribute<float>(grp, ".", "dist_cutoff"))
+        params(n_residue), ref_pos(n_residue)
     {
         check_elem_width(alignment, 7);
 
@@ -132,21 +61,75 @@ struct BackbonePairs : public PotentialNode
         traverse_dset<3,float>(grp, "ref_pos", [&](size_t nr, size_t na, size_t d, float x) {
                 ref_pos[nr].pos[na][d] = x;});
 
-        for(size_t nr=0; nr<params.size(); ++nr) alignment.slot_machine.add_request(1, params[nr].residue);
+        // set dist cutoff to largest distance that could possibly have an atom cutoff
+        float max_atom_dev = 0.f;
+        for(const auto& p: ref_pos)
+            for(int na: range(p.n_atom))
+                max_atom_dev = max(mag(p.pos[na]), max_atom_dev);
+
+        dist_cutoff = 2*max_atom_dev + sqrtf(nonbonded_atom_cutoff2);
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("backbone_pairs"));
-        backbone_pairs(
-                (mode==PotentialAndDerivMode ? &potential : nullptr),
-                alignment.coords(), 
-                ref_pos.data(), params.data(), energy_scale, dist_cutoff, n_residue);
-    }
 
-    virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
-        for(auto &p: params) coord_pairs.back().push_back(p.residue);
-        return -1.; // compute_relative_deviation_for_node<7,BackbonePairs,BODY_VALUE>(*this, alignment, coord_pairs);
+        float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
+        float dist_cutoff2 = dist_cutoff*dist_cutoff;
+        vector<Vec<3>> coords(n_residue);
+        vector<int>    ref_pos_atoms (n_residue);
+        vector<float3> ref_pos_coords(n_residue*4);
+
+        if(pot) *pot = 0.f;
+        for(int nr=0; nr<n_residue; ++nr) {
+            auto aff = load_vec<7>(alignment.output, params[nr].residue.index);
+            float U[9]; quat_to_rot(U, aff.v+3);
+            auto t = extract<0,3>(aff);
+            coords[nr] = t;
+
+            ref_pos_atoms[nr] = ref_pos[nr].n_atom;
+            for(int na=0; na<4; ++na) 
+                ref_pos_coords[nr*4+na] = apply_affine(U,t, ref_pos[nr].pos[na]);
+        }
+
+        for(int nr1=0; nr1<n_residue; ++nr1) {
+            for(int nr2=nr1+2; nr2<n_residue; ++nr2) {  // start interactions at i+2
+                if(mag2(coords[nr1]-coords[nr2]) < dist_cutoff2) {
+                    auto d1 = make_zero<3>(); auto torque1 = make_zero<3>(); auto t1 = coords[nr1];
+                    auto d2 = make_zero<3>(); auto torque2 = make_zero<3>(); auto t2 = coords[nr2];
+
+                    int n_atom1 = ref_pos_atoms[nr1];
+                    int n_atom2 = ref_pos_atoms[nr2];
+
+                    bool hit = false;
+                    for(int i1=0; i1<n_atom1; ++i1) {
+                        const float3 x1 = ref_pos_coords[nr1*4+i1];
+
+                        for(int i2=0; i2<n_atom2; ++i2) {
+                            const float3 x2 = ref_pos_coords[nr2*4+i2];
+
+                            const float3 r = x1-x2;
+                            const float r_mag2 = mag2(r);
+                            if(r_mag2>nonbonded_atom_cutoff2) continue;
+                            hit = true;
+                            const float deriv_over_r  = nonbonded_kernel_or_deriv_over_r<true> (r_mag2);
+                            if(pot)     *pot         += nonbonded_kernel_or_deriv_over_r<false>(r_mag2);
+                            const float3 g = deriv_over_r*r;
+
+                            d1 +=  g;  torque1 += cross(x1-t1,  g);
+                            d2 += -g;  torque2 += cross(x2-t2, -g);
+                        }
+                    }
+
+                    if(hit) {
+                        Vec<6> combine_deriv1; store<0,3>(combine_deriv1, d1); store<3,6>(combine_deriv1, torque1);
+                        Vec<6> combine_deriv2; store<0,3>(combine_deriv2, d2); store<3,6>(combine_deriv2, torque2);
+
+                        update_vec(alignment.sens, params[nr1].residue.index, combine_deriv1);
+                        update_vec(alignment.sens, params[nr2].residue.index, combine_deriv2);
+                    }
+                }
+            }
+        }
     }
 };
 static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

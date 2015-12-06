@@ -46,8 +46,6 @@ struct RamaMapPot : public PotentialNode
                 raw_data[(il*r.nx + ix)*r.ny + iy] = x;});
         r.fit_spline(raw_data.data());
 
-        for(size_t i=0; i<params.size(); ++i) rama.slot_machine.add_request(1, params[i].residue);
-
         if(logging(LOG_DETAILED)) 
             default_logger->add_logger<float>("rama_map_potential", {n_residue}, [&](float* buffer) {
                 for(int nr: range(n_residue)) 
@@ -59,7 +57,8 @@ struct RamaMapPot : public PotentialNode
         Timer timer(string("rama_map_pot"));
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
-        auto ramac = rama.coords();
+        VecArray ramac     = rama.output;
+        VecArray rama_sens = rama.sens;
         if(pot) *pot = 0.f;
 
         // add a litte paranoia to make sure there are no rounding problems
@@ -68,16 +67,16 @@ struct RamaMapPot : public PotentialNode
 
         if(pot) *pot = 0.f;
         for(int nr=0; nr<n_residue; ++nr) {
-            Coord<2> r(ramac, params[nr].residue);
+            const auto& p = params[nr];
+            auto r = load_vec<2>(ramac, p.residue.index);
 
             float map_value[3];
-            rama_map_data.evaluate_value_and_deriv(map_value, params[nr].rama_map_id, 
+            rama_map_data.evaluate_value_and_deriv(map_value, p.rama_map_id, 
                     (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
 
             if(pot) {*pot += map_value[2]; residue_potential[nr] = map_value[2];}
-            r.d[0][0] = map_value[0] * scale;
-            r.d[0][1] = map_value[1] * scale;
-            r.flush();
+            rama_sens(0,p.residue.index) += map_value[0] * scale;
+            rama_sens(1,p.residue.index) += map_value[1] * scale;
         }
     }
 

@@ -5,7 +5,6 @@
 #include "timing.h"
 #include "thermostat.h"
 #include <chrono>
-#include "md_export.h"
 #include <algorithm>
 #include "random.h"
 #include "state_logger.h"
@@ -157,12 +156,7 @@ struct ReplicaExchange {
 
         // swap coordinates and the associated system indices
         auto coord_swap = [&](int ns1, int ns2) {
-            auto& value1 = systems[ns1].engine.pos->output;
-            auto& value2 = systems[ns2].engine.pos->output;
-            swap_ranges(
-                    begin(value1),
-                    end  (value1),
-                    begin(value2));
+            swap(systems[ns1].engine.pos->output, systems[ns2].engine.pos->output);
             swap(replica_indices[ns1], replica_indices[ns2]);
         };
 
@@ -206,7 +200,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         vector<float> deriv_value(pos.n_atom*3);
         for(int na=0; na<pos.n_atom; ++na)
             for(int d=0; d<3; ++d)
-                deriv_value[na*3 + d] = pos.deriv_array()(d,na);
+                deriv_value[na*3 + d] = pos.sens(d,na);
         append_to_dset(tbl.get(), deriv_value, 2);
     }
 
@@ -214,7 +208,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
         check_size(config, "/testing/expected_deriv", pos.n_atom, 3, 1);
         double rms_error = 0.;
         traverse_dset<3,float>(config, "/testing/expected_deriv", [&](size_t na, size_t d, size_t ns, float x) {
-                double dev = x - pos.deriv_array()(d,na);
+                double dev = x - pos.sens(d,na);
                 rms_error += dev*dev;});
         rms_error = sqrtf(rms_error / pos.n_atom);
         printf("RMS deriv difference: %.6f\n", rms_error);
@@ -226,7 +220,7 @@ void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double der
 vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> relative_error;
     int n_atom = engine.pos->n_elem;
-    VecArray pos_array = engine.pos->coords().value;
+    VecArray pos_array = engine.pos->output;
 
     vector<float> input(n_atom*3);
     for(int na=0; na<n_atom; ++na)
@@ -254,7 +248,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> deriv_array;
     for(int na=0; na<n_atom; ++na)
         for(int d=0; d<3; ++d)
-            deriv_array.push_back(engine.pos->deriv_array()(d,na));
+            deriv_array.push_back(engine.pos->sens(d,na));
 
     relative_error.push_back(
             relative_rms_deviation(central_diff_jac, deriv_array));
@@ -426,7 +420,7 @@ try {
             sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get());
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
-                    sys->engine.pos->coords().value(d,na) = x;});
+                    sys->engine.pos->output(d,na) = x;});
 
             printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
@@ -434,11 +428,7 @@ try {
             if(potential_deriv_agreement_arg.getValue()){
                 // if(n_system>1) throw string("Testing code does not support n_system > 1");
                 sys->engine.compute(PotentialAndDerivMode);
-                printf("Initial agreement:\n");
-                for(auto &n: sys->engine.nodes)
-                    printf("%24s %f\n", n.name.c_str(), n.computation->test_value_deriv_agreement());
-                printf("\n");
-
+                printf("Initial potential:\n");
                 auto relative_error = potential_deriv_agreement(sys->engine);
                 printf("overall potential relative error: ");
                 for(auto r: relative_error) printf(" %.5f", r);
@@ -457,7 +447,7 @@ try {
 
             // we must capture the sys pointer by value here so that it is available later
             sys->logger->add_logger<float>("pos", {1, sys->n_atom, 3}, [sys](float* pos_buffer) {
-                    VecArray pos_array = sys->engine.pos->coords().value;
+                    VecArray pos_array = sys->engine.pos->output;
                     for(int na=0; na<sys->n_atom; ++na) 
                     for(int d=0; d<3; ++d) 
                     pos_buffer[na*3 + d] = pos_array(d,na);
@@ -554,18 +544,18 @@ try {
                         sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
-                        if(do_recenter) recenter(sys.engine.pos->coords().value, xy_recenter_only, sys.n_atom);
+                        if(do_recenter) recenter(sys.engine.pos->output, xy_recenter_only, sys.n_atom);
                         sys.engine.compute(PotentialAndDerivMode);
                         sys.logger->collect_samples();
 
                         double Rg = 0.f;
                         float3 com = make_vec3(0.f, 0.f, 0.f);
                         for(int na=0; na<sys.n_atom; ++na)
-                            com += load_vec<3>(sys.engine.pos->coords().value, na);
+                            com += load_vec<3>(sys.engine.pos->output, na);
                         com *= 1.f/sys.n_atom;
 
                         for(int na=0; na<sys.n_atom; ++na) 
-                            Rg += mag2(load_vec<3>(sys.engine.pos->coords().value,na)-com);
+                            Rg += mag2(load_vec<3>(sys.engine.pos->output,na)-com);
                         Rg = sqrtf(Rg/sys.n_atom);
 
                         printf("%*.0f / %*.0f elapsed %2i system %.2f temp %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 

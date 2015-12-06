@@ -54,7 +54,7 @@ int evaluate_deriv(float* deriv, DerivEngine* engine, const float* pos) try {
 
     engine->compute(PotentialAndDerivMode);
 
-    VecArray b = engine->pos->deriv_array();
+    VecArray b = engine->pos->sens;
     for(int na: range(engine->pos->n_atom))
         for(int d: range(3))
             deriv[na*3+d] = b(d,na);

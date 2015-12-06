@@ -19,11 +19,6 @@ using namespace std;
 #include <Eigen/Eigenvalues>
 #endif
 
-struct AffineAlignmentParams {
-    CoordPair atom[3];
-    float     ref_geom[9];
-} ;
-
 namespace {
 float house(
         int n,
@@ -380,113 +375,76 @@ three_atom_alignment(
 }
 
 
-void
-affine_reverse_autodiff(
-        const VecArray  affine,
-        const VecArray  affine_accum,
-        VecArray        pos_deriv,
-        const DerivRecord* tape,
-        const AutoDiffParams* p,
-        int n_tape,
-        int n_res)
-{
-    std::vector<Vec<6>> torque_sens(n_res);
-
-    for(int nt=0; nt<n_tape; ++nt) {
-        auto tape_elem = tape[nt];
-        for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-             torque_sens[tape_elem.atom] += load_vec<6>(affine_accum, tape_elem.loc + rec);
-        }
-    }
-
-    for(int na=0; na<n_res; ++na) {
-        float sens[7]; for(int d=0; d<3; ++d) sens[d] = torque_sens[na][d];
-
-        float q[4]; for(int d=0; d<4; ++d) q[d] = affine(d+3,na);
-
-        // push back torque to affine derivatives (multiply by quaternion)
-        // the torque is in the tangent space of the rotated frame
-        // to act on a tangent in the affine space, I need to push that tangent into the rotated space
-        // this means a right multiply by the quaternion itself
-
-        float *torque = torque_sens[na].v+3;
-        sens[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
-        sens[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
-        sens[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
-        sens[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
-
-        for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
-            for(int sens_dim=0; sens_dim<7; ++sens_dim) {
-                update_vec_scale<3>(pos_deriv, p[na].slots1[nsl]+sens_dim, sens[sens_dim]);
-            }
-        }
-    }
-}
-
-
 struct AffineAlignment : public CoordNode
 {
+    struct Params {
+        CoordPair atom[3];
+        float     ref_geom[9];
+    };
+
     CoordNode& pos;
-    vector<AffineAlignmentParams> params;
-    vector<AutoDiffParams> autodiff_params;
+    vector<Params> params;
+    VecArrayStorage jac;
 
     AffineAlignment(hid_t grp, CoordNode& pos_):
         CoordNode(get_dset_size(2, grp, "atoms")[0], 7),
-        pos(pos_), params(n_elem)
+        pos(pos_), params(n_elem),
+        jac(3*3*7, n_elem)
     {
-        int n_dep = 3;
-        check_size(grp, "atoms",    n_elem, n_dep);
-        check_size(grp, "ref_geom", n_elem, n_dep,3);
+        check_size(grp, "atoms",    n_elem, 3);
+        check_size(grp, "ref_geom", n_elem, 3,3);  // (residue, atom, xyz)
 
         traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params[i].atom[j].index=x;});
-        traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params[i].ref_geom[na*n_dep+d]=x;});
-
-        for(int j=0; j<n_dep; ++j) for(size_t i=0; i<params.size(); ++i) pos.slot_machine.add_request(7, params[i].atom[j]);
-        for(auto &p: params) autodiff_params.push_back(AutoDiffParams({p.atom[0].slot, p.atom[1].slot, p.atom[2].slot}));
+        traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params[i].ref_geom[na*3+d]=x;});
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("affine_alignment"));
 
-        auto rigid_body = coords().value;
-        auto posc = pos.coords();
+        VecArray rigid_body = output;
+        VecArray posc = pos.output;
 
         for(int nr=0; nr<n_elem; ++nr) {
-            Vec<7> rigid_body_coord;
+            auto x1 = load_vec<3>(posc, params[nr].atom[0].index);
+            auto x2 = load_vec<3>(posc, params[nr].atom[1].index);
+            auto x3 = load_vec<3>(posc, params[nr].atom[2].index);
 
-            Coord<3,7> x1(posc, params[nr].atom[0]);
-            Coord<3,7> x2(posc, params[nr].atom[1]);
-            Coord<3,7> x3(posc, params[nr].atom[2]);
-
-            float my_deriv[3*3*7];
-            three_atom_alignment(rigid_body_coord.v, my_deriv, x1.v,x2.v,x3.v, params[nr].ref_geom);
-
-            for(int quat_dim=0; quat_dim<7; ++quat_dim) {
-                for(int atom_dim=0; atom_dim<3; ++atom_dim) {
-                    x1.d[quat_dim][atom_dim] = my_deriv[0*21 + atom_dim*7 + quat_dim];
-                    x2.d[quat_dim][atom_dim] = my_deriv[1*21 + atom_dim*7 + quat_dim];
-                    x3.d[quat_dim][atom_dim] = my_deriv[2*21 + atom_dim*7 + quat_dim];
-                }
-            }
-
-            store_vec(rigid_body, nr, rigid_body_coord);
-            x1.flush();
-            x2.flush();
-            x3.flush();
+            three_atom_alignment(&rigid_body(0,nr), &jac(0,nr), x1.v,x2.v,x3.v, params[nr].ref_geom);
         }
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
-        affine_reverse_autodiff(
-                coords().value, coords().deriv, pos.slot_machine.accum_array(), 
-                slot_machine.deriv_tape.data(), autodiff_params.data(), 
-                slot_machine.deriv_tape.size(), 
-                n_elem);
-    }
+        VecArray pos_sens = pos.sens;
 
-    virtual double test_value_deriv_agreement() {
-        return -1.; // compute_relative_deviation_for_node<3>(*this, pos, extract_pairs(params, potential_term), BODY_VALUE);
+        for(int nr=0; nr<n_elem; ++nr) {
+            float sens7[7]; for(int d=0; d<3; ++d) sens7[d] = sens(d,nr);
+
+            float q[4]; for(int d=0; d<4; ++d) q[d] = output(d+3,nr);
+
+            // push back torque to affine derivatives (multiply by quaternion)
+            // the torque is in the tangent space of the rotated frame
+            // to act on a tangent in the affine space, I need to push that tangent into the rotated space
+            // this means a right multiply by the quaternion itself
+
+            float *torque = &sens(3,nr);
+            sens7[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
+            sens7[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
+            sens7[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
+            sens7[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+
+            // now how do I incorporate the jacobian?
+            for(int na=0; na<3; ++na) {
+                for(int d=0; d<3; ++d) {
+                    float* j = &jac((na*3+d)*7,nr);
+                    float s = 0.f;
+                    for(int sens_dim=0; sens_dim<7; ++sens_dim)
+                        s += sens7[sens_dim]*j[sens_dim];
+                    pos_sens(d,params[nr].atom[na].index) += s;
+                }
+            }
+        }
     }
 };
+
 static RegisterNodeType<AffineAlignment,1>_8("affine_alignment");

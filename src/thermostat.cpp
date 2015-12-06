@@ -1,6 +1,5 @@
 #include "deriv_engine.h"
 #include "thermostat.h"
-#include "md_export.h"
 #include "timing.h"
 #include "random.h"
 #include <string>

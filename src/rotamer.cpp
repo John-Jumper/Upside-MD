@@ -16,10 +16,6 @@ using namespace h5;
 
 constexpr static int UPPER_ROT = 4;  // 1 more than the most possible rotamers (handle 0)
 
-constexpr inline int ru(int i) {
-    return i==1 ? i : round_up(i,4);
-}
-
 struct EdgeLocator {
     protected:
         int data_size;   // 2*max_partners, must be divisible by 8
@@ -172,106 +168,98 @@ struct NodeHolder {
         }
 };
 
+constexpr static int simd_width = 4;
 
-struct SimdVecArrayStorage {
-    // AoSoA structure for holding partially transposed data
-    // makes it very easy to read Vec<n_dim,Float4> data
+// struct SimdVecArrayStorage {
+//     // AoSoA structure for holding partially transposed data
+//     // makes it very easy to read Vec<n_dim,Float4> data
+// 
+//     int elem_width, n_elem;
+//     unique_ptr<float[]> x;
+// 
+//     SimdVecArrayStorage(int elem_width_, int n_elem_min_):
+//         elem_width(elem_width_), n_elem(round_up(n_elem_min_,simd_width)), 
+//         x(new_aligned<float>(n_elem*elem_width, simd_width)) {}
+// 
+//     float& operator()(int i_comp, int i_elem) {
+//         return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
+//     }
+//     const float& operator()(int i_comp, int i_elem) const {
+//         return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
+//     }
+// };
+// 
+// template <int D>
+// inline Vec<D,Float4> load_whole_vec(const SimdVecArrayStorage& a, int idx) {
+//     // index must be divisible by 4
+//     // assert(a.elem_width == D)
+//     Vec<D,Float4> r;
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D + d*4);
+//     return r;
+// }
+// 
+// template <int D>
+// inline void store_whole_vec(SimdVecArrayStorage& a, int idx, const Vec<D,Float4>& r) {
+//     // index must be divisible by 4
+//     // assert(a.elem_width == D)
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) r[d].store(a.x + idx*D + d*4);
+// }
+// 
+// // FIXME remove these inefficient helper functions
+// template <int D>
+// inline Vec<D,float> load_vec(const SimdVecArrayStorage& a, int idx) {
+//     Vec<D,float> r;
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) r[d] = a(d,idx);
+//     return r;
+// }
+// 
+// template <int D>
+// inline void store_vec(SimdVecArrayStorage& a, int idx, const Vec<D,float>& r) {
+//     #pragma unroll
+//     for(int d=0; d<D; ++d) a(d,idx) = r[d];
+// }
+// 
+// static void fill(SimdVecArrayStorage& v, float fill_value) {
+//     std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
+// }
+// 
+// template<int D>
+// void node_update_scatter(float* data, const Int4& offsets, Vec<D,Float4>& v) {
+//     return v.NOT_IMPLEMENTED_IF_D_IS_NOT_3;
+// }
+// 
+// template<>
+// void node_update_scatter<3>(float* data, const Int4& offsets, Vec<3,Float4>& v) {
+//     // note that this function changes the vector v
+//     constexpr int D=3;
+// 
+//     float* p0 = data+offsets.x();
+//     float* p1 = data+offsets.y();
+//     float* p2 = data+offsets.z();
+//     float* p3 = data+offsets.w();
+// 
+//     Float4 e[3]; // scratch space to do the transpose
+// 
+//     #pragma unroll
+//     for(int d=0; d<D; d+=4)
+//         transpose4(
+//                 v[d  ],
+//                 (d+1<D ? v[d+1] : e[0]),
+//                 (d+2<D ? v[d+2] : e[1]),
+//                 (d+3<D ? v[d+3] : e[2]));
+// 
+// 
+//     // this writes must be done sequentially in case some of the 
+//     // offsets are equal (and hence point to the same memory location)
+//     v[0] *= Float4(p0); (v[0] * rcp(v[0].sum_in_all_entries())).store(p0);
+//     v[1] *= Float4(p1); (v[1] * rcp(v[1].sum_in_all_entries())).store(p1);
+//     v[2] *= Float4(p2); (v[2] * rcp(v[2].sum_in_all_entries())).store(p2);
+//     e[2] *= Float4(p3); (e[2] * rcp(e[2].sum_in_all_entries())).store(p3);
+// }
 
-    constexpr static const int simd_width = 4;
-    int elem_width, n_elem;
-    unique_ptr<float[]> x;
-
-    SimdVecArrayStorage(int elem_width_, int n_elem_min_):
-        elem_width(elem_width_), n_elem(round_up(n_elem_min_,simd_width)), 
-        x(new_aligned<float>(n_elem*elem_width, simd_width)) {}
-
-    float& operator()(int i_comp, int i_elem) {
-        return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
-    }
-    const float& operator()(int i_comp, int i_elem) const {
-        return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
-    }
-};
-
-template <int D>
-inline Vec<D,Float4> load_whole_vec(const SimdVecArrayStorage& a, int idx) {
-    // index must be divisible by 4
-    // assert(a.elem_width == D)
-    Vec<D,Float4> r;
-    #pragma unroll
-    for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D + d*4);
-    return r;
-}
-
-template <int D>
-inline void store_whole_vec(SimdVecArrayStorage& a, int idx, const Vec<D,Float4>& r) {
-    // index must be divisible by 4
-    // assert(a.elem_width == D)
-    #pragma unroll
-    for(int d=0; d<D; ++d) r[d].store(a.x + idx*D + d*4);
-}
-
-// FIXME remove these inefficient helper functions
-template <int D>
-inline Vec<D,float> load_vec(const SimdVecArrayStorage& a, int idx) {
-    Vec<D,float> r;
-    #pragma unroll
-    for(int d=0; d<D; ++d) r[d] = a(d,idx);
-    return r;
-}
-
-template <int D>
-inline void store_vec(SimdVecArrayStorage& a, int idx, const Vec<D,float>& r) {
-    #pragma unroll
-    for(int d=0; d<D; ++d) a(d,idx) = r[d];
-}
-
-static void fill(SimdVecArrayStorage& v, float fill_value) {
-    std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
-}
-
-template<int D>
-void node_update_scatter(float* data, const Int4& offsets, Vec<D,Float4>& v) {
-    return v.NOT_IMPLEMENTED_IF_D_IS_NOT_3;
-}
-
-template<>
-void node_update_scatter<3>(float* data, const Int4& offsets, Vec<3,Float4>& v) {
-    // note that this function changes the vector v
-    constexpr int D=3;
-
-    float* p0 = data+offsets.x();
-    float* p1 = data+offsets.y();
-    float* p2 = data+offsets.z();
-    float* p3 = data+offsets.w();
-
-    Float4 e[3]; // scratch space to do the transpose
-
-    #pragma unroll
-    for(int d=0; d<D; d+=4)
-        transpose4(
-                v[d  ],
-                (d+1<D ? v[d+1] : e[0]),
-                (d+2<D ? v[d+2] : e[1]),
-                (d+3<D ? v[d+3] : e[2]));
-
-
-    // this writes must be done sequentially in case some of the 
-    // offsets are equal (and hence point to the same memory location)
-    v[0] *= Float4(p0); (v[0] * rcp(v[0].sum_in_all_entries())).store(p0);
-    v[1] *= Float4(p1); (v[1] * rcp(v[1].sum_in_all_entries())).store(p1);
-    v[2] *= Float4(p2); (v[2] * rcp(v[2].sum_in_all_entries())).store(p2);
-    e[2] *= Float4(p3); (e[2] * rcp(e[2].sum_in_all_entries())).store(p3);
-}
-
-struct EqualUnsigned {
-    bool operator()(unsigned u1, unsigned u2) const {
-        return u1==u2;
-    }
-};
-
-
-// FIXME specialize edge_holder when rot1 is 1
 struct EdgeHolder {
     public:
         int n_rot1, n_rot2;  // should have rot1 < rot2
@@ -280,7 +268,6 @@ struct EdgeHolder {
 
     public:
         struct EdgeLoc {int edge_num, dim, ne;};
-        constexpr static int simd_width=4;
 
         // FIXME include numerical stability data (basically scale each probability in a sane way)
         VecArrayStorage prob;
@@ -300,10 +287,10 @@ struct EdgeHolder {
             prob      (n_rot1*ru(n_rot2), max_n_edge),
             cur_belief(ru(n_rot1)+ru(n_rot2), max_n_edge),
             old_belief(ru(n_rot1)+ru(n_rot2), max_n_edge),
-            marginal(n_rot1*n_rot2, max_n_edge),
+            marginal(n_rot1*n_rot2, max_n_edge+1), // the +1 ensures we can write past the end
 
-            edge_indices1(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width)),
-            edge_indices2(new_aligned<int>(max_n_edge,SimdVecArrayStorage::simd_width)),
+            edge_indices1(new_aligned<int>(max_n_edge,simd_width)),
+            edge_indices2(new_aligned<int>(max_n_edge,simd_width)),
 
             nodes_to_edge(nodes1.n_elem)
         {
@@ -311,8 +298,8 @@ struct EdgeHolder {
             edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
             fill(cur_belief, 0.f);
             fill(old_belief, 0.f);
-            fill_n(edge_indices1, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
-            fill_n(edge_indices2, round_up(max_n_edge,SimdVecArrayStorage::simd_width), 0);
+            fill_n(edge_indices1, round_up(max_n_edge,simd_width), 0);
+            fill_n(edge_indices2, round_up(max_n_edge,simd_width), 0);
             nodes_to_edge.n_edge = max_n_edge;
             reset();
         }
@@ -517,6 +504,41 @@ struct EdgeHolder {
         // }
 };
 
+template<>
+void EdgeHolder::calculate_marginals<3,3>() {
+    // FIXME ASSERT(n_rot1 == N_ROT1)
+    // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
+
+    int n_edge = nodes_to_edge.n_edge;
+    for(int ne=0; ne<n_edge; ++ne) {
+        auto b1 = Float4(nodes1.cur_belief.x + 4*edge_indices1[ne]);
+        auto b2 = Float4(nodes2.cur_belief.x + 4*edge_indices2[ne]);
+
+        // correct for self interaction
+        auto bc1 = b1 * rcp(Float4(1e-10f) + Float4(cur_belief.x + 8*ne));
+        auto bc2 = b2 * rcp(Float4(1e-10f) + Float4(cur_belief.x + 8*ne + 4));
+
+        auto ep_row1 = Float4(prob.x + ne*4*3 + 0);
+        auto ep_row2 = Float4(prob.x + ne*4*3 + 4);
+        auto ep_row3 = Float4(prob.x + ne*4*3 + 8);
+
+        // we want the element-wise product of ep and outer(bc1,bc2)
+        auto marg_row1 = bc1.broadcast<0>() * (ep_row1 * bc2);
+        auto marg_row2 = bc1.broadcast<1>() * (ep_row2 * bc2);
+        auto marg_row3 = bc1.broadcast<2>() * (ep_row3 * bc2);
+        
+        // normalize marginal so that total probability is 1
+        auto marg_scale = rcp((marg_row1 + marg_row2 + marg_row3).sum_in_all_entries());
+        marg_row1 *= marg_scale;
+        marg_row2 *= marg_scale;
+        marg_row3 *= marg_scale;
+
+        marg_row1.store(&marginal(0,ne), Alignment::  aligned);
+        marg_row2.store(&marginal(3,ne), Alignment::unaligned);
+        marg_row3.store(&marginal(6,ne), Alignment::unaligned);
+    }
+}
+
 
 template <typename BT>
 array<int,UPPER_ROT> calculate_n_elem(InteractionGraph<BT> &igraph) {
@@ -544,7 +566,6 @@ template <typename BT>
 struct RotamerSidechain: public PotentialNode {
     vector<CoordNode*> prob_nodes;
     int n_prob_nodes;
-    vector<slot_t> prob_slot;
     InteractionGraph<BT> igraph;
     array<int,UPPER_ROT> n_elem_rot;
 
@@ -597,15 +618,6 @@ struct RotamerSidechain: public PotentialNode {
                         " elements but the " + to_string(i) + "-th (0-indexed) probability node has only " +
                         to_string(prob_nodes[i]->n_elem) + " elements.");
 
-        // the index and the type information is already stored in the igraph
-        for(auto &x: igraph.loc1) {
-            CoordPair p; p.index = x.index;
-            for(auto pn: prob_nodes) {  // must request a slot for each prob_node
-                pn->slot_machine.add_request(1, p);
-                prob_slot.push_back(p.slot);
-            }
-        }
-
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem}, 
                     [&](float* buffer) {
@@ -656,7 +668,7 @@ struct RotamerSidechain: public PotentialNode {
         vector<VecArray> energy_1body;
         energy_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
-            energy_1body.emplace_back(prob_nodes[i]->coords().value);
+            energy_1body.emplace_back(prob_nodes[i]->output);
 
         for(int n: range(igraph.n_elem1)) {
             unsigned id = igraph.id1[n];
@@ -705,6 +717,11 @@ struct RotamerSidechain: public PotentialNode {
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
         for(int ne: range(edges11.nodes_to_edge.n_edge)) en += -logf(edges11.prob(0,ne));
         for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
+
+//        for(int nn: range(nodes1 .n_elem)) printf("en1  %4i % .2f\n",nn, nodes1 .node_free_energy<1>  (nn));
+//        for(int nn: range(nodes3 .n_elem)) printf("en3  %4i % .2f\n",nn, nodes3 .node_free_energy<3>  (nn));
+//        for(int ne: range(edges11.nodes_to_edge.n_edge)) printf("en11 %4i % .2f\n",ne, -logf(edges11.prob(0,ne)));
+//        for(int ne: range(edges33.nodes_to_edge.n_edge)) printf("en33 %4i % .2f\n",ne, edges33.edge_free_energy<3,3>(ne));
         return en;
     }
 
@@ -734,7 +751,7 @@ struct RotamerSidechain: public PotentialNode {
         vector<float> e1(nodes1.n_elem, 0.f);
         vector<float> e3(nodes3.n_elem, 0.f);
 
-        VecArray energy_1body = prob_nodes[prob_node_index]->coords().value;
+        VecArray energy_1body = prob_nodes[prob_node_index]->output;
         for(int n: range(igraph.n_elem1)) {
             unsigned id = igraph.id1[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
@@ -788,10 +805,10 @@ struct RotamerSidechain: public PotentialNode {
             igraph.edge_sensitivity[el.edge_num] = edges33.marginal  (el.dim, el.ne);
         igraph.propagate_derivatives();
 
-        vector<VecArray> deriv_1body;
-        deriv_1body.reserve(n_prob_nodes);
+        vector<VecArray> sens_1body;
+        sens_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
-            deriv_1body.emplace_back(prob_nodes[i]->coords().deriv);
+            sens_1body.emplace_back(prob_nodes[i]->sens);
 
         for(int n: range(igraph.n_elem1)) {
             unsigned id = igraph.id1[n];
@@ -800,7 +817,7 @@ struct RotamerSidechain: public PotentialNode {
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
 
             for(int i: range(n_prob_nodes))
-                deriv_1body[i](0,prob_slot[n*n_prob_nodes+i]) = node_holders_matrix[n_rot]->cur_belief(rot,id);
+                sens_1body[i](0,igraph.loc1[n].index) += node_holders_matrix[n_rot]->cur_belief(rot,id);
         }
     }
 

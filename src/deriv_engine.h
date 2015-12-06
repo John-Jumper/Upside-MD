@@ -4,79 +4,23 @@
 #include "h5_support.h"
 #include <vector>
 #include <string>
-#include "coord.h"
 #include <functional>
+#include "coord.h"
 #include <initializer_list>
 #include <map>
 
-struct DerivRecord {
-    index_t atom;
-    slot_t  loc, output_width;
-    DerivRecord(index_t atom_, slot_t loc_, slot_t output_width_):
-        atom(atom_), loc(loc_), output_width(output_width_) {}
-};
+void
+integration_stage(
+        VecArray mom,
+        VecArray pos,
+        const VecArray deriv,
+        float vel_factor,
+        float pos_factor,
+        float max_force,
+        int n_atom);
 
-
-struct SlotMachine
-{
-    const int width;
-    const int n_elem;
-
-    int n_slot;
-    std::vector<DerivRecord> deriv_tape;
-    std::vector<float>       accum;
-
-    SlotMachine(int width_, int n_elem_): 
-        width(width_), n_elem(n_elem_), n_slot(0) {}
-
-    void add_request(int output_width, CoordPair &pair) { 
-        DerivRecord prev_record = deriv_tape.size() ? deriv_tape.back() : DerivRecord(-1,0,0);
-        deriv_tape.emplace_back(pair.index, prev_record.loc+prev_record.output_width, output_width);
-        pair.slot = deriv_tape.back().loc;
-        for(int i=0; i<output_width*width; ++i) accum.push_back(0.f);
-        n_slot += output_width;
-    }
-
-    VecArray accum_array() { 
-        return VecArray(accum.data(), width); 
-    }
-};
-
-
-struct AutoDiffParams {
-    unsigned char  n_slots1, n_slots2;
-    slot_t slots1[6];      
-    slot_t slots2[5];        
-
-    AutoDiffParams(
-            const std::initializer_list<slot_t> &slots1_,
-            const std::initializer_list<slot_t> &slots2_)
-    {
-        unsigned loc1=0;
-        for(auto i: slots1_) if(i!=(slot_t)(-1)) slots1[loc1++] = i;
-        n_slots1 = loc1;
-        while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
-
-        unsigned loc2=0;
-        for(auto i: slots2_) if(i!=(slot_t)(-1)) slots2[loc2++] = i;
-        n_slots2 = loc2;
-        while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
-    }
-
-    explicit AutoDiffParams(const std::initializer_list<slot_t> &slots1_)
-    { 
-        unsigned loc1=0;
-        for(auto i: slots1_) if(i!=(slot_t)(-1)) slots1[loc1++] = i;
-        n_slots1 = loc1;
-        while(loc1<sizeof(slots1)/sizeof(slots1[0])) slots1[loc1++] = -1;
-
-        unsigned loc2=0;
-        // for(auto i: slots2_) if(i!=(slot_t)(-1)) slots1[loc2++] = i;
-        n_slots2 = loc2;
-        while(loc2<sizeof(slots2)/sizeof(slots2[0])) slots2[loc2++] = -1;
-    }
-
-} ;  // struct for implementing reverse autodifferentiation
+void
+recenter(VecArray pos, bool xy_recenter_only, int n_atom);
 
 enum ComputeMode { DerivMode = 0, PotentialAndDerivMode = 1 };
 
@@ -88,7 +32,6 @@ struct DerivComputation
     virtual ~DerivComputation() {}
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
-    virtual double test_value_deriv_agreement() {return -1.;}
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return std::vector<float>();}
@@ -101,15 +44,14 @@ struct CoordNode : public DerivComputation
 {
     int n_elem;
     int elem_width;
-    std::vector<float> output;
-    SlotMachine slot_machine;
+    VecArrayStorage output;
+    VecArrayStorage sens;
+
     CoordNode(int n_elem_, int elem_width_):
-        DerivComputation(false), n_elem(n_elem_), elem_width(elem_width_), 
-        output(n_elem*elem_width), 
-        slot_machine(elem_width, n_elem) {}
-    virtual CoordArray coords() {
-        return CoordArray(VecArray(output.data(), elem_width), slot_machine.accum_array());
-    }
+        DerivComputation(false),
+        n_elem(n_elem_), elem_width(elem_width_), 
+        output(elem_width, n_elem),
+        sens  (elem_width, n_elem) {}
 };
 
 
@@ -131,22 +73,14 @@ struct HBondCounter : public PotentialNode {
 struct Pos : public CoordNode
 {
     int n_atom;
-    std::vector<float> deriv;
 
     Pos(int n_atom_):
         CoordNode(n_atom_, 3), 
-        n_atom(n_atom_), deriv(3*n_atom, 0.f)
+        n_atom(n_atom_)
     {}
 
     virtual void compute_value(ComputeMode mode) {};
-    virtual void propagate_deriv();
-    virtual double test_value_deriv_agreement() {return 0.;};
-    CoordArray coords() {
-        return CoordArray(VecArray(output.data(), 3), slot_machine.accum_array());
-    }
-    VecArray deriv_array() {
-        return VecArray(deriv.data(), 3);
-    }
+    virtual void propagate_deriv() {};
 };
 
 
@@ -173,7 +107,8 @@ struct DerivEngine
             parents(std::move(other.parents)),
             children(std::move(other.children)),
             germ_exec_level(other.germ_exec_level),
-            deriv_exec_level(other.deriv_exec_level) {}
+            deriv_exec_level(other.deriv_exec_level)
+        {}
     };
 
     std::vector<Node> nodes;  // nodes[0] is the pos node
@@ -259,127 +194,11 @@ struct RegisterNodeType<NodeClass,2> {
 };
 
 
-template <int my_width, int width1, int width2>
-void reverse_autodiff(
-        const VecArray accum,
-        VecArray deriv1,
-        VecArray deriv2,
-        const DerivRecord* tape,
-        const AutoDiffParams* p,
-        int n_tape,
-        int n_atom)
-{
-    std::vector<Vec<my_width>> sens(n_atom);
-    for(int nt=0; nt<n_tape; ++nt) {
-        auto tape_elem = tape[nt];
-        for(int rec=0; rec<int(tape_elem.output_width); ++rec) {
-            sens[tape_elem.atom] += load_vec<my_width>(accum, tape_elem.loc + rec);
-        }
-    }
-
-    for(int na=0; na<n_atom; ++na) {
-        if(width1) {
-            for(int nsl=0; nsl<p[na].n_slots1; ++nsl) {
-                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    update_vec_scale<width1>(deriv1, p[na].slots1[nsl]+sens_dim, sens[na][sens_dim]);
-                }
-            }
-        }
-
-        if(width2) {
-            for(int nsl=0; nsl<p[na].n_slots2; ++nsl) {
-                for(int sens_dim=0; sens_dim<my_width; ++sens_dim) {
-                    update_vec_scale<width2>(deriv2, p[na].slots2[nsl]+sens_dim, sens[na][sens_dim]);
-                }
-            }
-        }
-    }
-}
-
-
 enum ValueType {CARTESIAN_VALUE=0, ANGULAR_VALUE=1, BODY_VALUE=2};
 
 std::vector<float> central_difference_deriviative(
         const std::function<void()> &compute_value, std::vector<float> &input, std::vector<float> &output,
         float eps=1e-2f, ValueType value_type = CARTESIAN_VALUE);
-
-
-template <int NDIM_INPUT>
-std::vector<float> extract_jacobian_matrix( const std::vector<std::vector<CoordPair>>& coord_pairs,
-        int elem_width_output, const std::vector<AutoDiffParams>* ad_params, 
-        CoordNode &input_node, int n_arg)
-{
-    using namespace std;
-    // First validate coord_pairs consistency with ad_params
-    if(ad_params) {
-        vector<slot_t> slots;
-        if(ad_params->size() != coord_pairs.size()) throw string("internal error");
-        for(unsigned no=0; no<ad_params->size(); ++no) {
-            slots.resize(0);
-            auto p = (*ad_params)[no];
-            if     (n_arg==0) slots.insert(begin(slots), p.slots1, p.slots1+p.n_slots1);
-            else if(n_arg==1) slots.insert(begin(slots), p.slots2, p.slots2+p.n_slots2);
-            else throw string("internal error");
-
-            if(slots.size() != coord_pairs[no].size()) 
-                throw string("size mismatch (") + to_string(slots.size()) + " != " + to_string(coord_pairs[no].size()) + ")";
-            for(unsigned i=0; i<slots.size(); ++i) if(slots[i] != coord_pairs[no][i].slot) throw string("inconsistent");
-        }
-    }
-
-    int output_size = coord_pairs.size()*elem_width_output;
-    int input_size  = input_node.n_elem*NDIM_INPUT;
-    // special case handling for rigid bodies, since torques have 3 elements but quats have 4
-    if(input_node.elem_width != NDIM_INPUT && input_node.elem_width!=7) 
-        throw string("dimension mismatch ") + to_string(input_node.elem_width) + " " + to_string(NDIM_INPUT);
-
-    vector<float> jacobian(output_size * input_size,0.f);
-    VecArray accum_array = input_node.coords().deriv;
-
-    for(unsigned no=0; no<coord_pairs.size(); ++no) {
-        for(auto cp: coord_pairs[no]) {
-            for(int eo=0; eo<elem_width_output; ++eo) {
-                auto d = load_vec<NDIM_INPUT>(accum_array, cp.slot+eo);
-                for(int i=0; i<NDIM_INPUT; ++i) {
-                    jacobian[eo*coord_pairs.size()*input_size + no*input_size + i*(input_size/NDIM_INPUT) + cp.index] += d[i];
-                }
-            }
-        }
-    }
-
-    return jacobian;
-}
-
-template <typename T>
-void dump_matrix(int nrow, int ncol, const char* name, T matrix) {
-    if(int(matrix.size()) != nrow*ncol) throw std::string("impossible matrix sizes");
-    FILE* f = fopen(name, "w");
-    for(int i=0; i<nrow; ++i) {
-	for(int j=0; j<ncol; ++j)
-	    fprintf(f, "%f ", matrix[i*ncol+j]);
-	fprintf(f, "\n");
-    }
-    fclose(f);
-}
-
-#if !defined(IDENT_NAME)
-#define IDENT_NAME atom
-#endif
-template <typename T>
-std::vector<std::vector<CoordPair>> extract_pairs(const std::vector<T>& params, bool is_potential) {
-    std::vector<std::vector<CoordPair>> coord_pairs;
-    int n_slot = sizeof(params[0].IDENT_NAME)/sizeof(params[0].IDENT_NAME[0]);
-    for(int ne=0; ne<int(params.size()); ++ne) {
-        if(ne==0 || !is_potential) coord_pairs.emplace_back();
-        for(int nsl=0; nsl<n_slot; ++nsl) {
-            CoordPair s = params[ne].IDENT_NAME[nsl];
-            if(s.slot != slot_t(-1)) coord_pairs.back().push_back(s);
-        }
-    }
-    return coord_pairs;
-}
-
-
 
 
 static double relative_rms_deviation(

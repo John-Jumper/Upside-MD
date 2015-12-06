@@ -174,13 +174,14 @@ struct PivotSampler {
             const float temperature,
             DerivEngine& engine) 
     {
-        std::vector<float> pos_copy = engine.pos->output;
+        auto &pos = engine.pos->output;
+        VecArrayStorage pos_copy(pos);
         float delta_lprob;
 
         engine.compute(PotentialAndDerivMode);
         float old_potential = engine.potential;
 
-        execute_random_pivot(&delta_lprob, seed, round, engine.pos->coords().value);
+        execute_random_pivot(&delta_lprob, seed, round, pos);
 
         engine.compute(PotentialAndDerivMode);
         float new_potential = engine.potential;
@@ -193,10 +194,7 @@ struct PivotSampler {
             pivot_stats.n_success++;
         } else {
             // If we reject the pivot, we must reverse it
-            std::copy(
-                    begin(pos_copy),
-                    end  (pos_copy),
-                    begin(engine.pos->output));
+            copy(pos_copy, pos);
         }
     }
 

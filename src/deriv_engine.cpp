@@ -1,5 +1,4 @@
 #include "deriv_engine.h"
-#include "md_export.h"
 #include "coord.h"
 #include "timing.h"
 #include <map>
@@ -9,6 +8,45 @@
 using namespace h5;
 
 using namespace std;
+
+void
+integration_stage(
+        VecArray mom,
+        VecArray pos,
+        const VecArray deriv,
+        float vel_factor,
+        float pos_factor,
+        float max_force,
+        int n_atom)
+{
+    for(int na=0; na<n_atom; ++na) {
+        // assumes unit mass for all particles
+
+        auto d = load_vec<3>(deriv, na);
+        if(max_force) {
+            float f_mag = mag(d)+1e-6f;  // ensure no NaN when mag(deriv)==0.
+            float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
+            d *= scale_factor;
+        }
+
+        auto p = load_vec<3>(mom, na) - vel_factor*d;
+        store_vec (mom, na, p);
+        update_vec(pos, na, pos_factor*p);
+    }
+}
+
+void
+recenter(VecArray pos, bool xy_recenter_only, int n_atom)
+{
+    float3 center = make_vec3(0.f, 0.f, 0.f);
+    for(int na=0; na<n_atom; ++na) center += load_vec<3>(pos,na);
+    center /= float(n_atom);
+
+    if(xy_recenter_only) center.z() = 0.f;
+
+    for(int na=0; na<n_atom; ++na)
+        update_vec(pos, na, -center);
+}
 
 void add_node_creation_function(std::string name_prefix, NodeCreationFunction fcn)
 {
@@ -54,13 +92,6 @@ void check_arguments_length(const ArgList& arguments, int n_expected) {
             " arguments but got " + std::to_string(arguments.size());
 }
 
-void Pos::propagate_deriv() {
-    Timer timer(string("pos_deriv"));
-    deriv_accumulation(deriv_array(),
-            slot_machine.accum_array(), slot_machine.deriv_tape.data(), 
-            slot_machine.deriv_tape.size(), n_atom);
-}
-
 void DerivEngine::add_node(
         const string& name, 
         unique_ptr<DerivComputation> fcn, 
@@ -92,14 +123,7 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
 }
 
 void DerivEngine::compute(ComputeMode mode) {
-    // FIXME add CUDA streams support
-    // for each BFS depth, each computation gets the stream ID of its parent
-    // if the parents have multiple streams or another (sibling) computation has already taken the stream id,
-    //   the computation gets a new stream ID and a synchronization wait event
-    // if the node has multiple children, it must record a compute_value event for synchronization of the children
-    // the compute_deriv must run in the same stream as compute_value
-    // if a node has multiple parents, it must record an event for compute_deriv
-    // pos_node is special since its compute_value is empty
+    // FIXME depth-first traversal would be simpler and more cache-friendly
 
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
@@ -122,6 +146,11 @@ void DerivEngine::compute(ComputeMode mode) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
                         potential += pot_node->potential;
                     }
+                    if(!n.computation->potential_term) {
+                        // ensure zero sensitivity for later derivative writing
+                        auto coord_node = static_cast<CoordNode*>(n.computation.get());
+                        fill(coord_node->sens, 0.f);
+                    }
                 }
             }
 
@@ -139,6 +168,17 @@ void DerivEngine::compute(ComputeMode mode) {
         }
         if(!not_finished) break;
     }
+
+    // for(auto& n: nodes) {
+    //     if(n.computation->potential_term) continue;
+    //     printf("\n%s sens\n", n.name.c_str());
+    //     auto c = static_cast<CoordNode*>(n.computation.get());
+    //     for(int ne: range(c->n_elem)) {
+    //         printf("%3i ", ne);
+    //         for(int d: range(c->elem_width)) printf(" % 7.2f", c->sens(d,ne));
+    //         printf("\n");
+    //     }
+    // }
 }
 
 
@@ -157,8 +197,8 @@ void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, Int
         Timer timer(string("integration"));
         integration_stage( 
                 mom,
-                pos->coords().value,
-                pos->deriv_array(),
+                pos->output,
+                pos->sens,
                 dt*mom_update[stage], dt*pos_update[stage], max_force, 
                 pos->n_atom);
     }

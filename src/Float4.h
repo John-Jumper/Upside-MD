@@ -12,6 +12,8 @@ enum class Alignment {unaligned, aligned};
 struct Int4;
 struct Float4;
 
+static void print_vector(const char* nm, const Float4& val);
+
 alignas(16) static uint8_t left_pack_control_vector[16*16] = {
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
@@ -129,6 +131,7 @@ struct alignas(16) Float4
         {};
 
     public:
+        typedef Float4 scalar_t; // functions that return scalars (like dot) give constant Float4's
         Float4(): vec(_mm_setzero_ps()) {}
 
         // constructor from aligned storage
@@ -207,6 +210,16 @@ struct alignas(16) Float4
             else 
                 _mm_storeu_ps(vec_,vec);
         }
+        Float4 update(float* vec_, Alignment align=Alignment::aligned) const { 
+            Float4 new_val = *this + Float4(vec_,align);
+            new_val.store(vec_,align);
+            return new_val;
+        }
+        Float4 scale_update(Float4& scale_val, float* vec_, Alignment align=Alignment::aligned) const { 
+            Float4 new_val = fmadd(scale_val,*this, Float4(vec_,align));
+            new_val.store(vec_,align);
+            return new_val;
+        }
 
         Float4 sum_in_all_entries() const {
             // the sum of the vector is now in all entries
@@ -228,12 +241,15 @@ struct alignas(16) Float4
             return Int4(_mm_cvttps_epi32(vec));
         }
 
-        template <int m3, int m2, int m1, int m0>
-        Float4 zero_entries() const
-        {
-            // requires SSE 4.1
-            constexpr int mask = (m3<<0) + (m2<<1) + (m1<<2) + (m0<<3);
-            return _mm_insert_ps(vec,vec, mask);
+        template <int m0, int m1, int m2, int m3>
+        Float4 blend(const Float4& o) const {
+            constexpr int mask = (m0<<0) + (m1<<1) + (m2<<2) + (m3<<3);
+            return _mm_blend_ps(vec, o.vec, mask);
+        }
+
+        template <int m0, int m1, int m2, int m3>
+        Float4 zero_entries() const {
+            return this->blend<m0,m1,m2,m3>(Float4());
         }
 
         float x() const { float val; _MM_EXTRACT_FLOAT(val, vec, 0); return val;}
@@ -243,7 +259,7 @@ struct alignas(16) Float4
 
         friend Int4;
         friend void transpose4(Float4&, Float4&, Float4&, Float4&);
-        template <int i3, int i2, int i1, int i0> friend Float4 shuffle_ps(Float4 m1, Float4 m2);
+        template <int i3, int i2, int i1, int i0> friend Float4 shuffle(Float4 m1, Float4 m2);
 
         Int4 cast_int() const {
             // bit-equivalent cast to int
@@ -251,6 +267,7 @@ struct alignas(16) Float4
         } 
 
         friend inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b);
+        friend inline Float4 fmsub(const Float4& a1, const Float4& a2, const Float4& b);
         friend inline Float4 min(const Float4& a, const Float4& b);
         friend inline Float4 max(const Float4& a, const Float4& b);
         friend inline Float4 horizontal_add(const Float4& x1, const Float4& x2);
@@ -333,21 +350,20 @@ inline Float4 rcp(const Float4& x) {
     return r*r;
 }
 
-template <int i3, int i2, int i1, int i0>
-Float4 shuffle_ps(Float4 m1, Float4 m2)
+// this function uses a left-to-right convention, unlike the _MM_SHUFFLE macro
+template <int i0, int i1, int i2, int i3>
+Float4 shuffle(Float4 m1, Float4 m2)
 {
     return Float4(_mm_shuffle_ps(m1.vec,m2.vec, _MM_SHUFFLE(i3,i2,i1,i0)));
 }
 
-
-// shuffle using a left-to-right convention for value ordering instead of 
-// the right-to-left ordering of the SSE API
+// this function uses a left-to-right convention, unlike the _MM_SHUFFLE macro
+// convenience function where shuffle(x) == shuffle(x,x)
 template <int i0, int i1, int i2, int i3>
-inline Float4 sane_shuffle_ps(Float4 m1, Float4 m2)
+Float4 shuffle(Float4 m)
 {
-    return shuffle_ps<3-i1, 3-i0, 3-i3, 3-i2>(m2,m1);
+    return shuffle<i0,i1,i2,i3>(m,m);
 }
-
 
 inline void transpose4(Float4 &x, Float4 &y, Float4 &z, Float4 &w)
 {
@@ -359,6 +375,14 @@ inline Float4 fmadd(const Float4& a1, const Float4& a2, const Float4& b) {
     return Float4(_mm_fmadd_ps(a1.vec,a2.vec, b.vec));
 #else
     return Float4(_mm_add_ps(_mm_mul_ps(a1.vec,a2.vec), b.vec));
+#endif
+}
+
+inline Float4 fmsub(const Float4& a1, const Float4& a2, const Float4& b) {
+#ifdef __AVX2__
+    return Float4(_mm_fmsub_ps(a1.vec,a2.vec, b.vec));
+#else
+    return Float4(_mm_sub_ps(_mm_mul_ps(a1.vec,a2.vec), b.vec));
 #endif
 }
 
@@ -410,6 +434,39 @@ inline Float4 right_multiply_3x3(const Float4 x, const Float4& row0, const Float
 
 inline Float4 horizontal_add(const Float4& x1, const Float4& x2) {
     return Float4(_mm_hadd_ps(x1.vec, x2.vec));
+}
+
+inline Float4 dot(const Float4& x, const Float4& y) {
+    return x.dp<1,1,1,1, 1,1,1,1>(y);
+}
+
+inline Float4 dot3(const Float4& x, const Float4& y) {
+    return x.dp<1,1,1,0, 1,1,1,0>(y);
+}
+
+inline Float4 mag2(const Float4& x) {
+    return dot(x,x);
+}
+
+inline Float4 inv_mag (const Float4& x) {
+    return rsqrt(dot(x,x));
+}
+
+inline Float4 inv_mag2(const Float4& x) {
+    return rcp(dot(x,x));
+}
+
+inline Float4 cross(const Float4& x, const Float4& y) {
+    return fmsub(shuffle<1,2,0,3>(x),  shuffle<2,0,1,3>(y),
+                 shuffle<2,0,1,3>(x) * shuffle<1,2,0,3>(y));
+}
+
+inline float extract_float(const Float4& x) {
+    return x.x();
+}
+
+inline float extract_float(float x) {
+    return x;
 }
 
 #endif

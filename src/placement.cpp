@@ -11,20 +11,21 @@ using namespace h5;
 
 enum class PlaceType {SCALAR, VECTOR, POINT};
 
-struct PlaceParam {
-    int layer_idx;
-    CoordPair affine_residue;
-    CoordPair rama_residue;
-};
 
 template <int n_pos_dim> 
 struct RigidPlacementNode: public CoordNode {
+    struct Params {
+        int layer_idx;
+        CoordPair affine_residue;
+        CoordPair rama_residue;
+    };
+
     vector<PlaceType> signature;
 
     CoordNode& rama;
     CoordNode& alignment;
 
-    vector<PlaceParam> params;
+    vector<Params> params;
     LayeredPeriodicSpline2D<n_pos_dim> spline;
     VecArrayStorage rama_deriv;
 
@@ -77,14 +78,11 @@ struct RigidPlacementNode: public CoordNode {
         if(logging(LOG_EXTENSIVE)) {
             // FIXME prepend the logging with the class name for disambiguation
             default_logger->add_logger<float>("placement_pos", {n_elem, n_pos_dim}, [&](float* buffer) {
-                    auto pos = coords().value;
+                    VecArray pos = output;
                     for(int ne: range(n_elem))
                         for(int d: range(n_pos_dim))
                             buffer[ne*n_pos_dim + d] = pos(d,ne);});
         }
-
-        for(auto &p: params) rama     .slot_machine.add_request(1, p.rama_residue);
-        for(auto &p: params) alignment.slot_machine.add_request(1, p.affine_residue);
     }
 
 
@@ -95,9 +93,9 @@ struct RigidPlacementNode: public CoordNode {
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
         const float shift = M_PI_F;
 
-        VecArray affine_pos = alignment.coords().value;
-        VecArray rama_pos   = rama.coords().value;
-        VecArray pos        = coords().value;
+        VecArray affine_pos = alignment.output;
+        VecArray rama_pos   = rama.output;
+        VecArray pos        = output;
 
         for(int ne: range(n_elem)) {
             auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
@@ -150,29 +148,19 @@ struct RigidPlacementNode: public CoordNode {
     virtual void propagate_deriv() {
         Timer timer(string("placement_deriv"));
 
-        VecArray pos   = coords().value;
-        VecArray accum = slot_machine.accum_array();
-        VecArray r_accum = rama.slot_machine.accum_array();
-        VecArray a_accum = alignment.slot_machine.accum_array();
-        VecArray affine_pos = alignment.coords().value;
-
-        vector<Vec<n_pos_dim>> sens(n_elem);
-        for(auto &s: sens) s = make_zero<n_pos_dim>();
-
-        for(auto tape_elem: slot_machine.deriv_tape) {
-            for(int rec=0; rec<int(tape_elem.output_width); ++rec)
-                sens[tape_elem.atom] += load_vec<n_pos_dim>(accum, tape_elem.loc + rec);
-        }
+        VecArray r_sens = rama.sens;
+        VecArray a_sens = alignment.sens;
+        VecArray affine_pos = alignment.output;
 
         for(int ne: range(n_elem)) {
-            auto d = sens[ne];
+            auto d = load_vec<n_pos_dim>(sens, ne);
 
             auto my_rama_deriv = load_vec<2*n_pos_dim>(rama_deriv, ne);
             auto rd = make_vec2(
                         dot(d, extract<        0,  n_pos_dim>(my_rama_deriv)),
                         dot(d, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
 
-            store_vec(r_accum, params[ne].rama_residue.slot, rd);
+            update_vec(r_sens, params[ne].rama_residue.index, rd);
 
             // only difference between points and vectors is whether to subtract off the translation
             auto z = make_zero<6>();
@@ -188,7 +176,7 @@ struct RigidPlacementNode: public CoordNode {
                     case PlaceType::POINT:
                         // see note in compute_value for why this if-statement is unnecessary but harmless
                         if(n_pos_dim >= 3) { 
-                            auto x  = make_vec3(pos(j+0,ne), pos(j+1,ne), pos(j+2,ne));
+                            auto x  = make_vec3(output(j+0,ne), output(j+1,ne), output(j+2,ne));
                             auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
 
                             // torque relative to the residue center
@@ -202,15 +190,10 @@ struct RigidPlacementNode: public CoordNode {
                         break;
                 }
             }
-            store_vec(a_accum, params[ne].affine_residue.slot, z);
+            update_vec(a_sens, params[ne].affine_residue.index, z);
         }
           
     }
-
-   virtual double test_value_deriv_agreement() {
-       // FIXME I can't test agreement since I don't store derivatives in the standard place
-       return -1;
-   }
 };
 
 static RegisterNodeType<RigidPlacementNode<1>,2> placement_scalar_node("placement_scalar");

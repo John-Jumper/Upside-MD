@@ -139,10 +139,7 @@ def write_backbone_pair(fasta):
     ref_pos[fasta=='GLY',3] = np.nan
 
     ref_pos -= ref_pos[:,:3].mean(axis=1)[:,None]
-    #print np.sqrt(np.sum(ref_pos[0]**2,axis=-1))
 
-    grp._v_attrs.energy_scale = 4.
-    grp._v_attrs.dist_cutoff = 6.
     create_array(grp, 'id', obj=np.arange(n_res))
     create_array(grp, 'ref_pos', obj=ref_pos)
     create_array(grp, 'n_atom',  obj=np.isfinite(grp.ref_pos[:].sum(axis=-1)).sum(axis=-1))

@@ -80,6 +80,7 @@ quat_to_rot(
 }
 }
 
+/*
 //! Coordinate representing a rigid body rotation and its derivative/torque
 template <int NDIM_OUTPUT=1>
 struct AffineCoord
@@ -217,6 +218,7 @@ struct AffineCoord
                 deriv_arr(nd,i_slot+ndo) = d[ndo][nd];
     }
 };
+*/
 
 namespace { 
 

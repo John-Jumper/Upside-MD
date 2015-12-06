@@ -9,108 +9,103 @@
 #include <algorithm>
 #include "Float4.h"
 
+static constexpr int default_alignment=4; // suitable for SSE
+
+// the function below is used to allow a version of max to be called in a constexpr context
+constexpr inline int maxint(int i, int j) {
+    return (i>j) ? i : j;
+}
+
+constexpr inline int round_up(int i, int alignment) {
+    return ((i+alignment-1)/alignment)*alignment; // probably alignment is a power of 2
+}
+
+constexpr inline int ru(int i) {
+    return i==1 ? i : round_up(i,4);
+}
+
+
+template <typename T>
+static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_elems=default_alignment) {
+    // round up allocation to ensure that you can also read to the end without
+    //   overstepping the array, if needed
+    T* ptr = new T[round_up(n_elem, alignment_elems)];
+    // printf("aligning %i elements at %p\n", round_up(n_elem, alignment_elems), (void*)ptr);
+    // if((unsigned long)(ptr)%(unsigned long)(alignment_elems*sizeof(T))) throw "bad alignment on string";
+    return std::unique_ptr<T[]>(ptr);
+}
+
 struct VecArray {
     float* x;
-    int elem_width;
+    int row_width;
 
-    VecArray(): x(nullptr), elem_width(0) {}
+    VecArray(): x(nullptr), row_width(0) {}
 
-    VecArray(float* x_, int elem_width_):
-        x(x_), elem_width(elem_width_) {}
+    VecArray(float* x_, int row_width_):
+        x(x_), row_width(row_width_) {}
 
     float& operator()(int i_comp, int i_elem) {
-        return x[i_comp+ i_elem*elem_width];
+        return x[i_comp+ i_elem*row_width];
     }
 
     const float& operator()(int i_comp, int i_elem) const {
-        return x[i_comp + i_elem*elem_width];
+        return x[i_comp + i_elem*row_width];
     }
 };
 
 
 struct VecArrayStorage {
     int n_elem;
-    int elem_width;
+    int row_width;
     std::unique_ptr<float[]> x;
 
     VecArrayStorage(int elem_width_, int n_elem_):
-        n_elem(n_elem_), elem_width(elem_width_),
-        x(new float[n_elem*elem_width]) {}
+        n_elem(n_elem_), row_width(ru(elem_width_)),
+        x(new_aligned<float>(n_elem*row_width)) {
+            std::fill_n(x.get(), n_elem*row_width, 0.f);
+        }
+
+    VecArrayStorage(const VecArrayStorage& o):
+        n_elem(o.n_elem), row_width(o.row_width),
+        x(new_aligned<float>(n_elem*row_width))
+    {
+        std::copy_n(o.x.get(), n_elem*row_width, x.get());
+    }
 
     VecArrayStorage(): VecArrayStorage(1,1) {}
 
     float& operator()(int i_comp, int i_elem) {
-        return x[i_elem*elem_width + i_comp];
+        return x[i_elem*row_width + i_comp];
     }
 
     const float& operator()(int i_comp, int i_elem) const {
-        return x[i_elem*elem_width + i_comp];
+        return x[i_elem*row_width + i_comp];
     }
 
-    operator VecArray() {return VecArray(x.get(), elem_width);}
+    operator VecArray() {return VecArray(x.get(), row_width);}
 
-    void reset(int n_dim_, int n_elem_) {
-        elem_width = n_dim_;
+    void reset(int elem_width_, int n_elem_) {
+        row_width = ru(elem_width_);
         n_elem = n_elem_;
-        x.reset(new float[n_elem*elem_width]);
+        x.reset(new float[n_elem*row_width]);
     }
 };
 
 
+static void copy(VecArrayStorage& v_src, VecArrayStorage& v_dst) {
+    assert(v_src.n_elem    == v_dst.n_elem);
+    assert(v_src.row_width == v_dst.row_width);
+    std::copy_n(v_src.x.get(), v_src.n_elem*v_src.row_width, v_dst.x.get()); 
+}
+
 inline void swap(VecArrayStorage& a, VecArrayStorage& b) {
     assert(a.n_elem==b.n_elem);
-    assert(a.elem_width==b.elem_width);
+    assert(a.row_width==b.row_width);
     a.x.swap(b.x);
 }
 
-
-// inline void swap(VecArray &a, VecArray &b) {
-//     { auto tmp=a.v; a.v=b.v; b.v=tmp; }
-//     { auto tmp=a.component_offset; a.component_offset=b.component_offset; b.component_offset=tmp; }
-// }
-
-
-// struct VecArrayStorage {
-//     int n_dim;
-//     int n_elem;
-// 
-//     int component_offset;
-//     std::unique_ptr<float[], std::default_delete<float[]>> storage;
-// 
-//     VecArrayStorage(): VecArrayStorage(0,0) {}
-// 
-//     VecArrayStorage(int n_dim_, int n_elem_):
-//         n_dim(n_dim_), n_elem(n_elem_),
-//         component_offset(n_elem),
-//         storage(new float[n_dim*component_offset])
-//     {}
-// 
-//     operator VecArray() {return VecArray(storage.get(), component_offset);}
-// 
-//     void reset(int n_dim_, int n_elem_) {
-//         n_dim = n_dim_;
-//         n_elem = n_elem_;
-//         component_offset = n_elem;
-//         storage.reset(new float[n_dim*component_offset]);
-//     }
-// 
-//     float& operator()(int i_comp, int i_elem) {
-//         return storage.get()[i_comp*component_offset + i_elem];
-//     }
-//     const float& operator()(int i_comp, int i_elem) const {
-//         return storage.get()[i_comp*component_offset + i_elem];
-//     }
-// };
-
-
-static void copy(VecArrayStorage& v_src, VecArrayStorage& v_dst) {
-    assert(v_src.n_elem==v_dst.n_elem);
-    assert(v_src.elem_width==v_dst.elem_width);
-    std::copy_n(v_src.x.get(), v_src.n_elem*v_src.elem_width, v_dst.x.get()); 
-}
-
 static void fill(VecArrayStorage& v, float fill_value) {
-    std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
+    std::fill_n(v.x.get(), v.n_elem*v.row_width, fill_value);
 }
 
 static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
@@ -152,20 +147,21 @@ template <int ndim, typename ScalarT = float>
 struct
 // alignas(std::alignment_of<ScalarT>::value)  // GCC 4.8.1 does not like this line
  Vec {
-    ScalarT v[ndim>=1 ? ndim : 1];  // avoid 0-size arrays since this is not allowed
+     typedef ScalarT scalar_t;
+     ScalarT v[ndim>=1 ? ndim : 1];  // avoid 0-size arrays since this is not allowed
 
-    ScalarT&       x()       {return           v[0];}
-    const ScalarT& x() const {return           v[0];}
-    ScalarT&       y()       {return ndim>=1 ? v[1] : v[0];}
-    const ScalarT& y() const {return ndim>=1 ? v[1] : v[0];}
-    ScalarT&       z()       {return ndim>=2 ? v[2] : v[0];}
-    const ScalarT& z() const {return ndim>=2 ? v[2] : v[0];}
-    ScalarT&       w()       {return ndim>=3 ? v[3] : v[0];}
-    const ScalarT& w() const {return ndim>=3 ? v[3] : v[0];}
+     ScalarT&       x()       {return           v[0];}
+     const ScalarT& x() const {return           v[0];}
+     ScalarT&       y()       {return ndim>=1 ? v[1] : v[0];}
+     const ScalarT& y() const {return ndim>=1 ? v[1] : v[0];}
+     ScalarT&       z()       {return ndim>=2 ? v[2] : v[0];}
+     const ScalarT& z() const {return ndim>=2 ? v[2] : v[0];}
+     ScalarT&       w()       {return ndim>=3 ? v[3] : v[0];}
+     const ScalarT& w() const {return ndim>=3 ? v[3] : v[0];}
 
-    ScalarT& operator[](int i) {return v[i];}
-    const ScalarT& operator[](int i) const {return v[i];}
-};
+     ScalarT& operator[](int i) {return v[i];}
+     const ScalarT& operator[](int i) const {return v[i];}
+ };
 
 typedef Vec<2,float> float2;
 typedef Vec<3,float> float3;
@@ -705,36 +701,38 @@ inline Vec<3,S> rama_box(const Vec<2,S>& rama, const Vec<2,S>& center, const Vec
 //! The angle is always in the range [-pi,pi].  If the arguments are NaN or Inf, the result is undefined.
 //! The arguments d1,d2,d3,d4 are output values, and d1 corresponds to the derivative of the dihedral angle
 //! with respect to r1.
-template <typename S>
-static float dihedral_germ(
-        Vec<3,S>  r1, Vec<3,S>  r2, Vec<3,S>  r3, Vec<3,S>  r4,
-        Vec<3,S> &d1, Vec<3,S> &d2, Vec<3,S> &d3, Vec<3,S> &d4)
+template <typename V>  // parameterize on vector type (probably Vec<3> or Float4)
+static typename V::scalar_t dihedral_germ(
+        V  r1, V  r2, V  r3, V  r4,
+        V &d1, V &d2, V &d3, V &d4)
     // Formulas and notation taken from Blondel and Karplus, 1995
 {
-    float3 F = r1-r2;
-    float3 G = r2-r3;
-    float3 H = r4-r3;
+    typedef typename V::scalar_t S;  // scalar type associated to vector type
 
-    float3 A = cross(F,G);
-    float3 B = cross(H,G);
-    float3 C = cross(B,A);
+    V F = r1-r2;
+    V G = r2-r3;
+    V H = r4-r3;
 
-    float inv_Amag2 = inv_mag2(A);
-    float inv_Bmag2 = inv_mag2(B);
+    V A = cross(F,G);
+    V B = cross(H,G);
+    V C = cross(B,A);
 
-    float Gmag2    = mag2(G);
-    float inv_Gmag = rsqrt(Gmag2);
-    float Gmag     = Gmag2 * inv_Gmag;
+    S inv_Amag2 = inv_mag2(A);
+    S inv_Bmag2 = inv_mag2(B);
+
+    S Gmag2    = mag2(G);
+    S inv_Gmag = rsqrt(Gmag2);
+    S Gmag     = Gmag2 * inv_Gmag;
 
     d1 = -Gmag * inv_Amag2 * A;
     d4 =  Gmag * inv_Bmag2 * B;
 
-    float3 f_mid =  dot(F,G)*inv_Amag2*inv_Gmag * A - dot(H,G)*inv_Bmag2*inv_Gmag * B;
+    V f_mid =  dot(F,G)*inv_Amag2*inv_Gmag * A - dot(H,G)*inv_Bmag2*inv_Gmag * B;
 
     d2 = -d1 + f_mid;
     d3 = -d4 - f_mid;
 
-    return atan2f(dot(C,G), dot(A,B) * Gmag);
+    return atan2f(extract_float(dot(C,G)), extract_float(dot(A,B) * Gmag));
 }
 
 
@@ -744,25 +742,6 @@ static void print(const VecArray &a, int n_dim, int n_elem, const char* txt) {
         for(int nd: range(n_dim)) printf(" % .2f", a(nd,ne));
         printf("\n");
     }
-}
-
-// the function below is used to allow a version of max to be called in a constexpr context
-constexpr inline int maxint(int i, int j) {
-    return (i>j) ? i : j;
-}
-
-constexpr inline int round_up(int i, int alignment) {
-    return ((i+alignment-1)/alignment)*alignment; // probably alignment is a power of 2
-}
-
-template <typename T>
-static std::unique_ptr<T[]> new_aligned(int n_elem, int alignment_elems) {
-    // round up allocation to ensure that you can also read to the end without
-    //   overstepping the array, if needed
-    T* ptr = new T[round_up(n_elem, alignment_elems)];
-    // printf("aligning %i elements at %p\n", round_up(n_elem, alignment_elems), (void*)ptr);
-    // if((unsigned long)(ptr)%(unsigned long)(alignment_elems*sizeof(T))) throw "bad alignment on string";
-    return std::unique_ptr<T[]>(ptr);
 }
 
 
