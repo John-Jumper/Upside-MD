@@ -1,7 +1,6 @@
 #include "deriv_engine.h"
 #include <string>
 #include "timing.h"
-#include "coord.h"
 #include "affine.h"
 #include <cmath>
 #include <vector>
@@ -12,7 +11,7 @@ using namespace std;
 using namespace h5;
 
 struct ContactPair {
-    CoordPair loc[2];
+    index_t loc[2];
     float3    sc_ref_pos[2];
     float     r0;
     float     scale;
@@ -156,7 +155,7 @@ struct ContactEnergy : public PotentialNode
         check_size(grp, "scale",      n_contact);
         check_size(grp, "energy",     n_contact);
 
-        traverse_dset<2,int  >(grp, "id",         [&](size_t nc, size_t i, int x) {params[nc].loc[i].index = x;});
+        traverse_dset<2,int  >(grp, "id",         [&](size_t nc, size_t i, int x) {params[nc].loc[i] = x;});
         traverse_dset<3,float>(grp, "sc_ref_pos", [&](size_t nc, size_t i, size_t d, float x) {
                 params[nc].sc_ref_pos[i][d] = x;});
 

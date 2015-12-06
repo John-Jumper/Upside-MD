@@ -1,6 +1,5 @@
 #include "deriv_engine.h"
 #include "timing.h"
-#include "coord.h"
 #include "state_logger.h"
 
 using namespace h5;
@@ -10,7 +9,7 @@ using namespace std;
 struct PosSpring : public PotentialNode
 {
     struct Params {
-        CoordPair atom;
+        index_t atom;
         Vec<3> x0;
         float spring_constant;
     };
@@ -28,7 +27,7 @@ struct PosSpring : public PotentialNode
         check_size(grp, "spring_const", n_elem);
 
         auto& p = params;
-        traverse_dset<1,int>  (grp, "id",           [&](size_t i,           int   x) { p[i].atom.index = x;});
+        traverse_dset<1,int>  (grp, "id",           [&](size_t i,           int   x) { p[i].atom = x;});
         traverse_dset<2,float>(grp, "x0",           [&](size_t i, size_t d, float x) { p[i].x0[d] = x;});
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
     }
@@ -42,9 +41,9 @@ struct PosSpring : public PotentialNode
         if(pot) *pot = 0.f;
         for(int nt=0; nt<n_elem; ++nt) {
             auto &p = params[nt];
-            float3 disp = load_vec<3>(posc, p.atom.index) - p.x0;
+            float3 disp = load_vec<3>(posc, p.atom) - p.x0;
             if(pot) *pot += 0.5f * p.spring_constant * mag2(disp);
-            update_vec(pos_sens, p.atom.index, p.spring_constant * disp);
+            update_vec(pos_sens, p.atom, p.spring_constant * disp);
         }
     }
 };
@@ -102,7 +101,7 @@ static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 struct RamaCoord : public CoordNode
 {
     struct alignas(16) Jac {float j[2][5][4];}; // padding for vector load/store
-    struct Params {bool dummy_angle[2]; CoordPair atom[5];};
+    struct Params {bool dummy_angle[2]; index_t atom[5];};
 
     CoordNode& pos;
     vector<Params> params;
@@ -114,19 +113,17 @@ struct RamaCoord : public CoordNode
         params(n_elem),
         jac(new_aligned<Jac>(n_elem,1))
     {
-        typedef decltype(params[0].atom[0].index) index_t;
-
         check_size(grp, "id", n_elem, 5);
         traverse_dset<2,int>(grp, "id", [&](size_t nr, size_t na, int x) {
-                params[nr].atom[na].index = x;});
+                params[nr].atom[na] = x;});
 
         for(auto& p: params) {
             // handle dummy angles uniformly (N-terminal phi and C-terminal psi)
-            p.dummy_angle[0] = p.atom[0].index == index_t(-1);
-            p.dummy_angle[1] = p.atom[4].index == index_t(-1);
+            p.dummy_angle[0] = p.atom[0] == index_t(-1);
+            p.dummy_angle[1] = p.atom[4] == index_t(-1);
 
-            p.atom[0].index = p.dummy_angle[0] ? 0 : p.atom[0].index;
-            p.atom[4].index = p.dummy_angle[1] ? 0 : p.atom[4].index;
+            p.atom[0] = p.dummy_angle[0] ? 0 : p.atom[0];
+            p.atom[4] = p.dummy_angle[1] ? 0 : p.atom[4];
         }
 
         if(logging(LOG_DETAILED)) {
@@ -144,7 +141,7 @@ struct RamaCoord : public CoordNode
         for(int nt=0; nt<n_elem; ++nt) {
             const auto& p = params[nt];
             Float4 x[5];
-            for(int na: range(5)) x[na] = Float4(posv + 4*p.atom[na].index);
+            for(int na: range(5)) x[na] = Float4(posv + 4*p.atom[na]);
 
             for(int phipsi: range(2)) {  // phi then psi
                 Float4 d[5];
@@ -172,10 +169,10 @@ struct RamaCoord : public CoordNode
                 ps[na] =
                     fmadd(s[0], Float4(jac[nt].j[0][na]),
                             fmadd(s[1], Float4(jac[nt].j[1][na]),
-                                Float4(pos_sens + 4*p.atom[na].index)));
+                                Float4(pos_sens + 4*p.atom[na])));
 
             for(int na: range(5))
-                ps[na].store(pos_sens + 4*p.atom[na].index);  // value was added above
+                ps[na].store(pos_sens + 4*p.atom[na]);  // value was added above
         }
     }
 };
@@ -185,7 +182,7 @@ static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
 struct DistSpring : public PotentialNode
 {
     struct Params {
-        CoordPair atom[2];
+        index_t atom[2];
         float equil_dist;
         float spring_constant;
     };
@@ -206,7 +203,7 @@ struct DistSpring : public PotentialNode
         check_size(grp, "bonded_atoms", n_elem);
 
         auto& p = params;
-        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j].index = x;});
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j] = x;});
         traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) {p[i].equil_dist = x;});
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) {p[i].spring_constant = x;});
         traverse_dset<1,int>  (grp, "bonded_atoms", [&](size_t i,           int   x) {bonded_atoms.push_back(x);});
@@ -220,7 +217,7 @@ struct DistSpring : public PotentialNode
                     if(bonded_atoms[nt]) continue;  // don't count bonded spring energy
 
                     auto p = params[nt];
-                    float dmag = mag(load_vec<3>(x, p.atom[0].index) - load_vec<3>(x, p.atom[1].index));
+                    float dmag = mag(load_vec<3>(x, p.atom[0]) - load_vec<3>(x, p.atom[1]));
                     pot += 0.5f * p.spring_constant * sqr(dmag - p.equil_dist);
                     }
                     buffer[0] = pot;
@@ -238,15 +235,15 @@ struct DistSpring : public PotentialNode
         for(int nt=0; nt<n_elem; ++nt) {
             auto& p = params[nt];
 
-            auto x1 = load_vec<3>(posc, p.atom[0].index);
-            auto x2 = load_vec<3>(posc, p.atom[1].index);
+            auto x1 = load_vec<3>(posc, p.atom[0]);
+            auto x2 = load_vec<3>(posc, p.atom[1]);
 
             auto disp = x1 - x2;
             auto deriv = p.spring_constant * (1.f - p.equil_dist*inv_mag(disp)) * disp;
             if(pot) *pot += 0.5f * p.spring_constant * sqr(mag(disp) - p.equil_dist);
 
-            update_vec(pos_sens, p.atom[0].index,  deriv);
-            update_vec(pos_sens, p.atom[1].index, -deriv);
+            update_vec(pos_sens, p.atom[0],  deriv);
+            update_vec(pos_sens, p.atom[1], -deriv);
         }
     }
 };
@@ -256,7 +253,7 @@ static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
 struct CavityRadial : public PotentialNode
 {
     struct Params {
-        CoordPair id;
+        index_t id;
         float     radius;
         float     spring_constant;
     };
@@ -274,7 +271,7 @@ struct CavityRadial : public PotentialNode
         check_size(hdf_group, "radius",          n_term);
         check_size(hdf_group, "spring_constant", n_term);
 
-        traverse_dset<1,int  >(hdf_group, "id", [&](size_t nt, int i) {params[nt].id.index=i;});
+        traverse_dset<1,int  >(hdf_group, "id", [&](size_t nt, int i) {params[nt].id=i;});
         traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
         traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
                 params[nt].spring_constant = x;});
@@ -290,7 +287,7 @@ struct CavityRadial : public PotentialNode
 
         for(int nt=0; nt<n_term; ++nt) {
             auto &p = params[nt];
-            auto x = load_vec<3>(posc, p.id.index);
+            auto x = load_vec<3>(posc, p.id);
 
             float r2 = mag2(x);
             if(r2>sqr(p.radius)) {
@@ -299,7 +296,7 @@ struct CavityRadial : public PotentialNode
                 float excess = r-p.radius;
 
                 if(pot) *pot += 0.5f * p.spring_constant * sqr(excess);
-                update_vec(pos_sens, p.id.index, (p.spring_constant*excess*inv_r)*x);
+                update_vec(pos_sens, p.id, (p.spring_constant*excess*inv_r)*x);
             }
         }
     }
@@ -310,7 +307,7 @@ static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
 struct ZFlatBottom : public PotentialNode
 {
     struct Params {
-        CoordPair id;
+        index_t id;
         float     z0;
         float     radius;
         float     spring_constant;
@@ -330,7 +327,7 @@ struct ZFlatBottom : public PotentialNode
         check_size(hdf_group, "radius",          n_term);
         check_size(hdf_group, "spring_constant", n_term);
 
-        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].id.index=i;});
+        traverse_dset<1,int  >(hdf_group, "atom", [&](size_t nt, int i) {params[nt].id=i;});
         traverse_dset<1,float>(hdf_group, "z0", [&](size_t nt, float x) {params[nt].z0 = x;});
         traverse_dset<1,float>(hdf_group, "radius", [&](size_t nt, float x) {params[nt].radius = x;});
         traverse_dset<1,float>(hdf_group, "spring_constant", [&](size_t nt, float x) {
@@ -347,11 +344,11 @@ struct ZFlatBottom : public PotentialNode
 
         for(int nt=0; nt<n_term; ++nt) {
             auto& p = params[nt];
-            float z = posc(2,p.id.index);
+            float z = posc(2,p.id);
 
             float excess = z-p.z0 >  p.radius ? z-p.z0 - p.radius
                 :         (z-p.z0 < -p.radius ? z-p.z0 + p.radius : 0.f);
-            pos_sens(2,p.id.index) += p.spring_constant * excess;
+            pos_sens(2,p.id) += p.spring_constant * excess;
 
             if(pot) *pot += 0.5f*p.spring_constant * sqr(excess);
         }
@@ -363,7 +360,7 @@ static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
 struct AngleSpring : public PotentialNode
 {
     struct Params {
-        CoordPair atom[3];
+        index_t atom[3];
         float equil_dp;
         float spring_constant;
     };
@@ -382,7 +379,7 @@ struct AngleSpring : public PotentialNode
         check_size(grp, "spring_const", n_elem);
 
         auto& p = params;
-        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j].index = x;});
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) { p[i].atom[j] = x;});
         traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) { p[i].equil_dp = x;});
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
     }
@@ -397,9 +394,9 @@ struct AngleSpring : public PotentialNode
 
         for(int nt=0; nt<n_elem; ++nt) {
             auto& p = params[nt];
-            auto atom1 = Float4(posc + 4*p.atom[0].index);
-            auto atom2 = Float4(posc + 4*p.atom[1].index);
-            auto atom3 = Float4(posc + 4*p.atom[2].index);
+            auto atom1 = Float4(posc + 4*p.atom[0]);
+            auto atom2 = Float4(posc + 4*p.atom[1]);
+            auto atom3 = Float4(posc + 4*p.atom[2]);
 
             auto x1 = atom1 - atom3; auto inv_d1 = inv_mag(x1); auto x1h = x1*inv_d1;
             auto x2 = atom2 - atom3; auto inv_d2 = inv_mag(x2); auto x2h = x2*inv_d2;
@@ -411,9 +408,9 @@ struct AngleSpring : public PotentialNode
             auto d2 = force_prefactor * (x1h - x2h*dp) * inv_d2;
             auto d3 = -d1-d2;
 
-            d1.update(pos_sens + 4*p.atom[0].index);
-            d2.update(pos_sens + 4*p.atom[1].index);
-            d3.update(pos_sens + 4*p.atom[2].index);
+            d1.update(pos_sens + 4*p.atom[0]);
+            d2.update(pos_sens + 4*p.atom[1]);
+            d3.update(pos_sens + 4*p.atom[2]);
 
             if(pot) *pot += 0.5f * p.spring_constant * sqr(dp.x()-p.equil_dp);
         }
@@ -425,7 +422,7 @@ static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
 struct DihedralSpring : public PotentialNode
 {
     struct Params {
-        CoordPair atom[4];
+        index_t atom[4];
         float equil_dihedral;
         float spring_constant;
     };
@@ -444,7 +441,7 @@ struct DihedralSpring : public PotentialNode
         check_size(grp, "spring_const", n_elem);
 
         auto& p = params;
-        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j].index  =x;});
+        traverse_dset<2,int>  (grp, "id",           [&](size_t i, size_t j, int   x) {p[i].atom[j]  =x;});
         traverse_dset<1,float>(grp, "equil_dist",   [&](size_t i,           float x) {p[i].equil_dihedral =x;});
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) {p[i].spring_constant=x;});
     }
@@ -460,7 +457,7 @@ struct DihedralSpring : public PotentialNode
         for(int nt=0; nt<n_elem; ++nt) {
             const auto& p = params[nt];
             Float4 x[4];
-            for(int na: range(4)) x[na] = Float4(posc + 4*params[nt].atom[na].index);
+            for(int na: range(4)) x[na] = Float4(posc + 4*params[nt].atom[na]);
 
             Float4 d[4];
             float dihedral = dihedral_germ(x[0],x[1],x[2],x[3], d[0],d[1],d[2],d[3]).x();
@@ -471,7 +468,7 @@ struct DihedralSpring : public PotentialNode
             displacement = (displacement<-M_PI_F) ? displacement+2.f*M_PI_F : displacement;
 
             auto s = Float4(p.spring_constant * displacement);
-            for(int na: range(4)) d[na].scale_update(s, pos_sens + 4*params[nt].atom[na].index);
+            for(int na: range(4)) d[na].scale_update(s, pos_sens + 4*params[nt].atom[na]);
 
             if(pot) *pot += 0.5f * p.spring_constant * sqr(displacement);
         }

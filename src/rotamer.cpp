@@ -675,7 +675,7 @@ struct RotamerSidechain: public PotentialNode {
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
-            int index = igraph.loc1[n].index;
+            int index = igraph.loc1[n];
 
             float energy = 0.f;
             for(auto &a: energy_1body) energy += a(0,index);
@@ -757,7 +757,7 @@ struct RotamerSidechain: public PotentialNode {
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
-            int index = igraph.loc1[n].index;
+            int index = igraph.loc1[n];
 
             switch(n_rot) {
                 case 1: e1[id] += nodes1.cur_belief(rot,id) * energy_1body(0,index); break;
@@ -817,7 +817,7 @@ struct RotamerSidechain: public PotentialNode {
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
 
             for(int i: range(n_prob_nodes))
-                sens_1body[i](0,igraph.loc1[n].index) += node_holders_matrix[n_rot]->cur_belief(rot,id);
+                sens_1body[i](0,igraph.loc1[n]) += node_holders_matrix[n_rot]->cur_belief(rot,id);
         }
     }
 

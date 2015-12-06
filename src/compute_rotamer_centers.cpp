@@ -3,7 +3,6 @@
 #include <Eigen/LU>
 #include <string>
 #include "h5_support.h"
-#include "coord.h"
 #include <map>
 #include <Eigen/SVD>
 #include <Eigen/Geometry>

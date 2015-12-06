@@ -1,7 +1,6 @@
 #ifndef PIVOT_SAMPLER_H
 #define PIVOT_SAMPLER_H
 
-#include "coord.h"
 #include "affine.h"
 #include "random.h"
 #include "h5_support.h"

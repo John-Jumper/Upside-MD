@@ -8,7 +8,6 @@
 
 #include "deriv_engine.h"
 #include "timing.h"
-#include "coord.h"
 #include "affine.h"
 
 using namespace h5;
@@ -378,7 +377,7 @@ three_atom_alignment(
 struct AffineAlignment : public CoordNode
 {
     struct Params {
-        CoordPair atom[3];
+        index_t atom[3];
         float     ref_geom[9];
     };
 
@@ -394,7 +393,7 @@ struct AffineAlignment : public CoordNode
         check_size(grp, "atoms",    n_elem, 3);
         check_size(grp, "ref_geom", n_elem, 3,3);  // (residue, atom, xyz)
 
-        traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params[i].atom[j].index=x;});
+        traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params[i].atom[j]=x;});
         traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params[i].ref_geom[na*3+d]=x;});
     }
 
@@ -405,9 +404,9 @@ struct AffineAlignment : public CoordNode
         VecArray posc = pos.output;
 
         for(int nr=0; nr<n_elem; ++nr) {
-            auto x1 = load_vec<3>(posc, params[nr].atom[0].index);
-            auto x2 = load_vec<3>(posc, params[nr].atom[1].index);
-            auto x3 = load_vec<3>(posc, params[nr].atom[2].index);
+            auto x1 = load_vec<3>(posc, params[nr].atom[0]);
+            auto x2 = load_vec<3>(posc, params[nr].atom[1]);
+            auto x3 = load_vec<3>(posc, params[nr].atom[2]);
 
             three_atom_alignment(&rigid_body(0,nr), &jac(0,nr), x1.v,x2.v,x3.v, params[nr].ref_geom);
         }
@@ -440,7 +439,7 @@ struct AffineAlignment : public CoordNode
                     float s = 0.f;
                     for(int sens_dim=0; sens_dim<7; ++sens_dim)
                         s += sens7[sens_dim]*j[sens_dim];
-                    pos_sens(d,params[nr].atom[na].index) += s;
+                    pos_sens(d,params[nr].atom[na]) += s;
                 }
             }
         }

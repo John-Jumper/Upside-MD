@@ -1,6 +1,5 @@
 #include "deriv_engine.h"
 #include "timing.h"
-#include "coord.h"
 #include "affine.h"
 #include <algorithm>
 
@@ -8,7 +7,7 @@ using namespace std;
 using namespace h5;
 
 struct AffineParams {
-    CoordPair residue;
+    index_t residue;
 };
 
 namespace {
@@ -55,7 +54,7 @@ struct BackbonePairs : public PotentialNode
         check_size(grp, "n_atom",  n_residue);
         check_size(grp, "ref_pos", n_residue, 4, 3);
 
-        traverse_dset<1,int>(grp, "id",     [&](size_t nr, int x) {params[nr].residue.index = x;});
+        traverse_dset<1,int>(grp, "id",     [&](size_t nr, int x) {params[nr].residue = x;});
         traverse_dset<1,int>(grp, "n_atom", [&](size_t nr, int x) {ref_pos[nr].n_atom = x;});
 
         traverse_dset<3,float>(grp, "ref_pos", [&](size_t nr, size_t na, size_t d, float x) {
@@ -81,7 +80,7 @@ struct BackbonePairs : public PotentialNode
 
         if(pot) *pot = 0.f;
         for(int nr=0; nr<n_residue; ++nr) {
-            auto aff = load_vec<7>(alignment.output, params[nr].residue.index);
+            auto aff = load_vec<7>(alignment.output, params[nr].residue);
             float U[9]; quat_to_rot(U, aff.v+3);
             auto t = extract<0,3>(aff);
             coords[nr] = t;
@@ -124,8 +123,8 @@ struct BackbonePairs : public PotentialNode
                         Vec<6> combine_deriv1; store<0,3>(combine_deriv1, d1); store<3,6>(combine_deriv1, torque1);
                         Vec<6> combine_deriv2; store<0,3>(combine_deriv2, d2); store<3,6>(combine_deriv2, torque2);
 
-                        update_vec(alignment.sens, params[nr1].residue.index, combine_deriv1);
-                        update_vec(alignment.sens, params[nr2].residue.index, combine_deriv2);
+                        update_vec(alignment.sens, params[nr1].residue, combine_deriv1);
+                        update_vec(alignment.sens, params[nr2].residue, combine_deriv2);
                     }
                 }
             }

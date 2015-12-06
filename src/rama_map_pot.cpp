@@ -1,6 +1,5 @@
 #include "deriv_engine.h"
 #include "timing.h"
-#include "coord.h"
 #include "spline.h"
 #include "state_logger.h"
 
@@ -8,7 +7,7 @@ using namespace h5;
 using namespace std;
 
 struct RamaMapParams {
-    CoordPair residue;
+    index_t residue;
     int       rama_map_id;
 };
 
@@ -40,7 +39,7 @@ struct RamaMapPot : public PotentialNode
         if(r.nx != r.ny) throw string("must have same x and y grid spacing for Rama maps");
         vector<double> raw_data(r.n_layer * r.nx * r.ny);
 
-        traverse_dset<1,int>   (grp, "residue_id",  [&](size_t i, int x) {params[i].residue.index = x;});
+        traverse_dset<1,int>   (grp, "residue_id",  [&](size_t i, int x) {params[i].residue = x;});
         traverse_dset<1,int>   (grp, "rama_map_id", [&](size_t i, int x) {params[i].rama_map_id = x;});
         traverse_dset<3,double>(grp, "rama_pot",    [&](size_t il, size_t ix, size_t iy, double x) {
                 raw_data[(il*r.nx + ix)*r.ny + iy] = x;});
@@ -68,22 +67,16 @@ struct RamaMapPot : public PotentialNode
         if(pot) *pot = 0.f;
         for(int nr=0; nr<n_residue; ++nr) {
             const auto& p = params[nr];
-            auto r = load_vec<2>(ramac, p.residue.index);
+            auto r = load_vec<2>(ramac, p.residue);
 
             float map_value[3];
             rama_map_data.evaluate_value_and_deriv(map_value, p.rama_map_id, 
                     (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
 
             if(pot) {*pot += map_value[2]; residue_potential[nr] = map_value[2];}
-            rama_sens(0,p.residue.index) += map_value[0] * scale;
-            rama_sens(1,p.residue.index) += map_value[1] * scale;
+            rama_sens(0,p.residue) += map_value[0] * scale;
+            rama_sens(1,p.residue) += map_value[1] * scale;
         }
-    }
-
-    virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
-        for(auto &p: params) coord_pairs.back().push_back(p.residue);
-        return -1.; // compute_relative_deviation_for_node<2>(*this, rama, coord_pairs);
     }
 
 #ifdef PARAM_DERIV

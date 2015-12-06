@@ -1,7 +1,6 @@
 #include "deriv_engine.h"
 #include <string>
 #include "timing.h"
-#include "coord.h"
 #include "affine.h"
 #include <cmath>
 #include "h5_support.h"
@@ -12,7 +11,7 @@ using namespace h5;
 using namespace std;
 
 struct MembraneResidueParams {
-    CoordPair residue;
+    index_t residue;
     int restype; 
 };
 
@@ -63,7 +62,7 @@ struct MembranePotential : public PotentialNode
         check_size(grp, "residue_id", n_elem);
         check_size(grp, "restype",    n_elem);
 
-        traverse_dset<1,int>(grp, "residue_id", [&](size_t nda, int x ) {params[nda].residue.index = x;});
+        traverse_dset<1,int>(grp, "residue_id", [&](size_t nda, int x ) {params[nda].residue = x;});
         traverse_dset<1,int>(grp, "restype",    [&](size_t nr,  int rt) {params[nr].restype = rt;});
 
         vector<double> energy_data;
@@ -83,7 +82,7 @@ struct MembranePotential : public PotentialNode
                 n_elem);
     }
     virtual double test_value_deriv_agreement() {
-        vector<vector<CoordPair>> coord_pairs(1);
+        vector<vector<index_t>> coord_pairs(1);
         for(auto &p: params) coord_pairs.back().push_back(p.residue);
         return -1.; // compute_relative_deviation_for_node<3>(*this, sidechain_pos, coord_pairs);
     }

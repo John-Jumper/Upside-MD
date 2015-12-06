@@ -1,13 +1,21 @@
-#ifndef FORCE_H
-#define FORCE_H
+#ifndef DERIV_ENGINE_H
+#define DERIV_ENGINE_H
 
 #include "h5_support.h"
 #include <vector>
 #include <string>
 #include <functional>
-#include "coord.h"
 #include <initializer_list>
 #include <map>
+#include "vector_math.h"
+
+inline void copy_vec_array_to_buffer(VecArray arr, int n_elem, int n_dim, float* buffer) {
+        for(int i=0; i<n_elem; ++i)
+            for(int d=0; d<n_dim; ++d) 
+                buffer[i*n_dim+d] = arr(d,i);
+}
+
+typedef int index_t;  //!< type of coordinate indices
 
 void
 integration_stage(

@@ -14,7 +14,7 @@ using namespace std;
 struct Infer_H_O : public CoordNode
 {
     struct Params {
-        CoordPair atom[3];
+        index_t atom[3];
         float bond_length;
     };
 
@@ -40,9 +40,9 @@ struct Infer_H_O : public CoordNode
         check_size(acc.get(), "id",          n_acceptor, 3);
         check_size(acc.get(), "bond_length", n_acceptor);
 
-        traverse_dset<2,int  >(don.get(),"id",          [&](size_t i,size_t j, int   x){params[        i].atom[j].index=x;});
+        traverse_dset<2,int  >(don.get(),"id",          [&](size_t i,size_t j, int   x){params[        i].atom[j]=x;});
         traverse_dset<1,float>(don.get(),"bond_length", [&](size_t i,          float x){params[        i].bond_length  =x;});
-        traverse_dset<2,int  >(acc.get(),"id",          [&](size_t i,size_t j, int   x){params[n_donor+i].atom[j].index=x;});
+        traverse_dset<2,int  >(acc.get(),"id",          [&](size_t i,size_t j, int   x){params[n_donor+i].atom[j]=x;});
         traverse_dset<1,float>(acc.get(),"bond_length", [&](size_t i,          float x){params[n_donor+i].bond_length  =x;});
 
         if(logging(LOG_EXTENSIVE)) {
@@ -68,9 +68,9 @@ struct Infer_H_O : public CoordNode
 
             auto& p = params[nv];
 
-            auto prev_c = Float4(&posc(0,p.atom[0].index));
-            auto curr_c = Float4(&posc(0,p.atom[1].index));
-            auto next_c = Float4(&posc(0,p.atom[2].index));
+            auto prev_c = Float4(&posc(0,p.atom[0]));
+            auto curr_c = Float4(&posc(0,p.atom[1]));
+            auto next_c = Float4(&posc(0,p.atom[2]));
 
             auto prev = prev_c - curr_c; auto prev_invmag = inv_mag(prev); prev *= prev_invmag;
             auto next = next_c - curr_c; auto next_invmag = inv_mag(next); next *= next_invmag;
@@ -122,9 +122,9 @@ struct Infer_H_O : public CoordNode
             // print_vector("curr_deriv", sens_pos - sens_nonunit_prev - sens_nonunit_next);
             // print_vector("next_deriv", sens_nonunit_next);
 
-            sens_nonunit_prev                                 .update(&pos_sens(0,p.atom[0].index));
-            (sens_pos - sens_nonunit_prev - sens_nonunit_next).update(&pos_sens(0,p.atom[1].index));
-            sens_nonunit_next                                 .update(&pos_sens(0,p.atom[2].index));
+            sens_nonunit_prev                                 .update(&pos_sens(0,p.atom[0]));
+            (sens_pos - sens_nonunit_prev - sens_nonunit_next).update(&pos_sens(0,p.atom[1]));
+            sens_nonunit_next                                 .update(&pos_sens(0,p.atom[2]));
             // printf("\n");
 
             // printf("jac\n");
@@ -447,12 +447,12 @@ struct ProteinHBond : public CoordNode
         VecArray pd1 = igraph.pos_node1->sens;
         for(int nd=0; nd<n_donor; ++nd) {
             // the last component is taken care of by the edge loop
-            update_vec(pd1, igraph.loc1[nd].index, load_vec<6>(sens, nd));
+            update_vec(pd1, igraph.loc1[nd], load_vec<6>(sens, nd));
         }
         VecArray pd2 = igraph.pos_node2->sens;
         for(int na=0; na<n_acceptor; ++na) {  // acceptor loop
             // the last component is taken care of by the edge loop
-            update_vec(pd2, igraph.loc2[na].index, load_vec<6>(sens, na+n_donor));
+            update_vec(pd2, igraph.loc2[na], load_vec<6>(sens, na+n_donor));
         }
     }
 };

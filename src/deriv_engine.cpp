@@ -1,5 +1,4 @@
 #include "deriv_engine.h"
-#include "coord.h"
 #include "timing.h"
 #include <map>
 #include <algorithm>
@@ -203,30 +202,6 @@ void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, Int
                 pos->n_atom);
     }
 }
-
-template <int ndim>
-struct ComputeMyDeriv {
-    const float* accum;
-    vector<Vec<ndim>> deriv;
-
-    ComputeMyDeriv(const std::vector<float> &accum_, int n_atom):
-        accum(accum_.data()), deriv(n_atom)
-    {zero();}
-
-    void add_pair(const CoordPair &cp) { deriv.at(cp.index) += load_vec<ndim>(accum, cp.slot); }
-    void zero() { for(auto &a: deriv) for(int i=0; i<ndim; ++i) a[i] = 0.f; }
-    void print(const char* nm) { 
-        for(int nr=0; nr<(int)deriv.size(); ++nr) {
-            printf("%-12s %2i", nm,nr);
-            for(int i=0; i<ndim; ++i) {
-                if(i%3==0) printf(" ");
-                printf(" % 6.2f", deriv[nr].v[i]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-};
 
 
 DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool quiet)

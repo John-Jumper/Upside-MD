@@ -3,7 +3,6 @@
 
 #include <cmath>
 #include <Random123/threefry.h>
-#include "coord.h"
 
 #include "uniform.hpp"
 #include "boxmuller.hpp"

@@ -16,8 +16,8 @@ template <int n_pos_dim>
 struct RigidPlacementNode: public CoordNode {
     struct Params {
         int layer_idx;
-        CoordPair affine_residue;
-        CoordPair rama_residue;
+        index_t affine_residue;
+        index_t rama_residue;
     };
 
     vector<PlaceType> signature;
@@ -65,8 +65,8 @@ struct RigidPlacementNode: public CoordNode {
         check_size(grp, "placement_data", spline.n_layer, spline.nx, spline.ny, n_pos_dim);
 
         traverse_dset<1,int>(grp, "layer_index",    [&](size_t np, int x){params[np].layer_idx  = x;});
-        traverse_dset<1,int>(grp, "affine_residue", [&](size_t np, int x){params[np].affine_residue.index = x;});
-        traverse_dset<1,int>(grp, "rama_residue",   [&](size_t np, int x){params[np].rama_residue.index  = x;});
+        traverse_dset<1,int>(grp, "affine_residue", [&](size_t np, int x){params[np].affine_residue = x;});
+        traverse_dset<1,int>(grp, "rama_residue",   [&](size_t np, int x){params[np].rama_residue  = x;});
 
         {
             vector<double> all_data_to_fit;
@@ -98,8 +98,8 @@ struct RigidPlacementNode: public CoordNode {
         VecArray pos        = output;
 
         for(int ne: range(n_elem)) {
-            auto aff = load_vec<7>(affine_pos, params[ne].affine_residue.index);
-            auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue.index);
+            auto aff = load_vec<7>(affine_pos, params[ne].affine_residue);
+            auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue);
             auto t   = extract<0,3>(aff);
             float U[9]; quat_to_rot(U, aff.v+3);
 
@@ -160,13 +160,13 @@ struct RigidPlacementNode: public CoordNode {
                         dot(d, extract<        0,  n_pos_dim>(my_rama_deriv)),
                         dot(d, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
 
-            update_vec(r_sens, params[ne].rama_residue.index, rd);
+            update_vec(r_sens, params[ne].rama_residue, rd);
 
             // only difference between points and vectors is whether to subtract off the translation
             auto z = make_zero<6>();
             int j=0;
 
-            auto t  = load_vec<3>(affine_pos, params[ne].affine_residue.index);
+            auto t  = load_vec<3>(affine_pos, params[ne].affine_residue);
             for(PlaceType type: signature) {
                 switch(type) {
                     case PlaceType::SCALAR:
@@ -190,7 +190,7 @@ struct RigidPlacementNode: public CoordNode {
                         break;
                 }
             }
-            update_vec(a_sens, params[ne].affine_residue.index, z);
+            update_vec(a_sens, params[ne].affine_residue, z);
         }
           
     }

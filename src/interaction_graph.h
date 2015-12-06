@@ -40,7 +40,7 @@ struct InteractionGraph{
 
     CoordNode* pos_node1;
     CoordNode* pos_node2;
-    std::vector<CoordPair> loc1, loc2;
+    std::vector<index_t> loc1, loc2;
 
     int   n_elem1, n_elem2;
     int   n_type1, n_type2;
@@ -133,12 +133,12 @@ struct InteractionGraph{
         check_size(grp, suffix1("type").c_str(),  n_elem1); if(!s) check_size(grp, "type2",  n_elem2);
         check_size(grp, suffix1("id").c_str(),    n_elem1); if(!s) check_size(grp, "id2",    n_elem2);
 
-        traverse_dset<1,int>(grp,suffix1("index").c_str(),[&](size_t nr,int x){loc1.emplace_back(x,0u);});
+        traverse_dset<1,int>(grp,suffix1("index").c_str(),[&](size_t nr,int x){loc1.push_back(x);});
         traverse_dset<1,int>(grp,suffix1("type" ).c_str(),[&](size_t nr,int x){types1[nr]=x;});
         traverse_dset<1,int>(grp,suffix1("id"   ).c_str(),[&](size_t nr,int x){id1   [nr]=x;});
 
         if(!s) {
-            traverse_dset<1,int>(grp,"index2",[&](size_t nr,int x){loc2.emplace_back(x,0u);});
+            traverse_dset<1,int>(grp,"index2",[&](size_t nr,int x){loc2.push_back(x);});
             traverse_dset<1,int>(grp,"type2", [&](size_t nr,int x){types2[nr]=x;});
             traverse_dset<1,int>(grp,"id2",   [&](size_t nr,int x){id2   [nr]=x;});
         } else {
@@ -186,12 +186,12 @@ struct InteractionGraph{
         {
             VecArray posv = pos_node1->output;
             for(int ne=0; ne<n_elem1; ++ne) 
-                store_vec(pos1.get()+ne*n_dim1a, load_vec<n_dim1>(posv, loc1[ne].index));
+                store_vec(pos1.get()+ne*n_dim1a, load_vec<n_dim1>(posv, loc1[ne]));
         }
         if(!symmetric) {
             VecArray posv = pos_node2->output;
             for(int ne=0; ne<n_elem2; ++ne) 
-                store_vec(pos2.get()+ne*n_dim2a, load_vec<n_dim2>(posv, loc2[ne].index));
+                store_vec(pos2.get()+ne*n_dim2a, load_vec<n_dim2>(posv, loc2[ne]));
         }
 
         // First find all the edges
@@ -321,12 +321,12 @@ struct InteractionGraph{
         {
             VecArray pos1_sens = pos_node1->sens;
             for(int i1=0; i1<n_elem1; ++i1)
-                update_vec(pos1_sens, loc1[i1].index, load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
+                update_vec(pos1_sens, loc1[i1], load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
         }
         if(!symmetric) {
             VecArray pos2_sens = pos_node2->sens;
             for(int i2=0; i2<n_elem2; ++i2)
-                update_vec(pos2_sens, loc2[i2].index, load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
+                update_vec(pos2_sens, loc2[i2], load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
         }
     }
 };

@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <cmath>
-#include "coord.h"
 
 struct OrnsteinUhlenbeckThermostat
         // following the notation in Gillespie, 1996
