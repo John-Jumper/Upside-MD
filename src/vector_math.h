@@ -440,11 +440,10 @@ inline Vec<D,S> operator-(const Vec<D,S>& a) {
 // FIXME how to handle sqrtf, rsqrtf for simd types?
 // I will assume there are functions rsqrt(s) and rcp(s) and sqrt(s) and I will write sqr(s)
 
-template <typename S>
-inline S zero() {return S(0.f);}
-
-template <typename S>
-inline S one () {return S(1.f);}
+template <typename S> inline S zero() {return S(0.f);} 
+template <typename S> inline S one () {return S(1.f);} 
+template <typename S> inline S two () {return S(2.f);} 
+template <typename S> inline S half() {return S(0.5f);} 
 
 template <int D, typename S = float>
 inline Vec<D,S> make_zero() {

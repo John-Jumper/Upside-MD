@@ -19,6 +19,7 @@ namespace {
         constexpr static int   n_param=18, n_dim1=3, n_dim2=3, simd_width=1;  // 8 angstrom cutoff
 
         static float cutoff(const float* p) {
+            // return 7.0;
             return (n_param-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
         }
 

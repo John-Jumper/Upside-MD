@@ -18,52 +18,71 @@ using namespace std;
 #include <Eigen/Eigenvalues>
 #endif
 
-namespace {
-float house(
-        int n,
-        float* x)  // size (n,), replaced by v, v[0] = |x|
-{
-    float beta,mu,s;
-    float sigma = 0.f;
+typedef float S;
 
-    for(int i=1; i<n; ++i) sigma += x[i]*x[i];
+namespace {
+
+// S house_accurate(
+//         int n,
+//         S* x)  // size (n,), replaced by v, v[0] = |x|
+// {
+//     S beta,mu,s;
+//     S sigma = zero<S>();
+// 
+//     for(int i=1; i<n; ++i) sigma += x[i]*x[i];
+//     
+//     mu = sqrtf(x[0]*x[0] + sigma);   // |x|
+//     if(sigma == zero<S>()) {  // FIXME more robust condition needed here
+//         beta = (x[0]>=zero<S>()) ? zero<S>() : two<S>();
+//         s = one<S>();
+//     } else {
+//         s = (x[0]>zero<S>()) ? -sigma/(x[0]+mu) : (x[0]-mu);
+//         beta = two<S>()*s*s / (sigma+s*s);
+//     }
+// 
+//     x[0] = mu;
+//     for(int i=1; i<n; ++i) x[i] *= 1./s;
+//     return beta;
+// }
+// 
+// void givens_accurate(S *c, S *s, S a, S b)
+// {
+//     if(b==zero<S>()) {
+//         *c=one<S>(); *s=zero<S>();
+//     } else {
+//         if(fabsf(b) > fabsf(a)) {
+//             S tau = -a/b; *s = one<S>()/sqrtf(one<S>()+tau*tau); *c = *s * tau;
+//         } else {
+//             S tau = -b/a; *c = one<S>()/sqrtf(one<S>()+tau*tau); *s = *c * tau;
+//         }
+//     }
+// }
+
+S house(
+        int n,
+        S* x)  // size (n,), replaced by v, v[0] = |x|
+{
+    S beta,mu,s;
+    S sigma2 = 1e-20f;
+
+    for(int i=1; i<n; ++i) sigma2 += x[i]*x[i];
     
-    mu = sqrtf(x[0]*x[0] + sigma);   // |x|
-    if(sigma == 0.f) {  // FIXME more robust condition needed here
-        beta = (x[0]>=0.f) ? 0.f : 2.f;
-        s = 1.f;
-    } else {
-        s = (x[0]>0.f) ? -sigma/(x[0]+mu) : (x[0]-mu);
-        beta = 2.f*s*s / (sigma+s*s);
-    }
+    mu = sqrtf(x[0]*x[0] + sigma2);   // |x|
+    s = ternary(zero<S>()<x[0], -sigma2*rcp(x[0]+mu), x[0]-mu);
+    beta = two<S>()*s*s * rcp(sigma2+s*s);
 
     x[0] = mu;
-    for(int i=1; i<n; ++i) x[i] *= 1./s;
+    for(int i=1; i<n; ++i) x[i] *= rcp(s);
     return beta;
 }
 
-void givens_accurate(float *c, float *s, float a, float b)
+void givens(S *c, S *s, S a, S b)
 {
-    if(b==0.f) {
-        *c=1.f; *s=0.f;
-    } else {
-        if(fabsf(b) > fabsf(a)) {
-            float tau = -a/b; *s = 1.f/sqrtf(1.f+tau*tau); *c = *s * tau;
-        } else {
-            float tau = -b/a; *c = 1.f/sqrtf(1.f+tau*tau); *s = *c * tau;
-        }
-    }
-}
+    S inv_r = rsqrt(a*a+b*b);
 
-void givens(float *c, float *s, float a, float b)
-{
-    if(b==0.f) {
-        *c=1.f; *s=0.f;
-    } else {
-        float inv_r = rsqrt(a*a+b*b);
-        *c =  a*inv_r;
-        *s = -b*inv_r;
-    }
+    auto trivial = b==zero<S>();
+    *c = ternary(trivial, one <S>(),  a*inv_r);
+    *s = ternary(trivial, zero<S>(), -b*inv_r);
 }
 
 
@@ -89,27 +108,27 @@ int r(int i, int j) {
 
 void
 symmetric_tridiagonalize_4x4(
-        float* restrict beta, // length 2 beta sequence of Householder sequence
-        float* restrict A)   // upper triangle of 4x4 matrix, 10 elements
+        S* restrict beta, // length 2 beta sequence of Householder sequence
+        S* restrict A)   // upper triangle of 4x4 matrix, 10 elements
 {
-    float p[3];
-    float w[3];
+    S p[3];
+    S w[3];
 
     for(int k=0; k<4-2; ++k) {
         int m = 4-(k+1);
         beta[k] = house(m, A+r(k,k+1));   // overwrite with householder
 
-        #define v(j) ((j)==0 ? 1.f : A[r(k,k+1+(j))])
+        #define v(j) ((j)==0 ? one<S>() : A[r(k,k+1+(j))])
         for(int i=0; i<m; ++i) {
-            p[i] = 0.f;
+            p[i] = zero<S>();
             for(int j=0; j<m; ++j)
                 p[i] += A[r(i+k+1,j+k+1)] * v(j);
             p[i] *= beta[k];
         }
 
-        float p_dot_v = 0.f;
+        S p_dot_v = zero<S>();
         for(int i=0; i<m; ++i) p_dot_v += p[i]*v(i);
-        for(int i=0; i<m; ++i) w[i] = p[i] - (0.5f*beta[k]*p_dot_v) * v(i);
+        for(int i=0; i<m; ++i) w[i] = p[i] - (half<S>()*beta[k]*p_dot_v) * v(i);
 
         for(int i=0; i<m; ++i)
             for(int j=i; j<m; ++j)
@@ -121,11 +140,11 @@ symmetric_tridiagonalize_4x4(
 
 void
 unpack_tridiagonalize_4x4(
-        float * restrict d,  // length 4
-        float * restrict u,  // length 3
-        float * restrict rot_, // size 4x4 = 16, nonsymmetric
-        float * restrict beta, // length 2
-        float * restrict A)    // symmetric_4x4, length 10
+        S * restrict d,  // length 4
+        S * restrict u,  // length 3
+        S * restrict rot_, // size 4x4 = 16, nonsymmetric
+        S * restrict beta, // length 2
+        S * restrict A)    // symmetric_4x4, length 10
 {
     #define rot(i,j) (rot_[(i)*4+(j)])
     for(int i=0; i<4; ++i) d[i] = A[r(i,i)];
@@ -135,8 +154,8 @@ unpack_tridiagonalize_4x4(
     for(int i=0; i<4; ++i) for(int j=i; j<4; ++j) rot(i,j) = (i==j);   // identity matrix to start
 
     // unpack Householder reflection vectors
-    #define v0(j) ((j)==0 ? 1.f : A[r(0,1+(j))])
-    #define v1(j) ((j)==0 ? 1.f : A[r(1,2+(j))])
+    #define v0(j) ((j)==0 ? one<S>() : A[r(0,1+(j))])
+    #define v1(j) ((j)==0 ? one<S>() : A[r(1,2+(j))])
 
     // first Householder reflection operates on lower left 3x3 block
     for(int i=1; i<4; ++i)
@@ -153,7 +172,7 @@ unpack_tridiagonalize_4x4(
 
     // now fill in non-symmetric Householder interaction (note leading zero for v1)
     // fills in lower left 2x3 block
-    float coeff = beta[0]*beta[1] * (v0(1)*v1(0) + v0(2)*v1(1));
+    S coeff = beta[0]*beta[1] * (v0(1)*v1(0) + v0(2)*v1(1));
     for(int i=2; i<4; ++i)
         for(int j=1; j<4; ++j)
             rot(i,j) += coeff * v1(i-2)*v0(j-1);
@@ -165,28 +184,27 @@ unpack_tridiagonalize_4x4(
 
 #define rot(i,j) (rot_[(i)*4 + (j)])
 
-// general implementation
 void
 implicit_symm_QR_step_4x4(
         int n,   // length of diagonal
-        float * restrict d,    // diagonal
-        float * restrict u,   // upper superdiagonal
-        float * restrict rot_) // rotation to accumulate Givens rotations
+        S * restrict d,    // diagonal
+        S * restrict u,   // upper superdiagonal
+        S * restrict rot_) // rotation to accumulate Givens rotations
                      // must be at least nx4-sized
 {
-    float dval = 0.5*(d[n-2] - d[n-1]);
-    float mu = d[n-1] - u[n-2]*u[n-2]/(dval+copysignf(sqrtf(dval*dval + u[n-2]*u[n-2]),dval));
-    float x = d[0] - mu;
-    float z = u[0];
+    S dval = half<S>()*(d[n-2] - d[n-1]);
+    S mu = d[n-1] - u[n-2]*u[n-2]*rcp(dval+copysignf(sqrtf(dval*dval + u[n-2]*u[n-2]),dval));
+    S x = d[0] - mu;
+    S z = u[0];
     
     for(int k=0; k<n-1; ++k){
-        float c,s;
+        S c,s;
         givens(&c,&s,x,z);
 
         /* accumulate Givens rotation */
         for(int j=0; j<4; ++j) {
-            float t1 = rot(k  ,j);
-            float t2 = rot(k+1,j);
+            S t1 = rot(k  ,j);
+            S t2 = rot(k+1,j);
             rot(k  ,j) = c*t1 - s*t2;
             rot(k+1,j) = s*t1 + c*t2;
         }
@@ -195,12 +213,12 @@ implicit_symm_QR_step_4x4(
         if(k > 0) u[k-1] = c*x - s*z;
 
         /* mix the T(k,k),T(k,k+1),T(k+1,k+1) block */
-        float T00 = d[k  ];
-        float T11 = d[k+1];
-        float T01 = u[k  ];
+        S T00 = d[k  ];
+        S T11 = d[k+1];
+        S T01 = u[k  ];
         
-        d[k  ]  = T00*c*c - T01*2.f*c*s + T11*s*s;
-        d[k+1]  = T00*s*s + T01*2.f*c*s + T11*c*c;
+        d[k  ]  = T00*c*c - T01*two<S>()*c*s + T11*s*s;
+        d[k+1]  = T00*s*s + T01*two<S>()*c*s + T11*c*c;
         u[k  ]  = (T00-T11)*c*s + T01*(c*c-s*s);
         x = u[k];
 
@@ -211,56 +229,48 @@ implicit_symm_QR_step_4x4(
         }
     } 
 }
-
-// // specializations for the length of the array
-// void implicit_symm_QR_step_4x4_n4(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(4,d,u,rot);}
-// void implicit_symm_QR_step_4x4_n3(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(3,d,u,rot);}
-// void implicit_symm_QR_step_4x4_n2(float *d, float *u, float *rot_) {implicit_symm_QR_step_4x4(2,d,u,rot);}
 #undef rot
-
 
 
 int  __attribute__ ((noinline))
 symm_QR_4x4(
-        float* restrict d, // will contain eigenvalues, length 4
-        float* restrict rot, // will contain eigenvectors in rows, size 4x4
-        float* restrict A, // symmetric 4x4 matrix, 10 elements, overwritten
-        float tol,  // relative tolerance for off-diagonal entries (suggest something like 1e-5)
+        S* restrict d, // will contain eigenvalues, length 4
+        S* restrict rot, // will contain eigenvectors in rows, size 4x4
+        S* restrict A, // symmetric 4x4 matrix, 10 elements, overwritten
+        S tol,  // relative tolerance for off-diagonal entries (suggest something like 1e-5)
         int max_iter) 
 {
 #if 1
     const int n = 4;
 
-    float beta[2];
+    S beta[2];
     symmetric_tridiagonalize_4x4(beta, A);
 
-    float u[3];
+    S u[3];
     unpack_tridiagonalize_4x4(d, u, rot, beta, A);
 
     for(int k=0; k<max_iter; ++k) {
         // exactly zero off-diagonal elements that are nearly zero
         for(int i=0; i<n-1; ++i) {
-            if(fabsf(u[i]) <= tol * (fabsf(d[i]) + fabsf(d[i+1]))) u[i] = 0.f;
+            auto small_u = fabsf(u[i]) <= tol * (fabsf(d[i]) + fabsf(d[i+1]));
+            u[i] = ternary(small_u, zero<S>(), u[i]);
         }
 
         // find largest diagonal lower left subblock
         int q;
-        if      (u[2] != 0.f) q = 0;
-        else if (u[1] != 0.f) q = 1;
-        else if (u[0] != 0.f) q = 2;
+        if      (any(u[2] != zero<S>())) q = 0;
+        else if (any(u[1] != zero<S>())) q = 1;
+        else if (any(u[0] != zero<S>())) q = 2;
         else return k;   // q=3 and the matrix is diagonal and we are done
 
         // p is start of largest unreduced triangular submatrix adjacent to the q region
         // unreduced means no entries in the upper triangle are zero
         int p;
         for(p=n-q-1; p>0; --p) {
-            if(u[p-1] == 0.f) break;
+            if(none(u[p-1] != zero<S>())) break;
         }
 
         // perform QR iteration and accumulate into rot
-        // if     (n-q-p == 4) implicit_symm_QR_step_4x4_n4(d+p, u+p, rot+4*p);
-        // else if(n-q-p == 3) implicit_symm_QR_step_4x4_n3(d+p, u+p, rot+4*p);
-        // else if(n-q-p == 2) implicit_symm_QR_step_4x4_n2(d+p, u+p, rot+4*p);
         implicit_symm_QR_step_4x4(n-q-p, d+p, u+p, rot+4*p);
     }
     return -1;  // non-convergence
@@ -281,99 +291,6 @@ symm_QR_4x4(
 }
 
 
-void 
-three_atom_alignment(
-        float * restrict rigid_body, //length 7 = 3 translation + 4 quaternion rotation
-        float * restrict deriv,    // length 3x3x7
-        const float * restrict atom1, const float*  restrict atom2, const float*  restrict atom3,  // each length 3
-        const float*  restrict ref_geom)  // length 9
-{
-    for(int j=0; j<3; ++j) rigid_body[j] = (1.f/3.f)*(atom1[j]+atom2[j]+atom3[j]);
-    
-    float R_[9];
-    #define R(i,j) (R_[(i)*3+(j)])
-    for(int i=0; i<3; ++i)
-        for(int j=0; j<3; ++j)
-            R(i,j) = (atom1[j]-rigid_body[j])*ref_geom[0+i] 
-                   + (atom2[j]-rigid_body[j])*ref_geom[3+i] 
-                   + (atom3[j]-rigid_body[j])*ref_geom[6+i];
-
-    float F[10] = {R(0,0)+R(1,1)+R(2,2), R(1,2)-R(2,1),         R(2,0)-R(0,2),         R(0,1)-R(1,0),
-                                         R(0,0)-R(1,1)-R(2,2),  R(0,1)+R(1,0),         R(0,2)+R(2,0),
-                                                               -R(0,0)+R(1,1)-R(2,2),  R(1,2)+R(2,1),
-                                                                                      -R(0,0)-R(1,1)+R(2,2)};
-    #undef R
-
-    float evals[4], evecs[16];
-
-    symm_QR_4x4(evals, evecs, F, 1e-5, 100);
-
-    int largest_loc=0;
-    for(int i=1; i<4; ++i) if(evals[largest_loc] < evals[i]) largest_loc = i;
-
-    // swap largest eval into location 0
-    float tmp = evals[0];
-    evals[0] = evals[largest_loc];
-    evals[largest_loc] = tmp;
-    
-    for(int j=0; j<4; ++j) {
-        tmp = evecs[0*4+j];
-        evecs[0*4+j] = evecs[largest_loc*4+j];
-        evecs[largest_loc*4+j] = tmp;
-    }
-
-    for(int j=0; j<4; ++j) rigid_body[3+j] = evecs[0*4+j];
-
-    // overwrite evals with the inverse eigenvalue differences
-    for(int j=1; j<4; ++j) evals[j] = 1.f / (evals[0]-evals[j]);
-
-    // The derivative of an eigenvector is given by perturbation theory as 
-    // a linear combination of the other eigenvectors weighted by interaction
-    // matrix elements and the difference of eigenvalues
-
-    // I will assume that the largest eigenvalue is nondegenerate, as would be expected
-    // for a reasonable alignment to a nearly rigid structure
-
-    // unsafe macro for perturbation term
-    #define t(i,j) (f[r(i,j)] * ((i==j) ? evecs[k*4+i]*evecs[0*4+j] : evecs[k*4+i]*evecs[0*4+j]+evecs[k*4+j]*evecs[0*4+i]))
-    #define perturb(ret, f00,f01,f02,f03,f11,f12,f13,f22,f23,f33) do { \
-        const float f[10] = {f00,f01,f02,f03,f11,f12,f13,f22,f23,f33}; \
-        (ret)[3] = (ret)[4] = (ret)[5] = (ret)[6] = 0.f; \
-        for(int k=1; k<4; ++k) { \
-            float c = evals[k]*(t(0,0)+t(0,1)+t(0,2)+t(0,3) \
-                                      +t(1,1)+t(1,2)+t(1,3) \
-                                             +t(2,2)+t(2,3) \
-                                                    +t(3,3)); \
-            for(int j=0; j<4; ++j) (ret)[3+j] += c*evecs[k*4+j]; \
-        } \
-    } while(0)
-
-    #define g(j) ref_geom[3*i+(j)]
-    for(int i=0; i<3; ++i) {
-        // translation vector derivative is (1/N) * identity_matrix(3)
-        deriv[(3*i+0)*7 + 0] = 1.f/3.f;  deriv[(3*i+0)*7 + 1] =     0.f;  deriv[(3*i+0)*7 + 2] =     0.f;
-        deriv[(3*i+1)*7 + 0] =     0.f;  deriv[(3*i+1)*7 + 1] = 1.f/3.f;  deriv[(3*i+1)*7 + 2] =     0.f;
-        deriv[(3*i+2)*7 + 0] =     0.f;  deriv[(3*i+2)*7 + 1] =     0.f;  deriv[(3*i+2)*7 + 2] = 1.f/3.f;
-
-        // quaternion rotation derivative
-        perturb(deriv+(3*i+0)*7, g(0),  0.f, g(2),-g(1), 
-                                       g(0), g(1), g(2), 
-                                            -g(0),  0.f, 
-                                                  -g(0));
-
-        perturb(deriv+(3*i+1)*7, g(1),-g(2),  0.f, g(0), 
-                                      -g(1), g(0),  0.f, 
-                                             g(1), g(2), 
-                                                  -g(1));
-
-        perturb(deriv+(3*i+2)*7, g(2), g(1),-g(0),  0.f, 
-                                      -g(2),  0.f, g(0), 
-                                            -g(2), g(1), 
-                                                   g(2));
-    }
-}
-
-
 struct AffineAlignment : public CoordNode
 {
     struct Params {
@@ -383,12 +300,15 @@ struct AffineAlignment : public CoordNode
 
     CoordNode& pos;
     vector<Params> params;
-    VecArrayStorage jac;
+    // VecArrayStorage jac;
+    VecArrayStorage evals_storage;
+    VecArrayStorage evecs_storage;
 
     AffineAlignment(hid_t grp, CoordNode& pos_):
         CoordNode(get_dset_size(2, grp, "atoms")[0], 7),
         pos(pos_), params(n_elem),
-        jac(3*3*7, n_elem)
+        evals_storage( 4,n_elem),
+        evecs_storage(16,n_elem)
     {
         check_size(grp, "atoms",    n_elem, 3);
         check_size(grp, "ref_geom", n_elem, 3,3);  // (residue, atom, xyz)
@@ -404,11 +324,56 @@ struct AffineAlignment : public CoordNode
         VecArray posc = pos.output;
 
         for(int nr=0; nr<n_elem; ++nr) {
-            auto x1 = load_vec<3>(posc, params[nr].atom[0]);
-            auto x2 = load_vec<3>(posc, params[nr].atom[1]);
-            auto x3 = load_vec<3>(posc, params[nr].atom[2]);
+            auto atom1 = load_vec<3>(posc, params[nr].atom[0]);
+            auto atom2 = load_vec<3>(posc, params[nr].atom[1]);
+            auto atom3 = load_vec<3>(posc, params[nr].atom[2]);
 
-            three_atom_alignment(&rigid_body(0,nr), &jac(0,nr), x1.v,x2.v,x3.v, params[nr].ref_geom);
+            auto center = S(1.f/3.f)*(atom1+atom2+atom3);
+            atom1 -= center;
+            atom2 -= center;
+            atom3 -= center;
+
+            float* restrict body     = &rigid_body(0,nr);
+            float* restrict ref_geom = params[nr].ref_geom;
+
+            for(int j=0; j<3; ++j) body[j] = center[j];
+            
+            S R_[9];
+            #define R(i,j) (R_[(i)*3+(j)])
+            for(int i=0; i<3; ++i)
+                for(int j=0; j<3; ++j)
+                    R(i,j) = atom1[j]*ref_geom[0+i] 
+                           + atom2[j]*ref_geom[3+i] 
+                           + atom3[j]*ref_geom[6+i];
+
+            S F[10] = {R(0,0)+R(1,1)+R(2,2), R(1,2)-R(2,1),         R(2,0)-R(0,2),         R(0,1)-R(1,0),
+                                             R(0,0)-R(1,1)-R(2,2),  R(0,1)+R(1,0),         R(0,2)+R(2,0),
+                                                                   -R(0,0)+R(1,1)-R(2,2),  R(1,2)+R(2,1),
+                                                                                          -R(0,0)-R(1,1)+R(2,2)};
+            #undef R
+
+            // S evals[4], evecs[16];
+            float* restrict evals = &evals_storage(0,nr);
+            float* restrict evecs = &evecs_storage(0,nr);
+
+            symm_QR_4x4(evals, evecs, F, 1e-5f, 100);
+
+            int largest_loc=0;
+            for(int i=1; i<4; ++i) if(evals[largest_loc] < evals[i]) largest_loc = i;
+
+            // swap largest eval into location 0
+            S tmp = evals[0];
+            evals[0] = evals[largest_loc];
+            evals[largest_loc] = tmp;
+            
+            for(int j=0; j<4; ++j) {
+                tmp = evecs[0*4+j];
+                evecs[0*4+j] = evecs[largest_loc*4+j];
+                evecs[largest_loc*4+j] = tmp;
+            }
+
+            for(int j=0; j<4; ++j) body[3+j] = evecs[0*4+j];
+
         }
     }
 
@@ -417,9 +382,15 @@ struct AffineAlignment : public CoordNode
         VecArray pos_sens = pos.sens;
 
         for(int nr=0; nr<n_elem; ++nr) {
-            float sens7[7]; for(int d=0; d<3; ++d) sens7[d] = sens(d,nr);
+            const S* restrict evals = &evals_storage(0,nr);
+            const S* restrict evecs = &evecs_storage(0,nr);
+            const S* restrict ref_geom = params[nr].ref_geom;
 
-            float q[4]; for(int d=0; d<4; ++d) q[d] = output(d+3,nr);
+            // compute inverse eigenvalue differences
+            S inv_evals[4];
+            for(int j=1; j<4; ++j) inv_evals[j] = rcp(evals[0]-evals[j]);
+
+            S q[4]; for(int d=0; d<4; ++d) q[d] = output(d+3,nr);
 
             // push back torque to affine derivatives (multiply by quaternion)
             // the torque is in the tangent space of the rotated frame
@@ -427,20 +398,67 @@ struct AffineAlignment : public CoordNode
             // this means a right multiply by the quaternion itself
 
             float *torque = &sens(3,nr);
-            sens7[3] = 2.f*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
-            sens7[4] = 2.f*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
-            sens7[5] = 2.f*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
-            sens7[6] = 2.f*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+            S quat_sens[4];
+            quat_sens[0] = two<S>()*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
+            quat_sens[1] = two<S>()*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
+            quat_sens[2] = two<S>()*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
+            quat_sens[3] = two<S>()*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
 
-            // now how do I incorporate the jacobian?
+            S quat_sens_diag_basis[4] = {zero<S>(),zero<S>(),zero<S>(),zero<S>()};
+            for(int d=0; d<4; ++d) for(int i=0; i<4; ++i) quat_sens_diag_basis[d] += quat_sens[i]*evecs[d*4+i];
+
+            // The derivative of an eigenvector is given by perturbation theory as 
+            // a linear combination of the other eigenvectors weighted by interaction
+            // matrix elements and the difference of eigenvalues
+
+            // I will assume that the largest eigenvalue is nondegenerate, as would be expected
+            // for a reasonable alignment to a nearly rigid structure
+
+            // unsafe macro for perturbation term
+            #define t(i,j) (f[r(i,j)] * ((i==j) \
+                                            ? evecs[k*4+i]*evecs[0*4+j] \
+                                            : evecs[k*4+i]*evecs[0*4+j]+evecs[k*4+j]*evecs[0*4+i]))
+            #define perturb(ret, f00,f01,f02,f03,f11,f12,f13,f22,f23,f33) do { \
+                const S f[10] = {f00,f01,f02,f03,f11,f12,f13,f22,f23,f33}; \
+                (ret) = 0.f; \
+                for(int k=1; k<4; ++k) { \
+                    S c = inv_evals[k]*(t(0,0)+t(0,1)+t(0,2)+t(0,3) \
+                                              +t(1,1)+t(1,2)+t(1,3) \
+                                                     +t(2,2)+t(2,3) \
+                                                            +t(3,3)); \
+                    (ret) += c*quat_sens_diag_basis[k]; \
+                } \
+            } while(0)
+
+
+
+            S sens3[3]; for(int d=0; d<3; ++d) sens3[d] = S(1.f/3.f)*sens(d,nr);
+
             for(int na=0; na<3; ++na) {
-                for(int d=0; d<3; ++d) {
-                    float* j = &jac((na*3+d)*7,nr);
-                    float s = 0.f;
-                    for(int sens_dim=0; sens_dim<7; ++sens_dim)
-                        s += sens7[sens_dim]*j[sens_dim];
-                    pos_sens(d,params[nr].atom[na]) += s;
-                }
+                float* restrict loc = &pos_sens(0,params[nr].atom[na]);
+                auto g = make_vec3(ref_geom[3*na+0],ref_geom[3*na+1],ref_geom[3*na+2]);
+
+                // quaternion rotation derivative
+                float d0;
+                perturb(d0, g[0],  zero<S>(), g[2],-g[1], 
+                                   g[0],      g[1], g[2], 
+                                             -g[0],  zero<S>(), 
+                                                    -g[0]);
+                loc[0] += sens3[0] + d0;
+
+                float d1;
+                perturb(d1, g[1],-g[2],  zero<S>(), g[0], 
+                                 -g[1],  g[0],      zero<S>(), 
+                                         g[1],      g[2], 
+                                                   -g[1]);
+                loc[1] += sens3[1] + d1;
+
+                float d2;
+                perturb(d2, g[2], g[1],  -g[0],      zero<S>(), 
+                                 -g[2],   zero<S>(), g[0], 
+                                         -g[2],      g[1], 
+                                                     g[2]);
+                loc[2] += sens3[2] + d2;
             }
         }
     }

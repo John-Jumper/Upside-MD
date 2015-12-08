@@ -14,7 +14,7 @@ struct Float4;
 
 static void print_vector(const char* nm, const Float4& val);
 
-alignas(16) static uint8_t left_pack_control_vector[16*16] = {
+alignas(16) static const uint8_t left_pack_control_vector[16*16] = {
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
   4, 5, 6, 7, 0, 1, 2, 3, 8, 9,10,11,12,13,14,15,
@@ -32,6 +32,9 @@ alignas(16) static uint8_t left_pack_control_vector[16*16] = {
   4, 5, 6, 7, 8, 9,10,11,12,13,14,15, 0, 1, 2, 3,
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15
 };
+
+alignas(16) static const uint32_t  abs_mask[4] = {0x7fffffffu, 0x7fffffffu, 0x7fffffffu, 0x7fffffffu};
+alignas(16) static const uint32_t sign_mask[4] = {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u};
 
 
 inline int popcnt_nibble(int value) {
@@ -193,6 +196,20 @@ struct alignas(16) Float4
         }
         Float4 sqrt() const {return (*this) * this->rsqrt();}  // faster than _mm_sqrt_ps
 
+        Float4 abs()  const {
+            // this function assumes well-behaved, finite floats
+            // I am not sure if it works sanely for denormals, inf, and NaN
+            return _mm_and_ps(vec, _mm_load_ps((const float*)abs_mask));
+        }
+
+        Float4 copysign(const Float4 &o)  const {
+            // this function assumes well-behaved, finite floats
+            // I am not sure if it works sanely for denormals, inf, and NaN
+            return _mm_or_ps(
+                    _mm_and_ps(  vec, _mm_load_ps((const float*) abs_mask)),
+                    _mm_and_ps(o.vec, _mm_load_ps((const float*)sign_mask)));
+        }
+
         Float4 operator+=(const Float4 &o) {return vec = _mm_add_ps(vec, o.vec);}
         Float4 operator-=(const Float4 &o) {return vec = _mm_sub_ps(vec, o.vec);}
         Float4 operator*=(const Float4 &o) {return vec = _mm_mul_ps(vec, o.vec);}
@@ -340,15 +357,10 @@ static void print_vector(const char* nm, const Int4& val) {
     printf("%s %3i %3i %3i %3i\n", nm, val.x(), val.y(), val.z(), val.w());
 }
 
-inline Float4 rsqrt(const Float4& x) {
-    // convenience function to match float interface
-    return x.rsqrt();
-}
-inline Float4 rcp(const Float4& x) {
-    // convenience function to match float interface
-    auto r = x.rsqrt();
-    return r*r;
-}
+// convenience functions to match float interface
+inline Float4 rsqrt(const Float4& x) { return x.rsqrt(); }
+inline Float4 sqrtf(const Float4& x) { return x.sqrt(); }
+inline Float4 rcp(const Float4& x) { auto r = x.rsqrt(); return r*r; }
 
 // this function uses a left-to-right convention, unlike the _MM_SHUFFLE macro
 template <int i0, int i1, int i2, int i3>
@@ -461,12 +473,17 @@ inline Float4 cross(const Float4& x, const Float4& y) {
                  shuffle<2,0,1,3>(x) * shuffle<1,2,0,3>(y));
 }
 
-inline float extract_float(const Float4& x) {
-    return x.x();
+inline float extract_float(const Float4& x) { return x.x(); }
+
+inline float extract_float(float x) { return x; }
+
+
+inline Float4 fabsf(const Float4 &x) {
+    return x.abs();
 }
 
-inline float extract_float(float x) {
-    return x;
+inline Float4 copysignf(const Float4 &mag_carrier, const Float4 &sign_carrier) {
+    return mag_carrier.copysign(sign_carrier);
 }
 
 #endif
