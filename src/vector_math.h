@@ -772,6 +772,36 @@ inline Vec<D,Float4> aligned_gather_vec(const float* data, const Int4& offsets) 
     return ret;
 }
 
+
+template<int D>
+inline void aligned_scatter_store_vec_destructive(float* data, const Int4& offsets, Vec<D,Float4>& v) {
+    // note that this function changes the vector v
+
+    float* p0 = data+offsets.x();
+    float* p1 = data+offsets.y();
+    float* p2 = data+offsets.z();
+    float* p3 = data+offsets.w();
+
+    Float4 extra[3]; // scratch space to do the transpose
+
+    #pragma unroll
+    for(int d=0; d<D; d+=4) {
+        transpose4(
+                v[d  ],
+                (d+1<D ? v[d+1] : extra[0]),
+                (d+2<D ? v[d+2] : extra[1]),
+                (d+3<D ? v[d+3] : extra[2]));
+
+        // this writes must be done sequentially in case some of the 
+        // offsets are equal (and hence point to the same memory location)
+        v[d  ]                     .store(p0+d);
+        (d+1<D ? v[d+1] : extra[0]).store(p1+d);
+        (d+2<D ? v[d+2] : extra[1]).store(p2+d);
+        (d+3<D ? v[d+3] : extra[2]).store(p3+d);
+    }
+}
+
+
 template<int D>
 inline void aligned_scatter_update_vec_destructive(float* data, const Int4& offsets, Vec<D,Float4>& v) {
     // note that this function changes the vector v

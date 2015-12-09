@@ -189,10 +189,19 @@ struct alignas(16) Float4
             // 12-bit accuracy (about to about 0.02%)
             return _mm_rsqrt_ps(vec);
         }
+        Float4 approx_rcp() const { 
+            // 12-bit accuracy (about to about 0.02%)
+            return _mm_rcp_ps(vec);
+        }
         Float4 rsqrt() const { 
             // one round of newton-raphson, see online documentation for _mm_rsqrt_ps for details
             Float4 a = _mm_rsqrt_ps(vec);   // 12-bit approximation
             return Float4(1.5f)*a - (Float4(0.5f)*(*this)) * a * (a*a);
+        }
+        Float4 rcp() const {
+            // one round of newton-raphson, see online documentation for _mm_rcp_ps for details
+            auto x = approx_rcp();
+            return x*(Float4(2.f) - (*this)*x);
         }
         Float4 sqrt() const {return (*this) * this->rsqrt();}  // faster than _mm_sqrt_ps
 
@@ -360,7 +369,7 @@ static void print_vector(const char* nm, const Int4& val) {
 // convenience functions to match float interface
 inline Float4 rsqrt(const Float4& x) { return x.rsqrt(); }
 inline Float4 sqrtf(const Float4& x) { return x.sqrt(); }
-inline Float4 rcp(const Float4& x) { auto r = x.rsqrt(); return r*r; }
+inline Float4 rcp(const Float4& x) { return x.rcp();}
 
 // this function uses a left-to-right convention, unlike the _MM_SHUFFLE macro
 template <int i0, int i1, int i2, int i3>
@@ -429,7 +438,7 @@ inline Float4 max(const Float4& a, const Float4& b) {
 }
 
 inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
-inline Float4 approx_rcp  (const Float4& x) {auto y = x.approx_rsqrt(); return y*y;}
+inline Float4 approx_rcp  (const Float4& x) {return x.approx_rcp  ();}
 
 inline Float4 left_multiply_3x3(const Float4& row0, const Float4& row1, const Float4& row2, const Float4& x) {
     return row0.dp<1,0,0,0, 1,1,1,0>(x) | 

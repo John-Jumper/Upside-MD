@@ -18,7 +18,7 @@ using namespace std;
 #include <Eigen/Eigenvalues>
 #endif
 
-typedef float S;
+typedef Float4 S;
 
 namespace {
 
@@ -294,57 +294,72 @@ symm_QR_4x4(
 struct AffineAlignment : public CoordNode
 {
     struct Params {
-        index_t atom[3];
-        float     ref_geom[9];
+        alignas(16) int32_t atom_offsets[3][4];
+        alignas(16) float   ref_geom[3][3][4];
     };
 
+    int n_group;
     CoordNode& pos;
     vector<Params> params;
-    // VecArrayStorage jac;
-    VecArrayStorage evals_storage;
-    VecArrayStorage evecs_storage;
+    unique_ptr<Float4[]> evals_storage;
+    unique_ptr<Float4[]> evecs_storage;
 
     AffineAlignment(hid_t grp, CoordNode& pos_):
         CoordNode(get_dset_size(2, grp, "atoms")[0], 7),
-        pos(pos_), params(n_elem),
-        evals_storage( 4,n_elem),
-        evecs_storage(16,n_elem)
+        n_group(round_up(n_elem,4)/4),
+        
+        pos(pos_), params(n_group),
+        evals_storage(new_aligned<Float4>(n_group* 4)),
+        evecs_storage(new_aligned<Float4>(n_group*16))
     {
         check_size(grp, "atoms",    n_elem, 3);
         check_size(grp, "ref_geom", n_elem, 3,3);  // (residue, atom, xyz)
 
-        traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){params[i].atom[j]=x;});
-        traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){params[i].ref_geom[na*3+d]=x;});
+        traverse_dset<2,int  >(grp,"atoms",   [&](size_t i,size_t j,          int   x){
+                params[i/4].atom_offsets[j][i%4] = x*pos.output.row_width;});
+        traverse_dset<3,float>(grp,"ref_geom",[&](size_t i,size_t na,size_t d,float x){
+                params[i/4].ref_geom[na][d][i%4]=x;});
+
+        // handle non-multiple of 4's by padding (needs testing)
+        for(int i=n_elem; i<round_up(n_elem,4); ++i) {
+            for(int j: range(3))
+                params[i/4].atom_offsets[j][i%4] = params[i/4].atom_offsets[j][0];
+
+            for(int na: range(3))
+                for(int d: range(3))
+                    params[i/4].ref_geom[na][d][i%4] = params[i/4].ref_geom[na][d][0];
+        }
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("affine_alignment"));
 
         VecArray rigid_body = output;
-        VecArray posc = pos.output;
+        float* posc = pos.output.x.get();
 
-        for(int nr=0; nr<n_elem; ++nr) {
-            auto atom1 = load_vec<3>(posc, params[nr].atom[0]);
-            auto atom2 = load_vec<3>(posc, params[nr].atom[1]);
-            auto atom3 = load_vec<3>(posc, params[nr].atom[2]);
+        for(int ng=0; ng<n_group; ++ng) {
+            const auto& p = params[ng];
+
+            auto atom1 = aligned_gather_vec<3>(posc, Int4(p.atom_offsets[0]));
+            auto atom2 = aligned_gather_vec<3>(posc, Int4(p.atom_offsets[1]));
+            auto atom3 = aligned_gather_vec<3>(posc, Int4(p.atom_offsets[2]));
 
             auto center = S(1.f/3.f)*(atom1+atom2+atom3);
             atom1 -= center;
             atom2 -= center;
             atom3 -= center;
 
-            float* restrict body     = &rigid_body(0,nr);
-            float* restrict ref_geom = params[nr].ref_geom;
+            auto ref_geom1 = make_vec3(Float4(p.ref_geom[0][0]), Float4(p.ref_geom[0][1]), Float4(p.ref_geom[0][2]));
+            auto ref_geom2 = make_vec3(Float4(p.ref_geom[1][0]), Float4(p.ref_geom[1][1]), Float4(p.ref_geom[1][2]));
+            auto ref_geom3 = make_vec3(Float4(p.ref_geom[2][0]), Float4(p.ref_geom[2][1]), Float4(p.ref_geom[2][2]));
 
-            for(int j=0; j<3; ++j) body[j] = center[j];
-            
-            S R_[9];
-            #define R(i,j) (R_[(i)*3+(j)])
+            S R_[3][3];
+            #define R(i,j) (R_[i][j])
             for(int i=0; i<3; ++i)
                 for(int j=0; j<3; ++j)
-                    R(i,j) = atom1[j]*ref_geom[0+i] 
-                           + atom2[j]*ref_geom[3+i] 
-                           + atom3[j]*ref_geom[6+i];
+                    R(i,j) = atom1[j] * ref_geom1[i]
+                           + atom2[j] * ref_geom2[i]
+                           + atom3[j] * ref_geom3[i];
 
             S F[10] = {R(0,0)+R(1,1)+R(2,2), R(1,2)-R(2,1),         R(2,0)-R(0,2),         R(0,1)-R(1,0),
                                              R(0,0)-R(1,1)-R(2,2),  R(0,1)+R(1,0),         R(0,2)+R(2,0),
@@ -353,56 +368,72 @@ struct AffineAlignment : public CoordNode
             #undef R
 
             // S evals[4], evecs[16];
-            float* restrict evals = &evals_storage(0,nr);
-            float* restrict evecs = &evecs_storage(0,nr);
+            Float4* restrict evals = evals_storage.get() + ng* 4;
+            Float4* restrict evecs = evecs_storage.get() + ng*16;
 
             symm_QR_4x4(evals, evecs, F, 1e-5f, 100);
 
-            int largest_loc=0;
-            for(int i=1; i<4; ++i) if(evals[largest_loc] < evals[i]) largest_loc = i;
+            // swap largest eigenvalue into location 0
+            for(int i=1; i<4; ++i) {
+                auto do_flip = evals[0] < evals[i];
 
-            // swap largest eval into location 0
-            S tmp = evals[0];
-            evals[0] = evals[largest_loc];
-            evals[largest_loc] = tmp;
-            
-            for(int j=0; j<4; ++j) {
-                tmp = evecs[0*4+j];
-                evecs[0*4+j] = evecs[largest_loc*4+j];
-                evecs[largest_loc*4+j] = tmp;
+                auto eval0 = ternary(do_flip, evals[i], evals[0]);
+                auto evali = ternary(do_flip, evals[0], evals[i]);
+                evals[0] = eval0;
+                evals[i] = evali;
+
+                for(int d=0; d<4; ++d) {
+                    auto evec0 = ternary(do_flip, evecs[i*4+d], evecs[0*4+d]);
+                    auto eveci = ternary(do_flip, evecs[0*4+d], evecs[i*4+d]);
+                    evecs[0*4+d] = evec0;
+                    evecs[i*4+d] = eveci;
+                }
             }
 
+            Vec<8,S> body; // really 7 components but I need the eight for the transpose
+            for(int j=0; j<3; ++j) body[j] = center[j];
             for(int j=0; j<4; ++j) body[3+j] = evecs[0*4+j];
 
+            transpose4(body[0],body[1],body[2],body[3]);
+            for(int i=0; i<4; ++i) body[i].store(&rigid_body(0,4*ng+i));
+
+            transpose4(body[4],body[5],body[6],body[7]);
+            for(int i=0; i<4; ++i) body[4+i].store(&rigid_body(4,4*ng+i));
         }
     }
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
-        VecArray pos_sens = pos.sens;
+        float* pos_sens = pos.sens.x.get();
 
-        for(int nr=0; nr<n_elem; ++nr) {
-            const S* restrict evals = &evals_storage(0,nr);
-            const S* restrict evecs = &evecs_storage(0,nr);
-            const S* restrict ref_geom = params[nr].ref_geom;
+        for(int ng=0; ng<n_group; ++ng) {
+            const auto& p = params[ng];
+
+            const Float4* restrict evals = evals_storage.get() + ng* 4;
+            const Float4* restrict evecs = evecs_storage.get() + ng*16;
 
             // compute inverse eigenvalue differences
             S inv_evals[4];
             for(int j=1; j<4; ++j) inv_evals[j] = rcp(evals[0]-evals[j]);
-
-            S q[4]; for(int d=0; d<4; ++d) q[d] = output(d+3,nr);
 
             // push back torque to affine derivatives (multiply by quaternion)
             // the torque is in the tangent space of the rotated frame
             // to act on a tangent in the affine space, I need to push that tangent into the rotated space
             // this means a right multiply by the quaternion itself
 
-            float *torque = &sens(3,nr);
-            S quat_sens[4];
-            quat_sens[0] = two<S>()*(-torque[0]*q[1] - torque[1]*q[2] - torque[2]*q[3]);
-            quat_sens[1] = two<S>()*( torque[0]*q[0] + torque[1]*q[3] - torque[2]*q[2]);
-            quat_sens[2] = two<S>()*( torque[1]*q[0] + torque[2]*q[1] - torque[0]*q[3]);
-            quat_sens[3] = two<S>()*( torque[2]*q[0] + torque[0]*q[2] - torque[1]*q[1]);
+            // evecs[0] is the rotation quaternion
+            S sens3  [3] = {Float4(&sens(0,4*ng+0)), Float4(&sens(0,4*ng+1)),Float4(&sens(0,4*ng+2))};
+            S torque [3] = {Float4(&sens(0,4*ng+3)), Float4(&sens(4,4*ng+0)),Float4(&sens(4,4*ng+1))};
+            S padding[2] = {Float4(&sens(4,4*ng+2)), Float4(&sens(4,4*ng+3))};
+
+            transpose4(sens3 [0],sens3 [1],sens3  [2],torque [0]);
+            transpose4(torque[1],torque[2],padding[0],padding[1]);
+
+            S quat_sens[4] = {
+                two<S>()*(-torque[0]*evecs[1] - torque[1]*evecs[2] - torque[2]*evecs[3]),
+                two<S>()*( torque[0]*evecs[0] + torque[1]*evecs[3] - torque[2]*evecs[2]),
+                two<S>()*( torque[1]*evecs[0] + torque[2]*evecs[1] - torque[0]*evecs[3]),
+                two<S>()*( torque[2]*evecs[0] + torque[0]*evecs[2] - torque[1]*evecs[1])};
 
             S quat_sens_diag_basis[4] = {zero<S>(),zero<S>(),zero<S>(),zero<S>()};
             for(int d=0; d<4; ++d) for(int i=0; i<4; ++i) quat_sens_diag_basis[d] += quat_sens[i]*evecs[d*4+i];
@@ -420,7 +451,6 @@ struct AffineAlignment : public CoordNode
                                             : evecs[k*4+i]*evecs[0*4+j]+evecs[k*4+j]*evecs[0*4+i]))
             #define perturb(ret, f00,f01,f02,f03,f11,f12,f13,f22,f23,f33) do { \
                 const S f[10] = {f00,f01,f02,f03,f11,f12,f13,f22,f23,f33}; \
-                (ret) = 0.f; \
                 for(int k=1; k<4; ++k) { \
                     S c = inv_evals[k]*(t(0,0)+t(0,1)+t(0,2)+t(0,3) \
                                               +t(1,1)+t(1,2)+t(1,3) \
@@ -431,34 +461,27 @@ struct AffineAlignment : public CoordNode
             } while(0)
 
 
-
-            S sens3[3]; for(int d=0; d<3; ++d) sens3[d] = S(1.f/3.f)*sens(d,nr);
-
             for(int na=0; na<3; ++na) {
-                float* restrict loc = &pos_sens(0,params[nr].atom[na]);
-                auto g = make_vec3(ref_geom[3*na+0],ref_geom[3*na+1],ref_geom[3*na+2]);
+                Vec<3,S> deriv = S(1.f/3.f)*make_vec3(sens3[0],sens3[1],sens3[2]);
+                auto g = make_vec3(Float4(p.ref_geom[na][0]), Float4(p.ref_geom[na][1]), Float4(p.ref_geom[na][2]));
 
                 // quaternion rotation derivative
-                float d0;
-                perturb(d0, g[0],  zero<S>(), g[2],-g[1], 
-                                   g[0],      g[1], g[2], 
-                                             -g[0],  zero<S>(), 
-                                                    -g[0]);
-                loc[0] += sens3[0] + d0;
+                perturb(deriv[0], g[0],  zero<S>(), g[2],-g[1], 
+                                         g[0],      g[1], g[2], 
+                                                   -g[0],  zero<S>(), 
+                                                          -g[0]);
 
-                float d1;
-                perturb(d1, g[1],-g[2],  zero<S>(), g[0], 
-                                 -g[1],  g[0],      zero<S>(), 
-                                         g[1],      g[2], 
-                                                   -g[1]);
-                loc[1] += sens3[1] + d1;
+                perturb(deriv[1], g[1],-g[2],  zero<S>(), g[0], 
+                                       -g[1],  g[0],      zero<S>(), 
+                                               g[1],      g[2], 
+                                                         -g[1]);
 
-                float d2;
-                perturb(d2, g[2], g[1],  -g[0],      zero<S>(), 
-                                 -g[2],   zero<S>(), g[0], 
-                                         -g[2],      g[1], 
-                                                     g[2]);
-                loc[2] += sens3[2] + d2;
+                perturb(deriv[2], g[2], g[1],  -g[0],      zero<S>(), 
+                                       -g[2],   zero<S>(), g[0], 
+                                               -g[2],      g[1], 
+                                                           g[2]);
+
+                aligned_scatter_update_vec_destructive(pos_sens, Int4(p.atom_offsets[na]), deriv);
             }
         }
     }
