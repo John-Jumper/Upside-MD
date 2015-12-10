@@ -273,10 +273,13 @@ struct InteractionGraph{
             store_vec(edge_deriv + ne*(n_dim1+n_dim2)+4*n_dim1, d2);
 
             #ifdef PARAM_DERIV
-            NOT UPDATED YET;
-            edge_param_deriv.push_back(make_zero<n_param>());
-            IType::param_deriv(edge_param_deriv.back(), interaction_param+interaction*n_param, 
-                               coord1, coord2);
+            for(int i: range(4)) {
+                Vec<n_dim1> c1; for(int d: range(n_dim1)) c1[d] = extract_float(coord1[d],i);
+                Vec<n_dim2> c2; for(int d: range(n_dim2)) c2[d] = extract_float(coord2[d],i);
+
+                edge_param_deriv.push_back(make_zero<n_param>());
+                IType::param_deriv(edge_param_deriv.back(), interaction_ptr[i], c1,c2);
+            }
             #endif
         }
     }
@@ -312,9 +315,11 @@ struct InteractionGraph{
             aligned_scatter_update_vec_destructive((symmetric?pos1_deriv:pos2_deriv).get(),i2*Int4(n_dim2a), d2);
 
             #ifdef PARAM_DERIV
-            auto t1 = types1[i1];
-            auto t2 = types2[i2];
-            update_vec(interaction_param_deriv, t1*n_type2+t2, sens*edge_param_deriv[ne]);
+            for(int i: range(4)) {
+                int t1 = types1[edge_indices1[ne+i]];
+                int t2 = types2[edge_indices2[ne+i]];
+                update_vec(interaction_param_deriv, t1*n_type2+t2, extract_float(sens,i)*edge_param_deriv[ne+i]);
+            }
             #endif
         }
 

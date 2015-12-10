@@ -27,7 +27,7 @@ void free_deriv_engine(DerivEngine* engine) {
 
 // 0 indicates success, anything else is failure
 int evaluate_energy(float* energy, DerivEngine* engine, const float* pos) try {
-    VecArray a = engine->pos->coords().value;
+    VecArray a = engine->pos->output;
     for(int na: range(engine->pos->n_atom))
         for(int d: range(3))
             a(d,na) = pos[na*3+d];
@@ -47,7 +47,7 @@ int evaluate_energy(float* energy, DerivEngine* engine, const float* pos) try {
 // 0 indicates success, anything else is failure
 int evaluate_deriv(float* deriv, DerivEngine* engine, const float* pos) try {
     // result is size (n_atom,3)
-    VecArray a = engine->pos->coords().value;
+    VecArray a = engine->pos->output;
     for(int na: range(engine->pos->n_atom))
         for(int d: range(3))
             a(d,na) = pos[na*3+d];
@@ -70,7 +70,7 @@ int set_param(int n_param, const float* param, DerivEngine* engine, const char* 
     engine->get(string(node_name)).computation->set_param(param_v);
     return 0;
 #else
-    fprintf(stderr, "not compile for param deriv\n");
+    fprintf(stderr, "not compiled for param deriv\n");
     return -1;
 #endif
 } catch(const string& s) {
@@ -129,7 +129,7 @@ int get_output(int n_output, float* output, DerivEngine* engine, const char* nod
     } else {
         auto& c = dynamic_cast<CoordNode&>(dc);
         if(n_output != c.n_elem*c.elem_width) throw string("wrong size for CoordNode");
-        VecArray a = c.coords().value;
+        VecArray a = c.output;
         for(int ne: range(c.n_elem))
             for(int d: range(c.elem_width))
                 output[ne*c.elem_width + d] = a(d,ne);

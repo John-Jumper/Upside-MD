@@ -484,6 +484,12 @@ inline Float4 cross(const Float4& x, const Float4& y) {
 }
 
 inline float extract_float(const Float4& x) { return x.x(); }
+inline float extract_float(const Float4& x, int d) { 
+    // this function is slow but can be convenient
+    alignas(16) float data[4];
+    x.store(data);
+    return data[d];
+}
 
 inline float extract_float(float x) { return x; }
 
