@@ -583,21 +583,22 @@ try {
         for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
-        printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.4f seconds/simulation_time_unit)\n",
-                elapsed, elapsed*1e6/systems.size()/n_round/3, elapsed/duration_arg.getValue());
+        printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.1e simulation_time_unit/hour)\n",
+                elapsed, elapsed*1e6/systems.size()/n_round/3, 
+                n_round*3*dt/elapsed * 3600.);
 
-        /*
-        {
-            auto sum_kin = vector<double>(n_system, 0.);
-            auto n_kin   = vector<long>  (n_system, 0);
-            traverse_dset<2,float>(config.get(),"/output/kinetic", [&](size_t i, size_t ns, float x){
-                    if(i>n_round*0.5 / frame_interval){ sum_kin[ns]+=x; n_kin[ns]++; }
+        printf("\navg_kinetic_energy/1.5kT");
+        for(auto& sys: systems) {
+            double sum_kinetic = 0.;
+            long n_kinetic = 0l;
+            size_t tot_frames = get_dset_size(2, sys.config.get(), "/output/kinetic")[0];
+
+            traverse_dset<2,float>(sys.config.get(),"/output/kinetic", [&](size_t nf, size_t ns, float x){
+                    if(nf>tot_frames/2){ sum_kinetic+=x; n_kinetic++; }
                     });
-            printf("\navg_kinetic_energy/1.5kT");
-            for(int ns=0; ns<n_system; ++ns) printf(" % .4f", sum_kin[ns]/n_kin[ns] / (1.5*temperature[ns]));
-            printf("\n");
+            printf(" % .3f", sum_kinetic/n_kinetic / (1.5*sys.temperature));
         }
-        */
+        printf("\n");
 
         try {
             if(pivot_interval) {

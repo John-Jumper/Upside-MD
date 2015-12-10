@@ -13,11 +13,6 @@
 using namespace h5;
 using namespace std;
 
-#if 0
-#include <Eigen/Dense>
-#include <Eigen/Eigenvalues>
-#endif
-
 typedef Float4 S;
 
 namespace {
@@ -73,6 +68,7 @@ S house(
 
     x[0] = mu;
     for(int i=1; i<n; ++i) x[i] *= rcp(s);
+
     return beta;
 }
 
@@ -192,8 +188,9 @@ implicit_symm_QR_step_4x4(
         S * restrict rot_) // rotation to accumulate Givens rotations
                      // must be at least nx4-sized
 {
-    S dval = half<S>()*(d[n-2] - d[n-1]);
+    S dval = half<S>()*(d[n-2] - d[n-1]) + S(1e-20f);  // paranoia against NaN
     S mu = d[n-1] - u[n-2]*u[n-2]*rcp(dval+copysignf(sqrtf(dval*dval + u[n-2]*u[n-2]),dval));
+
     S x = d[0] - mu;
     S z = u[0];
     
@@ -240,7 +237,6 @@ symm_QR_4x4(
         S tol,  // relative tolerance for off-diagonal entries (suggest something like 1e-5)
         int max_iter) 
 {
-#if 1
     const int n = 4;
 
     S beta[2];
@@ -274,19 +270,6 @@ symm_QR_4x4(
         implicit_symm_QR_step_4x4(n-q-p, d+p, u+p, rot+4*p);
     }
     return -1;  // non-convergence
-#else 
-    using namespace Eigen;
-    Matrix4f Amat; // only the lower triangle will be used
-    for(int i=0; i<4; ++i) for(int j=0; j<4; ++j) Amat(i,j) = A[r(i,j)];
-    SelfAdjointEigenSolver<Matrix4f> solver(Amat);
-    auto &eigvals = solver.eigenvalues();
-    auto &eigvecs = solver.eigenvectors();
-    for(int i=0; i<4; ++i) {
-        d[i] = eigvals[i];
-        for(int j=0; j<4; ++j) rot[i*4+j] = eigvecs(j,i);
-    }
-    return 1;
-#endif
 }
 }
 

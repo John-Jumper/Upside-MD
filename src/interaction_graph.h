@@ -236,8 +236,10 @@ struct InteractionGraph{
             }
             n_edge = ne;
             for(int i=ne; i<round_up(ne,4); ++i) {
-                edge_indices1[i] = 0;
-                edge_indices2[i] = 0; // just put something sane here
+                // we need something sane to fill out the last group of 4 so just duplicate the interactions
+                // with sensitivity 0.
+                edge_indices1[i] = edge_indices1[i-i%4];
+                edge_indices2[i] = edge_indices2[i-i%4]; // just put something sane here
             }
         }
         // printf("n_edge for n_dim1 %i n_dim2 %i is %i\n", n_dim1, n_dim2, n_edge);
@@ -267,7 +269,6 @@ struct InteractionGraph{
             Vec<n_dim1,Float4> d1;
             Vec<n_dim2,Float4> d2;
             IType::compute_edge(d1,d2, interaction_ptr, coord1,coord2).store(edge_value+ne);
-
             store_vec(edge_deriv + ne*(n_dim1+n_dim2),          d1);
             store_vec(edge_deriv + ne*(n_dim1+n_dim2)+4*n_dim1, d2);
 

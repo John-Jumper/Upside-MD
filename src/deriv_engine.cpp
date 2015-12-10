@@ -123,6 +123,9 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
 
 void DerivEngine::compute(ComputeMode mode) {
     // FIXME depth-first traversal would be simpler and more cache-friendly
+    #ifdef CHECK_FOR_NAN
+    mode = PotentialAndDerivMode; // catch NaN early
+    #endif
 
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
@@ -144,11 +147,33 @@ void DerivEngine::compute(ComputeMode mode) {
                     if(mode == PotentialAndDerivMode && n.computation->potential_term) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
                         potential += pot_node->potential;
+
+                        #ifdef CHECK_FOR_NAN
+                        if(isnan(pot_node->potential)) throw std::string("Node " + n.name + " produced a NaN potential");
+                        #endif
                     }
                     if(!n.computation->potential_term) {
                         // ensure zero sensitivity for later derivative writing
-                        auto coord_node = static_cast<CoordNode*>(n.computation.get());
+                        CoordNode* coord_node = static_cast<CoordNode*>(n.computation.get());
                         fill(coord_node->sens, 0.f);
+
+                        #ifdef CHECK_FOR_NAN
+                        for(int ne: range(coord_node->n_elem)) {
+                            for(int d: range(coord_node->elem_width)) {
+                                if(isnan(coord_node->output(d,ne))) {
+                                    printf("\n%s output\n", n.name.c_str());
+                                    for(int ne: range(coord_node->n_elem)) {
+                                        printf("%4i", ne);
+                                        for(int d: range(coord_node->elem_width))
+                                            printf(" % 6.2f", coord_node->output(d,ne));
+                                        printf("\n");
+                                    }
+                                    throw "Node " + n.name + " produced NaN in location (" + 
+                                        to_string(d) + ","+to_string(ne)+")";
+                                }
+                            }
+                        }
+                        #endif
                     }
                 }
             }
@@ -167,17 +192,6 @@ void DerivEngine::compute(ComputeMode mode) {
         }
         if(!not_finished) break;
     }
-
-    // for(auto& n: nodes) {
-    //     if(n.computation->potential_term) continue;
-    //     printf("\n%s sens\n", n.name.c_str());
-    //     auto c = static_cast<CoordNode*>(n.computation.get());
-    //     for(int ne: range(c->n_elem)) {
-    //         printf("%3i ", ne);
-    //         for(int d: range(c->elem_width)) printf(" % 7.2f", c->sens(d,ne));
-    //         printf("\n");
-    //     }
-    // }
 }
 
 

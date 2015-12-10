@@ -170,96 +170,6 @@ struct NodeHolder {
 
 constexpr static int simd_width = 4;
 
-// struct SimdVecArrayStorage {
-//     // AoSoA structure for holding partially transposed data
-//     // makes it very easy to read Vec<n_dim,Float4> data
-// 
-//     int elem_width, n_elem;
-//     unique_ptr<float[]> x;
-// 
-//     SimdVecArrayStorage(int elem_width_, int n_elem_min_):
-//         elem_width(elem_width_), n_elem(round_up(n_elem_min_,simd_width)), 
-//         x(new_aligned<float>(n_elem*elem_width, simd_width)) {}
-// 
-//     float& operator()(int i_comp, int i_elem) {
-//         return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
-//     }
-//     const float& operator()(int i_comp, int i_elem) const {
-//         return x[(i_elem-i_elem%simd_width)*elem_width + i_comp*simd_width + i_elem%simd_width];
-//     }
-// };
-// 
-// template <int D>
-// inline Vec<D,Float4> load_whole_vec(const SimdVecArrayStorage& a, int idx) {
-//     // index must be divisible by 4
-//     // assert(a.elem_width == D)
-//     Vec<D,Float4> r;
-//     #pragma unroll
-//     for(int d=0; d<D; ++d) r[d] = Float4(a.x + idx*D + d*4);
-//     return r;
-// }
-// 
-// template <int D>
-// inline void store_whole_vec(SimdVecArrayStorage& a, int idx, const Vec<D,Float4>& r) {
-//     // index must be divisible by 4
-//     // assert(a.elem_width == D)
-//     #pragma unroll
-//     for(int d=0; d<D; ++d) r[d].store(a.x + idx*D + d*4);
-// }
-// 
-// // FIXME remove these inefficient helper functions
-// template <int D>
-// inline Vec<D,float> load_vec(const SimdVecArrayStorage& a, int idx) {
-//     Vec<D,float> r;
-//     #pragma unroll
-//     for(int d=0; d<D; ++d) r[d] = a(d,idx);
-//     return r;
-// }
-// 
-// template <int D>
-// inline void store_vec(SimdVecArrayStorage& a, int idx, const Vec<D,float>& r) {
-//     #pragma unroll
-//     for(int d=0; d<D; ++d) a(d,idx) = r[d];
-// }
-// 
-// static void fill(SimdVecArrayStorage& v, float fill_value) {
-//     std::fill_n(v.x.get(), v.n_elem*v.elem_width, fill_value);
-// }
-// 
-// template<int D>
-// void node_update_scatter(float* data, const Int4& offsets, Vec<D,Float4>& v) {
-//     return v.NOT_IMPLEMENTED_IF_D_IS_NOT_3;
-// }
-// 
-// template<>
-// void node_update_scatter<3>(float* data, const Int4& offsets, Vec<3,Float4>& v) {
-//     // note that this function changes the vector v
-//     constexpr int D=3;
-// 
-//     float* p0 = data+offsets.x();
-//     float* p1 = data+offsets.y();
-//     float* p2 = data+offsets.z();
-//     float* p3 = data+offsets.w();
-// 
-//     Float4 e[3]; // scratch space to do the transpose
-// 
-//     #pragma unroll
-//     for(int d=0; d<D; d+=4)
-//         transpose4(
-//                 v[d  ],
-//                 (d+1<D ? v[d+1] : e[0]),
-//                 (d+2<D ? v[d+2] : e[1]),
-//                 (d+3<D ? v[d+3] : e[2]));
-// 
-// 
-//     // this writes must be done sequentially in case some of the 
-//     // offsets are equal (and hence point to the same memory location)
-//     v[0] *= Float4(p0); (v[0] * rcp(v[0].sum_in_all_entries())).store(p0);
-//     v[1] *= Float4(p1); (v[1] * rcp(v[1].sum_in_all_entries())).store(p1);
-//     v[2] *= Float4(p2); (v[2] * rcp(v[2].sum_in_all_entries())).store(p2);
-//     e[2] *= Float4(p3); (e[2] * rcp(e[2].sum_in_all_entries())).store(p3);
-// }
-
 struct EdgeHolder {
     public:
         int n_rot1, n_rot2;  // should have rot1 < rot2
@@ -284,10 +194,10 @@ struct EdgeHolder {
         EdgeHolder(NodeHolder &nodes1_, NodeHolder &nodes2_, int max_n_edge):
             n_rot1(nodes1_.n_rot), n_rot2(nodes2_.n_rot),
             nodes1(nodes1_), nodes2(nodes2_),
-            prob      (n_rot1*ru(n_rot2), max_n_edge),
-            cur_belief(ru(n_rot1)+ru(n_rot2), max_n_edge),
-            old_belief(ru(n_rot1)+ru(n_rot2), max_n_edge),
-            marginal(n_rot1*n_rot2, max_n_edge+1), // the +1 ensures we can write past the end
+            prob      (n_rot1*ru(n_rot2),     max_n_edge+3),
+            cur_belief(ru(n_rot1)+ru(n_rot2), max_n_edge+3),
+            old_belief(ru(n_rot1)+ru(n_rot2), max_n_edge+3),
+            marginal(n_rot1*n_rot2,           max_n_edge+3), // the +1 ensures we can write past the end
 
             edge_indices1(new_aligned<int>(max_n_edge,simd_width)),
             edge_indices2(new_aligned<int>(max_n_edge,simd_width)),
@@ -442,21 +352,32 @@ struct EdgeHolder {
                 auto cur_node_belief1 = cur_edge_belief1 * Float4(vec_cur_node_belief1 + i1);
                 auto cur_node_belief2 = cur_edge_belief2 * Float4(vec_cur_node_belief2 + i2);
 
-                // // let's approximately l1 normalize everything to avoid any numerical problems later
-                // auto scales_for_unit_l1 = Float4(3.f)*approx_rcp(horizontal_add(
-                //         horizontal_add(cur_edge_belief1, cur_edge_belief2),
-                //         horizontal_add(cur_node_belief1, cur_node_belief2)));
-                // 
-                // cur_edge_belief1 *= scales_for_unit_l1.broadcast<0>();
-                // cur_edge_belief2 *= scales_for_unit_l1.broadcast<1>();
-                // cur_node_belief1 *= scales_for_unit_l1.broadcast<2>();
-                // cur_node_belief2 *= scales_for_unit_l1.broadcast<3>();
-
                 // I might be able to do the normalization only every few steps if I wanted
-                cur_edge_belief1.store(cur_belief.x + ne*4*2 + 0);
-                cur_edge_belief2.store(cur_belief.x + ne*4*2 + 4);
+                cur_edge_belief1.store(cur_belief.x + ne*8 + 0);
+                cur_edge_belief2.store(cur_belief.x + ne*8 + 4);
                 cur_node_belief1.store(vec_cur_node_belief1 + i1);
                 cur_node_belief2.store(vec_cur_node_belief2 + i2);
+            }
+
+            // Perform edge normalization for all edges
+            // We could perform it in the loop above, but it would insert a long dependency chain in the 
+            // middle of the algorithm.  The hope is that the processor will expose much more instruction
+            // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal adds.
+            for(int ne=0; ne<n_edge; ne+=2) {
+                auto cb11 = Float4(cur_belief.x + ne*8 +  0);
+                auto cb12 = Float4(cur_belief.x + ne*8 +  4);
+                auto cb21 = Float4(cur_belief.x + ne*8 +  8);
+                auto cb22 = Float4(cur_belief.x + ne*8 + 12);
+
+                // let's approximately l1 normalize everything edges to avoid any numerical problems later
+                auto scales_for_unit_l1 = approx_rcp(horizontal_add(
+                        horizontal_add(cb11, cb12),
+                        horizontal_add(cb21, cb22)));
+
+                (cb11*scales_for_unit_l1.broadcast<0>()).store(cur_belief.x + ne*8 +  0);
+                (cb12*scales_for_unit_l1.broadcast<1>()).store(cur_belief.x + ne*8 +  4);
+                (cb21*scales_for_unit_l1.broadcast<2>()).store(cur_belief.x + ne*8 +  8);
+                (cb22*scales_for_unit_l1.broadcast<3>()).store(cur_belief.x + ne*8 + 12);
             }
         }
 

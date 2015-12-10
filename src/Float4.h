@@ -203,7 +203,8 @@ struct alignas(16) Float4
             auto x = approx_rcp();
             return x*(Float4(2.f) - (*this)*x);
         }
-        Float4 sqrt() const {return (*this) * this->rsqrt();}  // faster than _mm_sqrt_ps
+        // Float4 sqrt() const {return (*this) * this->rsqrt();}  // faster than _mm_sqrt_ps but NaN for vec==0.
+        Float4 sqrt() const {return _mm_sqrt_ps(vec);}
 
         Float4 abs()  const {
             // this function assumes well-behaved, finite floats
@@ -494,5 +495,12 @@ inline Float4 fabsf(const Float4 &x) {
 inline Float4 copysignf(const Float4 &mag_carrier, const Float4 &sign_carrier) {
     return mag_carrier.copysign(sign_carrier);
 }
+
+inline Float4 approx_max_normalize3(const Float4& o) {
+    auto m = max(o.broadcast<0>(), max(o.broadcast<1>(), o.broadcast<2>()));
+    return o*approx_rcp(m);
+}
+
+inline Float4 isnan(const Float4& o) {return o!=o;}
 
 #endif
