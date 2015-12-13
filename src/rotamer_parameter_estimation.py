@@ -13,7 +13,8 @@ import concurrent.futures
 n_knot_angular = 15
 n_angular = 2*n_knot_angular
 n_restype = 24
-n_knot = 18
+n_knot_sc = 16
+n_knot_hb = 12
 
 lparam = T.dvector('lparam')
 func = lambda expr: (theano.function([lparam],expr),expr)
@@ -33,7 +34,7 @@ def unpack_param_maker():
     def read_angular_spline(read_func):
         return [T.exp(read_func()) for i in range(n_knot_angular)]
 
-    def read_clamped_spline(read_func):
+    def read_clamped_spline(read_func,n_knot):
         c0 = read_func()
         c1 = read_func()
         c2 = c0  # left clamping condition
@@ -45,19 +46,13 @@ def unpack_param_maker():
         cn1 = -2.*cn2   # these three lines ensure right clamp is at 0
         return [c0,c1,c2] + middle + [cn3,cn2,cn1]
 
-    rot = T.stack(*read_clamped_spline(read_symm)).transpose((1,2,0))
+    rot = T.stack(*read_clamped_spline(read_symm,n_knot_sc)).transpose((1,2,0))
 
     def read_cov():
         return read_param((2,n_restype))
 
-    # cov_angle1       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
-    # cov_angle1_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
-    # cov_angle2       = read_cov() # T.zeros((2,n_restype)) + np.cos(30*np.pi/180.)
-    # cov_angle2_scale = T.exp(read_cov()) # T.zeros((2,n_restype)) + 10./3.
-    # cov_param = ([cov_angle1, cov_angle1_scale, cov_angle2, cov_angle2_scale] + 
-    #         read_clamped_spline(read_cov) + read_clamped_spline(read_cov))
     cov_param = (read_angular_spline(read_cov) + read_angular_spline(read_cov) +
-            read_clamped_spline(read_cov) + read_clamped_spline(read_cov))
+            read_clamped_spline(read_cov,n_knot_hb) + read_clamped_spline(read_cov,n_knot_hb))
 
     cov = T.stack(*cov_param).transpose((1,2,0))
 
@@ -73,7 +68,7 @@ def pack_param(loose_rot,loose_cov, check_accuracy=True):
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
             (lambda x: discrep(x)),
-            np.zeros(n_restype*n_restype*n_knot+2*n_restype*(n_angular+2*n_knot)),
+            np.zeros(n_restype*n_restype*n_knot_sc+2*n_restype*(n_angular+2*n_knot_hb)),
             method = 'L-BFGS-B',
             jac = (lambda x: d_discrep(x)))
 

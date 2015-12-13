@@ -1,4 +1,5 @@
 #include "generate_from_rotamer.h"
+#include <cmath>
 #include <Eigen/Dense>
 #include <Eigen/LU>
 #include <string>
@@ -14,6 +15,8 @@
 using namespace Eigen;
 using namespace std;
 using namespace h5;
+
+constexpr float M_PI_F = 4.f*atanf(1.f);
 
 //static const float M_PI_F = 4.*atan(1.);
 static const float deg = 4.*atan(1.)/180.;

@@ -148,8 +148,8 @@ def read_hb(tr):
     don_res =  tr.root.input.potential.infer_H_O.donors.id[:,1] / 3
     acc_res = (tr.root.input.potential.infer_H_O.acceptors.id[:,1]-2) / 3
     
-    n_hb = tr.root.output.hbond.shape[2]
-    hb_raw   = tr.root.output.hbond[:,0]
+    n_hb = tr.root.output.hbond.shape[1]
+    hb_raw   = tr.root.output.hbond[:]
     hb = np.zeros((hb_raw.shape[0],n_res,2,2))
 
     hb[:,don_res,0,0] =    hb_raw[:,:len(don_res)]

@@ -260,7 +260,7 @@ namespace {
         // first group is donors; second group is acceptors
 
         constexpr static bool  symmetric = false;
-        constexpr static int   n_knot = 12, n_knot_angular=18;
+        constexpr static int   n_knot = 12, n_knot_angular=15;
         constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, simd_width=1;
         constexpr static float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
 

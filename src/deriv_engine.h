@@ -58,8 +58,8 @@ struct CoordNode : public DerivComputation
     CoordNode(int n_elem_, int elem_width_):
         DerivComputation(false),
         n_elem(n_elem_), elem_width(elem_width_), 
-        output(elem_width, n_elem),
-        sens  (elem_width, n_elem) {}
+        output(elem_width, round_up(n_elem,4)),
+        sens  (elem_width, round_up(n_elem,4)) {}
 };
 
 
