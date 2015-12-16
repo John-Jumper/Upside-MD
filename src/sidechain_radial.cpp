@@ -209,4 +209,4 @@ struct ContactEnergy : public PotentialNode
 static RegisterNodeType<ContactEnergy,1>        contact_node("contact");
 */
 static RegisterNodeType<SidechainRadialPairs,1> radial_node ("radial");
-static RegisterNodeType<SidechainRadialPairs,1> hbond_sc_radial_node ("hbond_sc_radial");
+static RegisterNodeType<HBondSidechainRadialPairs,2> hbond_sc_radial_node ("hbond_sc_radial");
