@@ -31,7 +31,7 @@ static T&& message(const std::string& s, T&& x) {
 template<typename IType>
 struct InteractionGraph{
     constexpr static const bool symmetric  = IType::symmetric;
-    constexpr static const int  simd_width = IType::simd_width;
+    constexpr static const bool simd_width = IType::simd_width;
     constexpr static const int  align      = maxint(4,simd_width);
     constexpr static const int  align_bytes= 4*align;
     constexpr static const int  n_dim1     = IType::n_dim1, n_dim1a = round_up(n_dim1, align);
@@ -99,7 +99,7 @@ struct InteractionGraph{
         edge_deriv      (new_aligned<float>  (max_n_edge*(n_dim1+n_dim2), align_bytes)),
         edge_sensitivity(new_aligned<float>  (max_n_edge,                 align_bytes)),
 
-        interaction_param(new_aligned<float>(n_type1*n_type2*n_param, simd_width)),
+        interaction_param(new_aligned<float>(n_type1*n_type2*n_param, 4)),
 
         pos1_deriv(new_aligned<float>(round_up(n_elem1,4)*n_dim1a,             maxint(4,simd_width))),
         pos2_deriv(new_aligned<float>(round_up(symmetric?4:n_elem2,4)*n_dim2a, maxint(4,simd_width)))

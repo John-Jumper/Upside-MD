@@ -6,7 +6,7 @@
 #include "state_logger.h"
 #include "interaction_graph.h"
 #include "spline.h"
-#include "Float4.h"
+#include "bead_interaction.h"
 
 using namespace h5;
 using namespace std;
@@ -99,14 +99,8 @@ struct Infer_H_O : public CoordNode
 
             auto sens_pos = Float4(&sens(0,nv)).zero_entries<0,0,0,1>(); // last entry should be zero
             auto sens_dir = Float4(&sens(3,nv), Alignment::unaligned);
-            // printf("sens %3i  % .2f % .2f % .2f  % .2f % .2f % .2f\n", nv,
-            //         sens_pos.x(), sens_pos.y(), sens_pos.z(),
-            //         sens_dir.x(), sens_dir.y(), sens_dir.z());
 
             auto sens_neg_unitdisp = sens_dir + Float4(p.bond_length)*sens_pos;
-
-            //        d(hat(a))  = 1/|a| * (I - hat(a) * hat(a)')
-            // dot(b, d(hat(a))) = 1/|a| * (b - dot(a_hat,b) * hat(a)) = -1/|a| * (dot(a_hat,b) * hat(a) - b) 
 
             // loading: first 3 entries are unitvec and last is inv_mag
             auto prev4 = Float4(data_for_deriv + nv*3*4 + 0);  auto prev_invmag = prev4.broadcast<3>();
@@ -118,21 +112,9 @@ struct Infer_H_O : public CoordNode
             auto sens_nonunit_prev = (-prev_invmag)*fmsub(dot3(prev4,sens_nonunit_disp),prev4, sens_nonunit_disp);
             auto sens_nonunit_next = (-next_invmag)*fmsub(dot3(next4,sens_nonunit_disp),next4, sens_nonunit_disp);
 
-            // print_vector("prev_deriv", sens_nonunit_prev);
-            // print_vector("curr_deriv", sens_pos - sens_nonunit_prev - sens_nonunit_next);
-            // print_vector("next_deriv", sens_nonunit_next);
-
             sens_nonunit_prev                                 .update(&pos_sens(0,p.atom[0]));
             (sens_pos - sens_nonunit_prev - sens_nonunit_next).update(&pos_sens(0,p.atom[1]));
             sens_nonunit_next                                 .update(&pos_sens(0,p.atom[2]));
-            // printf("\n");
-
-            // printf("jac\n");
-            // float prev_d[6*3]; float curr_d[6*3]; float next_d[6*3]; jac(prev_d,curr_d,next_d, nv);
-            // printf("prev\n"); for(int i: range(6)) {for(int d: range(3)) printf("% .2f ", prev_d[i*3+d]); printf("\n");}
-            // printf("curr\n"); for(int i: range(6)) {for(int d: range(3)) printf("% .2f ", curr_d[i*3+d]); printf("\n");}
-            // printf("next\n"); for(int i: range(6)) {for(int d: range(3)) printf("% .2f ", next_d[i*3+d]); printf("\n");}
-            // printf("\n");
         }
     }
 };
@@ -275,100 +257,21 @@ namespace {
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
                 const Vec<n_dim1,Float4> &hb_pos, const Vec<n_dim2,Float4> &sc_pos) {
             Float4 one(1.f);
-            auto displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
-            auto rHN = extract<3,6>(hb_pos);
-            auto rSC = extract<3,6>(sc_pos);
 
-            auto dist2 = mag2(displace);
-            auto inv_dist = rsqrt(dist2);
-            auto dist_coord = dist2*(inv_dist*Float4(inv_dx));
-            auto displace_unitvec = inv_dist*displace;
+            auto coverage = quadspline<n_knot_angular, n_knot>(d1,d2, inv_dtheta,inv_dx,p, hb_pos,sc_pos);
 
-            auto cos_cov_angle1 = dot(rHN, displace_unitvec);
-            auto cos_cov_angle2 = dot(rSC,-displace_unitvec);
-
-            // Spline evaluation
-            auto angular_sigmoid1 = deBoor_value_and_deriv(p,  (cos_cov_angle1+one)*Float4(inv_dtheta)+one);
-            int o = n_knot_angular; const float* pp[4] = {p[0]+o, p[1]+o, p[2]+o, p[3]+o};
-
-            auto angular_sigmoid2 = deBoor_value_and_deriv(pp, (cos_cov_angle2+one)*Float4(inv_dtheta)+one);
-            o=n_knot_angular; pp[0]+=o; pp[1]+=o; pp[2]+=o; pp[3]+=o;
-
-            auto wide_cover   = clamped_deBoor_value_and_deriv(pp, dist_coord, n_knot);
-            o=n_knot; pp[0]+=o; pp[1]+=o; pp[2]+=o; pp[3]+=o;
-
-            auto narrow_cover = clamped_deBoor_value_and_deriv(pp, dist_coord, n_knot);
-
-            // Partition derivatives
-            auto angular_weight = angular_sigmoid1.x() * angular_sigmoid2.x();
-
-            auto radial_deriv   = Float4(inv_dx    ) * (wide_cover.y() + angular_weight*narrow_cover.y());
-            auto angular_deriv1 = Float4(inv_dtheta) * angular_sigmoid1.y()*angular_sigmoid2.x()*narrow_cover.x();
-            auto angular_deriv2 = Float4(inv_dtheta) * angular_sigmoid1.x()*angular_sigmoid2.y()*narrow_cover.x();
-
-            Vec<3,Float4> col0, col1, col2;
-            hat_deriv(displace_unitvec, inv_dist, col0, col1, col2);
-            auto rXX = angular_deriv1*rHN - angular_deriv2*rSC;
-            auto deriv_dir = make_vec3(dot(col0,rXX), dot(col1,rXX), dot(col2,rXX));
-
-            auto d_displace = radial_deriv  * displace_unitvec + deriv_dir;
-            auto d_rHN      =  angular_deriv1 * displace_unitvec;
-            auto d_rSC      = -angular_deriv2 * displace_unitvec;
-
-            auto coverage = wide_cover.x() + angular_weight*narrow_cover.x();
             auto prefactor = sqr(one-hb_pos[6]);
-
-            store<0,3>(d1, -(prefactor * d_displace));
-            store<3,6>(d1,   prefactor * d_rHN);
+            d1 *= prefactor;
+            d2 *= prefactor;
             d1[6] = -coverage * (one-hb_pos[6])*Float4(2.f);
-
-            store<0,3>(d2, prefactor * d_displace);
-            store<3,6>(d2, prefactor * d_rSC);
 
             return prefactor * coverage;
         }
 
         static void param_deriv(Vec<n_param> &d_param, const float* p,
                 const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
-            d_param = make_zero<n_param>();
-
-            float3 displace = extract<0,3>(sc_pos)-extract<0,3>(hb_pos);
-            float3 rHN = extract<3,6>(hb_pos);
-            float3 rSC = extract<3,6>(sc_pos);
-
-            float  dist2 = mag2(displace);
-            float  inv_dist = rsqrt(dist2);
-            float  dist_coord = dist2*(inv_dist*inv_dx);
-            float3 displace_unitvec = inv_dist*displace;
-
-            float  cos_cov_angle1 = dot(rHN, displace_unitvec);
-            float  cos_cov_angle2 = dot(rSC,-displace_unitvec);
-
-            float2 angular_sigmoid1 = deBoor_value_and_deriv(p,                (cos_cov_angle1+1.f)*inv_dtheta+1.f);
-            float2 angular_sigmoid2 = deBoor_value_and_deriv(p+n_knot_angular, (cos_cov_angle2+1.f)*inv_dtheta+1.f);
-
-            // wide_cover derivative
-            int starting_bin;
-            float result[4];
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular, dist_coord, n_knot);
-            for(int i: range(4)) d_param[2*n_knot_angular+starting_bin+i] = result[i];
-
-            // narrow_cover derivative
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular+n_knot, dist_coord, n_knot);
-            for(int i: range(4)) 
-                d_param[2*n_knot_angular+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
-
-            // angular_sigmoid derivatives
-            float2 narrow_cover = clamped_deBoor_value_and_deriv(p+2*n_knot_angular+n_knot, dist_coord, n_knot);
-
-            deBoor_coeff_deriv(&starting_bin, result, p+n_knot_angular, (cos_cov_angle1+1.f)*inv_dtheta+1.f);
-            for(int i: range(4)) d_param[starting_bin+i] = angular_sigmoid2.x()*narrow_cover.x()*result[i];
-
-            deBoor_coeff_deriv(&starting_bin, result, p,                (cos_cov_angle2+1.f)*inv_dtheta+1.f);
-            for(int i: range(4)) 
-                d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
-
-            float prefactor = sqr(1.f-hb_pos[6]);
+            quadspline_param_deriv<n_knot_angular, n_knot>(d_param, inv_dtheta,inv_dx,p, hb_pos,sc_pos);
+            auto prefactor = sqr(1.f-hb_pos[6]);
             d_param *= prefactor;
         }
 

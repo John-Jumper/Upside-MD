@@ -46,7 +46,11 @@ def unpack_param_maker():
         cn1 = -2.*cn2   # these three lines ensure right clamp is at 0
         return [c0,c1,c2] + middle + [cn3,cn2,cn1]
 
-    rot = T.stack(*read_clamped_spline(read_symm,n_knot_sc)).transpose((1,2,0))
+    # rot = T.stack(*read_clamped_spline(read_symm,n_knot_sc)).transpose((1,2,0))
+    angular_spline_sc = read_angular_spline(lambda: read_param((n_restype,n_restype)))
+    rot_param = (angular_spline_sc + [x.T for x in angular_spline_sc] +
+            read_clamped_spline(read_symm,n_knot_sc) + read_clamped_spline(read_symm,n_knot_sc)
+            )
 
     def read_cov():
         return read_param((2,n_restype))
@@ -54,6 +58,7 @@ def unpack_param_maker():
     cov_param = (read_angular_spline(read_cov) + read_angular_spline(read_cov) +
             read_clamped_spline(read_cov,n_knot_hb) + read_clamped_spline(read_cov,n_knot_hb))
 
+    rot = T.stack(*rot_param).transpose((1,2,0))
     cov = T.stack(*cov_param).transpose((1,2,0))
 
     return func(rot), func(cov)
@@ -68,7 +73,8 @@ def pack_param(loose_rot,loose_cov, check_accuracy=True):
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
             (lambda x: discrep(x)),
-            np.zeros(n_restype*n_restype*n_knot_sc+2*n_restype*(n_angular+2*n_knot_hb)),
+            # np.zeros(n_restype*n_restype*n_knot_sc+2*n_restype*(n_angular+2*n_knot_hb)),
+            np.zeros(n_restype*n_restype*(n_angular+2*n_knot_sc)+2*n_restype*(n_angular+2*n_knot_hb)),
             method = 'L-BFGS-B',
             jac = (lambda x: d_discrep(x)))
 
