@@ -19,60 +19,64 @@ struct ContactPair {
 };
 
 namespace {
+template <bool is_symmetric>
+struct RadialHelper {
+    // spline-based distance interaction
+    // n_knot is the number of basis splines (including those required to get zero
+    //   derivative in the clamped spline)
+    // spline is constant over [0,dx] to avoid funniness at origin
+
+    // Please obey these 4 conditions:
+    // p[0] = 1./dx, that is the inverse of the knot spacing
+    // should have p[1] == p[3] for origin clamp (p[0] is inv_dx)
+    // should have p[-3] == p[-1] (negative indices from the end, Python-style) for terminal clamping
+    // should have (1./6.)*p[-3] + (2./3.)*p[-2] + (1./6.)*p[-1] == 0. for continuity at cutoff
+
+    constexpr static bool  symmetric = is_symmetric;
+    constexpr static int   n_knot=16, n_param=1+n_knot, n_dim1=3, n_dim2=3, simd_width=1;
+
+    static float cutoff(const float* p) {
+        const float inv_dx = p[0];
+        return (n_knot-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
+    }
+
+    static bool is_compatible(const float* p1, const float* p2) {
+        if(symmetric) for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
+        return true;
+    }
+
+    static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+        auto sequence_cutoff = Int4(3);
+        return (sequence_cutoff < id1-id2) | (sequence_cutoff < id2-id1);
+    }
+
+    static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4], 
+            const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
+        alignas(16) const float inv_dx_data[4] = {p[0][0], p[1][0], p[2][0], p[3][0]};
+
+        auto inv_dx     = Float4(inv_dx_data, Alignment::aligned);
+        auto disp       = x1-x2;
+        auto dist2      = mag2(disp);
+        auto inv_dist   = rsqrt(dist2+Float4(1e-7f));  // 1e-7 is divergence protection
+        auto dist_coord = dist2*(inv_dist*inv_dx);
+
+        const float* pp[4] = {p[0]+1, p[1]+1, p[2]+1, p[3]+1};
+        auto en = clamped_deBoor_value_and_deriv(pp, dist_coord, n_param);
+        d1 = disp*(inv_dist*inv_dx*en.y());
+        d2 = -d1;
+        return en.x();
+    }
+
+    static void param_deriv(Vec<n_param> &d_param, const float* p, 
+            const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
+};
+
+
+
 struct SidechainRadialPairs : public PotentialNode
 {
-    struct Helper {
-        // spline-based distance interaction
-        // n_knot is the number of basis splines (including those required to get zero
-        //   derivative in the clamped spline)
-        // spline is constant over [0,dx] to avoid funniness at origin
 
-        // Please obey these 4 conditions:
-        // p[0] = 1./dx, that is the inverse of the knot spacing
-        // should have p[1] == p[3] for origin clamp (p[0] is inv_dx)
-        // should have p[-3] == p[-1] (negative indices from the end, Python-style) for terminal clamping
-        // should have (1./6.)*p[-3] + (2./3.)*p[-2] + (1./6.)*p[-1] == 0. for continuity at cutoff
-
-        constexpr static bool  symmetric = true;
-        constexpr static int   n_knot=16, n_param=1+n_knot, n_dim1=3, n_dim2=3, simd_width=1;
-
-        static float cutoff(const float* p) {
-            const float inv_dx = p[0];
-            return (n_knot-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
-        }
-
-        static bool is_compatible(const float* p1, const float* p2) {
-            for(int i: range(n_param)) if(p1[i]!=p2[i]) return false;
-            return true;
-        }
-
-        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
-            auto sequence_cutoff = Int4(3);
-            return (sequence_cutoff < id1-id2) | (sequence_cutoff < id2-id1);
-        }
-
-        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4], 
-                const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
-            alignas(16) const float inv_dx_data[4] = {p[0][0], p[1][0], p[2][0], p[3][0]};
-
-            auto inv_dx     = Float4(inv_dx_data, Alignment::aligned);
-            auto disp       = x1-x2;
-            auto dist2      = mag2(disp);
-            auto inv_dist   = rsqrt(dist2+Float4(1e-7f));  // 1e-7 is divergence protection
-            auto dist_coord = dist2*(inv_dist*inv_dx);
-
-            const float* pp[4] = {p[0]+1, p[1]+1, p[2]+1, p[3]+1};
-            auto en = clamped_deBoor_value_and_deriv(pp, dist_coord, n_param);
-            d1 = disp*(inv_dist*inv_dx*en.y());
-            d2 = -d1;
-            return en.x();
-        }
-
-        static void param_deriv(Vec<n_param> &d_param, const float* p, 
-                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
-    };
-
-    InteractionGraph<Helper> igraph;
+    InteractionGraph<RadialHelper<true>> igraph;
 
     SidechainRadialPairs(hid_t grp, CoordNode& bb_point_):
         PotentialNode(),
@@ -81,6 +85,32 @@ struct SidechainRadialPairs : public PotentialNode
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("radial_pairs"));
+
+        igraph.compute_edges();
+        for(int ne=0; ne<igraph.n_edge; ++ne) igraph.edge_sensitivity[ne] = 1.f;
+        igraph.propagate_derivatives();
+
+        if(mode==PotentialAndDerivMode) {
+            potential = 0.f;
+            for(int ne=0; ne<igraph.n_edge; ++ne) 
+                potential += igraph.edge_value[ne];
+        }
+    }
+};
+
+
+struct HBondSidechainRadialPairs : public PotentialNode
+{
+
+    InteractionGraph<RadialHelper<false>> igraph;
+
+    HBondSidechainRadialPairs(hid_t grp, CoordNode& bb_point_, CoordNode& hb_point_):
+        PotentialNode(),
+        igraph(grp, &bb_point_, &hb_point_)
+    {};
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("hbond_sc_radial_pairs"));
 
         igraph.compute_edges();
         for(int ne=0; ne<igraph.n_edge; ++ne) igraph.edge_sensitivity[ne] = 1.f;
@@ -179,3 +209,4 @@ struct ContactEnergy : public PotentialNode
 static RegisterNodeType<ContactEnergy,1>        contact_node("contact");
 */
 static RegisterNodeType<SidechainRadialPairs,1> radial_node ("radial");
+static RegisterNodeType<SidechainRadialPairs,1> hbond_sc_radial_node ("hbond_sc_radial");
