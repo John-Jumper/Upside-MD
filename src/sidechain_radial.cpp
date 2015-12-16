@@ -104,9 +104,9 @@ struct HBondSidechainRadialPairs : public PotentialNode
 
     InteractionGraph<RadialHelper<false>> igraph;
 
-    HBondSidechainRadialPairs(hid_t grp, CoordNode& bb_point_, CoordNode& hb_point_):
+    HBondSidechainRadialPairs(hid_t grp, CoordNode& hb_point_, CoordNode& bb_point_):
         PotentialNode(),
-        igraph(grp, &bb_point_, &hb_point_)
+        igraph(grp, &hb_point_, &bb_point_)
     {};
 
     virtual void compute_value(ComputeMode mode) {
