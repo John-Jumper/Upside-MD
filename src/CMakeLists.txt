@@ -29,7 +29,7 @@ set (ENGINE_SRC
     rama_map_pot.cpp
     spline.cpp
     deriv_engine.cpp 
-    # sidechain_radial.cpp
+    sidechain_radial.cpp
     nonbond.cpp 
     bonds.cpp 
     eig.cpp 

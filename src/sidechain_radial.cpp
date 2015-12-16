@@ -34,7 +34,7 @@ struct SidechainRadialPairs : public PotentialNode
         // should have (1./6.)*p[-3] + (2./3.)*p[-2] + (1./6.)*p[-1] == 0. for continuity at cutoff
 
         constexpr static bool  symmetric = true;
-        constexpr static int   n_knot=1, n_param=1+n_knot, n_dim1=3, n_dim2=3, simd_width=1;
+        constexpr static int   n_knot=16, n_param=1+n_knot, n_dim1=3, n_dim2=3, simd_width=1;
 
         static float cutoff(const float* p) {
             const float inv_dx = p[0];
@@ -47,7 +47,7 @@ struct SidechainRadialPairs : public PotentialNode
         }
 
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
-            auto sequence_cutoff = Int4(2);
+            auto sequence_cutoff = Int4(3);
             return (sequence_cutoff < id1-id2) | (sequence_cutoff < id2-id1);
         }
 
@@ -92,12 +92,11 @@ struct SidechainRadialPairs : public PotentialNode
                 potential += igraph.edge_value[ne];
         }
     }
-
-    virtual double test_value_deriv_agreement() { return -1.f; }
 };
 }
 
 
+/*
 void contact_energy(
         float* potential,
         const CoordArray   rigid_body,
@@ -178,4 +177,5 @@ struct ContactEnergy : public PotentialNode
     virtual double test_value_deriv_agreement() {return -1.;}
 };
 static RegisterNodeType<ContactEnergy,1>        contact_node("contact");
+*/
 static RegisterNodeType<SidechainRadialPairs,1> radial_node ("radial");
