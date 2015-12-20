@@ -101,31 +101,41 @@ struct NodeHolder {
         VecArrayStorage cur_belief;
         VecArrayStorage old_belief;
 
+        unique_ptr<float[]> energy_offset;
+
         NodeHolder(int n_rot_, int n_elem_):
             n_rot(n_rot_),
             n_elem(n_elem_),
-            prob      (ru(n_rot),n_elem),
-            cur_belief(ru(n_rot),n_elem),
-            old_belief(ru(n_rot),n_elem) 
+            prob         (n_rot,n_elem),
+            cur_belief   (n_rot,n_elem),
+            old_belief   (n_rot,n_elem),
+
+            energy_offset(new_aligned<float>(n_elem,4))
         {
             fill(cur_belief, 1.f);
             fill(old_belief, 1.f);
             reset();
         }
 
-        void reset() {
-            for(int i=0; i<n_elem; ++i)
-                for(int j=0; j<ru(n_rot); ++j)
-                    prob(j,i) = float(j<n_rot);
-        }
+        void reset() { fill(prob, 0.f); } // prob array initially contains energy
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
-        void standardize_probs() {
+        void convert_energy_to_prob() {
+            // prob array should initially contain energy
+            // prob array is not normalized at the end (one of the entries will be 1.),
+            //   but should be sanely scaled to resist underflow/overflow
+            // It might be more effective to l1 normalize the probabilities at the end,
+            //   but then I would need an extra logf to add to the offset if we are in energy mode
+
             for(int ne: range(n_elem)) {
-                float max_prob = 1e-10f;
-                for(int no: range(n_rot)) if(prob(no,ne)>max_prob) max_prob = prob(no,ne);
-                float inv_max_prob = rcp(max_prob);
-                for(int no: range(n_rot)) prob(no,ne) *= inv_max_prob;
+                auto e_offset = prob(0,ne);
+                for(int d=1; d<n_rot; ++d)
+                    e_offset = min(e_offset, prob(d,ne));
+
+                for(int d=0; d<n_rot; ++d)
+                    prob(d,ne) = expf(e_offset-prob(d,ne));
+
+                energy_offset[ne] = e_offset;
             }
         }
 
@@ -161,7 +171,7 @@ struct NodeHolder {
             b *= rcp(sum(b));
             auto pr = load_vec<N_ROT>(prob,nn);
             
-            float en = 0.f;
+            float en = energy_offset[nn];
             // free energy is average energy - entropy
             for(int no: range(N_ROT)) en += b[no] * logf((1e-10f+b[no])*rcp(1e-10f+pr[no]));
             return en;
@@ -601,8 +611,12 @@ struct RotamerSidechain: public PotentialNode {
             float energy = 0.f;
             for(auto &a: energy_1body) energy += a(0,index);
 
-            node_holders_matrix[n_rot]->prob(rot,id) *= expf(-energy);
+            // at this point, the node "prob" is really energy
+            node_holders_matrix[n_rot]->prob(rot,id) += energy;
         }
+        for(int n_rot: range(1,UPPER_ROT))
+            if(node_holders_matrix[n_rot])
+                node_holders_matrix[n_rot]->convert_energy_to_prob();
 
         // Fill edge probabilities
         igraph.compute_edges();

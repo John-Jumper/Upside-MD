@@ -162,26 +162,48 @@ int get_output_dims(int* n_elem, int* elem_width, DerivEngine* engine, const cha
     return 1;
 }
 
-int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff, float x) {
-    auto en = clamped_deBoor_value_and_deriv(bspline_coeff, x, N);
-    result[0] = en.x();
-    result[1] = en.y();
+int clamped_spline_value(int N, float* result, const float* bspline_coeff, int nx, float* x) {
+    const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff, bspline_coeff, bspline_coeff};
+    int i;
+    for(i=0; i<nx-3; i+=4) {
+        auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(x+i, Alignment::unaligned), N);
+        en.x().store(result+i, Alignment::unaligned);
+    }
+
+    if(i<nx) {
+        // handle ragged end in non-multiple of 4 cases
+        alignas(16) float last_data[4] = {0.f,0.f,0.f,0.f};
+        for(int j=0; j<nx-i; ++j) last_data[j] = x[i+j];
+        auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(last_data), N);
+        en.x().store(last_data);
+        for(int j=0; j<nx-i; ++j) result[i+j] = last_data[j];
+    }
+
     return 0;
 }
 
-int get_clamped_value_and_deriv_simd(int N, float* result, const float* bspline_coeff, float* x) {
-    const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff+N, bspline_coeff+2*N, bspline_coeff+3*N};
-    auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(x, Alignment::unaligned), N);
-    result[0] = en.x().x();
-    result[1] = en.y().x();
-    result[2] = en.x().y();
-    result[3] = en.y().y();
-    result[4] = en.x().z();
-    result[5] = en.y().z();
-    result[6] = en.x().w();
-    result[7] = en.y().w();
+int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff, int nx, float* x) {
+    for(int i: range(nx)) {
+        auto en = clamped_deBoor_value_and_deriv(bspline_coeff, x[i], N);
+        result[i*2+0] = en.x();
+        result[i*2+1] = en.y();
+    }
     return 0;
 }
+
+// int get_clamped_value_and_deriv_simd(int N, float* result, const float* bspline_coeff, float* x) {
+//     const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff+N, bspline_coeff+2*N, bspline_coeff+3*N};
+//     auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(x, Alignment::unaligned), N);
+//     result[0] = en.x().x();
+//     result[1] = en.y().x();
+//     result[2] = en.x().y();
+//     result[3] = en.y().y();
+//     result[4] = en.x().z();
+//     result[5] = en.y().z();
+//     result[6] = en.x().w();
+//     result[7] = en.y().w();
+//     return 0;
+// }
 
 int get_clamped_coeff_deriv(int N, float* result, const float* bspline_coeff, float x) {
     int starting_bin;

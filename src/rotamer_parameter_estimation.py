@@ -27,56 +27,61 @@ def read_param(shape):
 
 
 def unpack_param_maker():
-    def read_symm():
-        x = read_param((n_restype,n_restype))
-        return 0.5*(x + x.T)
+    def read_symm(n):
+        x = read_param((n_restype,n_restype,n))
+        return 0.5*(x + x.transpose((1,0,2)))
+
+    def read_cov(n):
+        return read_param((2,n_restype,n))
 
     def read_angular_spline(read_func):
-        return [T.exp(read_func()) for i in range(n_knot_angular)]
+        return T.nnet.sigmoid(read_func(n_knot_angular))  # bound on (0,1)
 
     def read_clamped_spline(read_func,n_knot):
-        c0 = read_func()
-        c1 = read_func()
-        c2 = c0  # left clamping condition
+        middle = read_func(n_knot-3)
 
-        middle = [read_func() for i in range(n_knot-6)]
+        c0 = middle[:,:,1:2]   # left clamping condition
 
-        cn2 = read_func()
-        cn3 = -2.*cn2
-        cn1 = -2.*cn2   # these three lines ensure right clamp is at 0
-        return [c0,c1,c2] + middle + [cn3,cn2,cn1]
+        cn3 = middle[:,:,-1:]
+        cn2 = -0.5*cn3
+        cn1 = cn3         # these two lines ensure right clamp is at 0
+        return T.concatenate([c0,middle,cn2,cn1],axis=2)
+    
+    angular_spline_sc = read_angular_spline(lambda n: read_param((n_restype,n_restype,n)))
 
-    # rot = T.stack(*read_clamped_spline(read_symm,n_knot_sc)).transpose((1,2,0))
-    angular_spline_sc = read_angular_spline(lambda: read_param((n_restype,n_restype)))
-    rot_param = (angular_spline_sc + [x.T for x in angular_spline_sc] +
-            read_clamped_spline(read_symm,n_knot_sc) + read_clamped_spline(read_symm,n_knot_sc)
-            )
+    rot_param = T.concatenate([
+        angular_spline_sc, angular_spline_sc.transpose((1,0,2)),
+        read_clamped_spline(read_symm,n_knot_sc), read_clamped_spline(read_symm,n_knot_sc)],
+        axis=2)
 
-    def read_cov():
-        return read_param((2,n_restype))
+    cov_param = T.concatenate([
+        read_angular_spline(read_cov), read_angular_spline(read_cov),
+        read_clamped_spline(read_cov,n_knot_hb), read_clamped_spline(read_cov,n_knot_hb)],
+        axis=2)
 
-    cov_param = (read_angular_spline(read_cov) + read_angular_spline(read_cov) +
-            read_clamped_spline(read_cov,n_knot_hb) + read_clamped_spline(read_cov,n_knot_hb))
+    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+2*n_restype*(n_angular+2*(n_knot_hb-3))
 
-    rot = T.stack(*rot_param).transpose((1,2,0))
-    cov = T.stack(*cov_param).transpose((1,2,0))
+    return func(rot_param), func(cov_param), n_param
 
-    return func(rot), func(cov)
+(unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr), n_param = unpack_param_maker()
 
-(unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr) = unpack_param_maker()
+def pack_param_helper_maker():
+    loose_cov_var = T.dtensor3('loose_cov')
+    loose_rot_var = T.dtensor3('loose_rot')
+    discrep_expr = T.sum((unpack_rot_expr - loose_rot_var)**2) + T.sum((unpack_cov_expr - loose_cov_var)**2)
+    discrep   = theano.function([lparam,loose_rot_var,loose_cov_var], discrep_expr)
+    d_discrep = theano.function([lparam,loose_rot_var,loose_cov_var], T.grad(discrep_expr,lparam))
+    return discrep, d_discrep
+
+discrep, d_discrep = pack_param_helper_maker()
 
 def pack_param(loose_rot,loose_cov, check_accuracy=True):
-    discrep,     discrep_expr = func(T.sum((unpack_rot_expr - loose_rot)**2) +
-                                     T.sum((unpack_cov_expr - loose_cov)**2))
-    d_discrep, d_discrep_expr = func(T.grad(discrep_expr,lparam))
-
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
-            (lambda x: discrep(x)),
-            # np.zeros(n_restype*n_restype*n_knot_sc+2*n_restype*(n_angular+2*n_knot_hb)),
-            np.zeros(n_restype*n_restype*(n_angular+2*n_knot_sc)+2*n_restype*(n_angular+2*n_knot_hb)),
+            (lambda x: discrep(x, loose_rot, loose_cov)),
+            np.zeros(n_param),
             method = 'L-BFGS-B',
-            jac = (lambda x: d_discrep(x)))
+            jac = (lambda x: d_discrep(x, loose_rot, loose_cov)))
 
     if not check_accuracy and not (discrep(results.x) < 1e-4):
         raise ValueError('Failed to converge')
@@ -172,3 +177,77 @@ def rmsprop_sweep(state, mom, minibatches, change_batch_function, d_obj, lr=0.00
         mom = rho*mom + (1-rho) * grad**2
         state = state - lr*grad/np.sqrt(mom+epsilon)
     return state, mom
+
+
+# handle a mix of scalars and lists
+def read_comp(x,i):
+    try:
+        return x[i]
+    except:
+        return x  # scalar case
+
+class AdamSolver(object):
+    ''' See Adam optimization paper (Kingma and Ba, 2015) for details. Beta2 is reduced by 
+    default to handle the shorter training expected on protein problems.  alpha is roughly 
+    the largest possible step size.'''
+    def __init__(self, n_comp, alpha=1e-2, beta1=0.8, beta2=0.96, epsilon=1e-6):
+        self.n_comp  = n_comp
+
+        self.alpha   = alpha
+        self.beta1   = beta1
+        self.beta2   = beta2
+        self.epsilon = epsilon
+
+        self.step_num = 0
+        self.grad1    = [0. for i in range(n_comp)]  # accumulator of gradient
+        self.grad2    = [0. for i in range(n_comp)]  # accumulator of gradient**2
+
+    def update_for_d_obj(self,):
+        return [0. for x in self.grad1]  # This method is used in Nesterov SGD, not Adam
+
+    def update_step(self, grad):
+        r = read_comp
+        self.step_num += 1
+        t = self.step_num
+
+        u = [None]*len(self.grad1)
+        for i,g in enumerate(grad):
+            b=r(self.beta1,i); self.grad1[i] = b*self.grad1[i] + (1.-b)*g    ; grad1corr = self.grad1[i]/(1-b**t)
+            b=r(self.beta2,i); self.grad2[i] = b*self.grad2[i] + (1.-b)*g**2 ; grad2corr = self.grad2[i]/(1-b**t)
+            u[i] = -r(self.alpha,i) * grad1corr / (np.sqrt(grad2corr) + r(self.epsilon,i))
+
+        return u
+
+    def log_state(self, direc):
+        with open(os.path.join(direc, 'solver_state.pkl'),'w') as f: 
+            cp.dump(dict(step_num=self.step_num, grad1=self.grad1, grad2=self.grad2, solver=str(self)), f, -1)
+
+    def __repr__(self):
+        return 'AdamSolver(%i, alpha=%r, beta1=%r, beta2=%r, epsilon=%r)'%(
+                self.n_comp,self.alpha,self.beta1,self.beta2,self.epsilon)
+
+    def __str__(self):
+        return 'AdamSolver(%i, alpha=%s, beta1=%s, beta2=%s, epsilon=%s)'%(
+                self.n_comp,self.alpha,self.beta1,self.beta2,self.epsilon)
+
+
+class SGD_Solver(object):
+    def __init__(self, n_comp, mu=0.9, learning_rate = 0.1, nesterov=True):
+        self.n_comp = n_comp
+
+        self.mu = mu
+        self.learning_rate = learning_rate
+        self.nesterov = nesterov
+
+        self.momentum = [0. for i in range(n_comp)]
+
+    def update_for_d_obj(self,):
+        if self.nesterov:
+            return [read_comp(self.mu,i)*self.momentum[i] for i in range(self.n_comp)]
+        else:
+            return [0. for i in range(n_comp)]
+
+    def update_step(self, grad):
+        self.momentum = [read_comp(self.mu,i)*self.momentum[i] - read_comp(self.learning_rate,i)*grad[i] 
+                for i in range(self.n_comp)]
+        return [1.*x for x in self.momentum]  # make sure the user doesn't smash the momentum

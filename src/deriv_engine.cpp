@@ -28,6 +28,11 @@ integration_stage(
             d *= scale_factor;
         }
 
+#ifdef CHECK_FOR_NAN
+        if(isnan(sum(load_vec<3>(mom, na)))) throw string("NaN found in momentum");
+        if(isnan(sum(d))) throw string("NaN found in derivative");
+#endif
+
         auto p = load_vec<3>(mom, na) - vel_factor*d;
         store_vec (mom, na, p);
         update_vec(pos, na, pos_factor*p);
