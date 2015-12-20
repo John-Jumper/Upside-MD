@@ -10,34 +10,14 @@
 using namespace h5;
 using namespace std;
 
-struct MembraneResidueParams {
-    index_t residue;
-    int restype; 
-};
-
-void membrane_potential(
-        float* restrict potential,
-        const CoordArray sc_com_pos,
-        const MembraneResidueParams* params,
-        const LayeredClampedSpline1D<1>& energy_spline,
-        float z_shift, float z_scale,
-        int n_residue)
-{
-    if(potential) potential[0] = 0.f;
-
-    for(int nr=0; nr<n_residue; ++nr) {	                                                         
-        Coord<3> pos1(sc_com_pos, params[nr].residue); 
-        float result[2];  // deriv then value
-        energy_spline.evaluate_value_and_deriv(result, params[nr].restype, (pos1.f3().z()+z_shift)*z_scale);
-        pos1.set_deriv(make_vec3(0.f, 0.f, result[0]*z_scale));
-        if(potential) potential[0] += result[1];
-        pos1.flush();
-    }
-}
-
 
 struct MembranePotential : public PotentialNode
 {
+    struct MembraneResidueParams {
+        index_t residue;
+        int restype; 
+    };
+
     int n_elem;        // number of residues to process
     CoordNode& sidechain_pos;
     vector<MembraneResidueParams> params;
@@ -69,24 +49,24 @@ struct MembranePotential : public PotentialNode
         traverse_dset<2,double>(grp, "energy", [&](size_t rt, size_t z_index, double value) {
                 energy_data.push_back(value);});
         membrane_energy_spline.fit_spline(energy_data.data());
-
-        for(size_t i=0; i<params.size(); ++i)
-            sidechain_pos.slot_machine.add_request(1, params[i].residue);
-
     }
+
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("membrane_potential"));
-        membrane_potential((mode==PotentialAndDerivMode ? &potential : nullptr),
-                sidechain_pos.coords(), params.data(),
-                membrane_energy_spline, z_shift, z_scale,
-                n_elem);
-    }
-    virtual double test_value_deriv_agreement() {
-        vector<vector<index_t>> coord_pairs(1);
-        for(auto &p: params) coord_pairs.back().push_back(p.residue);
-        return -1.; // compute_relative_deviation_for_node<3>(*this, sidechain_pos, coord_pairs);
-    }
 
+        VecArray pos      = sidechain_pos.output;
+        VecArray pos_sens = sidechain_pos.sens;
+        potential = 0.f;
+
+        for(int nr=0; nr<n_elem; ++nr) {
+            auto &p = params[nr];
+            float z = pos(2,p.residue);
+            float result[2];    // deriv then value
+            membrane_energy_spline.evaluate_value_and_deriv(result, p.restype, (z+z_shift)*z_scale);
+            pos_sens(2,p.residue) += result[0];
+            potential             += result[1];
+        }
+    }
 };
 
 static RegisterNodeType<MembranePotential,1> membrane_potential_node("membrane_potential");

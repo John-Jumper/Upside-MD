@@ -33,7 +33,7 @@ set (ENGINE_SRC
     nonbond.cpp 
     bonds.cpp 
     eig.cpp 
-    # membrane_potential.cpp
+    membrane_potential.cpp
     timing.cpp 
     thermostat.cpp
     h5_support.cpp 
