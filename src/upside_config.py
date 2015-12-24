@@ -203,7 +203,6 @@ def write_environment(fasta, environment_library):
 
     grp = t.create_group(potential, 'placement_cb_only')
     grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord',])
-    create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    np.arange(len(fasta)))
     create_array(grp, 'affine_residue',  np.arange(len(fasta)))
     create_array(grp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
@@ -711,7 +710,6 @@ def write_backbone_dependent_point(fasta, library):
         for rname,idx in sorted(aa_num.items()):
             point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
 
-    create_array(grp, 'signature',       np.array(['point']))
     create_array(grp, 'rama_residue',    np.arange(len(fasta)))
     create_array(grp, 'affine_residue',  np.arange(len(fasta)))
     create_array(grp, 'layer_index',     np.array([aa_num[s] for s in fasta]))
@@ -765,7 +763,6 @@ def write_weighted_placement(fasta, placement_library):
 
     grp = t.create_group(potential, 'placement4_weighted')
     grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
-    create_array(grp, 'signature',       np.array(['point','scalar']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
@@ -831,7 +828,6 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     grp = t.create_group(potential, 'placement_point_vector')
     grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
-    create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
@@ -841,7 +837,6 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     grp = t.create_group(potential, 'placement_scalar')
     grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
-    create_array(grp, 'signature',       np.array(['scalar']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)

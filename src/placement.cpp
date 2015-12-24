@@ -9,10 +9,12 @@
 using namespace std;
 using namespace h5;
 
-enum class PlaceType {SCALAR, VECTOR, POINT};
+namespace {
 
-constexpr int placetype_size(PlaceType t) {
-    return t==PlaceType::SCALAR ? 1 : 3;
+enum class PlaceT {SCALAR, VECTOR, POINT};
+
+constexpr int placetype_size(PlaceT t) {
+    return t==PlaceT::SCALAR ? 1 : 3;
 }
 
 template <int n_pos_dim>
@@ -53,6 +55,8 @@ struct RamaPlacement {
         }
     }
 
+    void reset() {}
+
     Vec<n_pos_dim> evaluate(int ne) {
         const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
@@ -86,36 +90,86 @@ struct RamaPlacement {
 
         update_vec(r_sens, params[ne].rama_residue, rd);
     }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return {};}
+    virtual std::vector<float> get_param_deriv() const {return {};}
+    virtual void set_param(const std::vector<float>& new_param) {}
+#endif
 };
 
 
-// template <int n_pos_dim>
-// struct FixedPlacement {
-//     struct Params {
-//         int layer_idx;
-//     }
-//         
-//     VecArrayStorage placement_data_by_layer;
-// 
-//     FixedPlacementData(hid_t grp)
-// 
-//     Vec<n_pos_dim> evaluate(int ne) {
-//         return load_vec<n_pos_dim>(placement_data_by_layer, params[ne].layer_idx);
-//     }
-// 
-//     void push_derivative(float* deriv_value, int ne) {
-//         #ifdef PARAM_DERIV
-//             write some derivative info;
-//         #endif
-//     }
-// };
+template <int n_pos_dim>
+struct FixedPlacement {
+    struct Params {
+        int layer_idx;
+    };
+        
+    int n_elem;
+    int n_layer;
+    vector<Params> params;
+    VecArrayStorage data;
 
-template<PlaceType first>
+    #ifdef PARAM_DERIV
+    VecArrayStorage param_deriv;
+    #endif
+
+    FixedPlacement(hid_t grp):
+        n_elem (get_dset_size(1, grp, "layer_index")[0]),
+        n_layer(get_dset_size(2, grp, "placement_data")[0]),
+        params(n_elem),
+        data(n_pos_dim, n_layer)
+        #ifdef PARAM_DERIV
+        ,param_deriv(n_pos_dim, n_layer)
+        #endif
+    {
+        check_size(grp, "layer_index",    n_elem);
+        check_size(grp, "placement_data", n_layer, n_pos_dim);
+
+        traverse_dset<1,int>(grp, "layer_index",    [&](size_t np, int x){params[np].layer_idx  = x;});
+        traverse_dset<2,float>(grp, "placement_data", [&](size_t nl, size_t d, double x) {data(d,nl) = x;});
+    }
+
+    void reset() {
+        #ifdef PARAM_DERIV
+        fill(param_deriv, 0.f);
+        #endif
+    }
+
+    Vec<n_pos_dim> evaluate(int ne) {
+        return load_vec<n_pos_dim>(data, params[ne].layer_idx);
+    }
+
+    void propagate_deriv(const Vec<n_pos_dim> &sens, int ne) {
+        #ifdef PARAM_DERIV
+        update_vec(param_deriv, params[ne].layer_idx, sens);
+        #endif
+    }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {
+        auto ret = std::vector<float>(n_layer*n_pos_dim);
+        for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = data(d,nl);
+    }
+    virtual std::vector<float> get_param_deriv() const {
+        auto ret = std::vector<float>(n_layer*n_pos_dim);
+        for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = param_deriv(d,nl);
+    }
+
+    virtual void set_param(const std::vector<float>& new_param) {
+        if(new_param.size() != size_t(n_layer*n_pos_dim)) throw string("wrong param size");
+        for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) data(d,nl) = new_param[nl*n_pos_dim+d];
+    }
+#endif
+};
+
+
+template<PlaceT first>
 static constexpr int compute_pos_dim_from_signature() {
     return placetype_size(first);
 }
 
-template<PlaceType first, PlaceType second, PlaceType ...rest>
+template<PlaceT first, PlaceT second, PlaceT ...rest>
 static constexpr int compute_pos_dim_from_signature() {
     return placetype_size(first) + compute_pos_dim_from_signature<second,rest...>();
 }
@@ -123,19 +177,19 @@ static constexpr int compute_pos_dim_from_signature() {
 template<int offset>
 void do_transformations(const float* U, const float3& t, const float* val, float* pos) {}
 
-template<int offset, PlaceType first, PlaceType ... rest>
+template<int offset, PlaceT first, PlaceT ... rest>
 void do_transformations(const float* U, const float3& t, const float* val, float* pos) {
 
     switch(first) {
-        case PlaceType::SCALAR:
+        case PlaceT::SCALAR:
             pos[offset] = val[offset];
             break;
 
-        case PlaceType::VECTOR:
+        case PlaceT::VECTOR:
             store_vec(pos+offset, apply_rotation(U,   make_vec3(val[offset],val[offset+1],val[offset+2])));
             break;
 
-        case PlaceType::POINT:
+        case PlaceT::POINT:
             store_vec(pos+offset, apply_affine  (U,t, make_vec3(val[offset],val[offset+1],val[offset+2])));
             break;
     }
@@ -149,20 +203,20 @@ void do_sens_transformations(
         float* restrict ref_sens, float3& com_deriv, float3& torque, 
         const float* U, const float3& t, const float* x, const float* sens) {}
 
-template<int offset, PlaceType first, PlaceType ... rest>
+template<int offset, PlaceT first, PlaceT ... rest>
 void do_sens_transformations(
         float* restrict ref_sens, float3& com_deriv, float3& torque, 
         const float* U, const float3& t, const float* x, const float* sens) {
 
-    if(first==PlaceType::SCALAR) {
+    if(first==PlaceT::SCALAR) {
         ref_sens[offset] = sens[offset];
-    } else if(first==PlaceType::POINT) {
+    } else if(first==PlaceT::POINT) {
         auto s  = make_vec3(sens[offset],sens[offset+1],sens[offset+2]);
         auto xv = make_vec3(x   [offset],x   [offset+1],x   [offset+2]);
         store_vec(ref_sens+offset, apply_inverse_rotation(U,s));
         com_deriv += s;
         torque    += cross(xv-t, s);
-    } else if(first==PlaceType::VECTOR) {
+    } else if(first==PlaceT::VECTOR) {
         auto s = make_vec3(sens[offset],sens[offset+1],sens[offset+2]);
         auto xv = make_vec3(x   [offset],x   [offset+1],x   [offset+2]);
         store_vec(ref_sens+offset, apply_inverse_rotation(U,s));
@@ -173,7 +227,7 @@ void do_sens_transformations(
 }
 
 
-template <typename PlacementData, PlaceType ...signature>
+template <typename PlacementData, PlaceT ...signature>
 struct PlacementNode: public CoordNode
 {
     static constexpr int n_pos_dim = compute_pos_dim_from_signature<signature...>();
@@ -209,6 +263,8 @@ struct PlacementNode: public CoordNode
 
         VecArray affine_pos = alignment.output;
         VecArray pos        = output;
+
+        placement_data.reset();
 
         for(int ne: range(n_elem)) {
             auto aff = load_vec<7>(affine_pos, affine_residue[ne]);
@@ -246,8 +302,16 @@ struct PlacementNode: public CoordNode
           update_vec(&a_sens(3,affine_residue[ne]), torque);
       }
     }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return placement_data.get_param();}
+    virtual std::vector<float> get_param_deriv() const {return placement_data.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) {placement_data.set_param(new_param);}
+#endif
 };
 
-static RegisterNodeType<PlacementNode<RamaPlacement<1>, PlaceType::SCALAR                  >,2> pl_scalar_node      ("placement_scalar");
-static RegisterNodeType<PlacementNode<RamaPlacement<3>, PlaceType::POINT                   >,2> pl_point_node       ("placement_point_only");
-static RegisterNodeType<PlacementNode<RamaPlacement<6>, PlaceType::POINT, PlaceType::VECTOR>,2> pl_point_vector_node("placement_point_vector");
+static RegisterNodeType<PlacementNode<RamaPlacement <1>, PlaceT::SCALAR               >,2> pl1("placement_scalar");
+static RegisterNodeType<PlacementNode<RamaPlacement <3>, PlaceT::POINT                >,2> pl2("placement_point_only");
+static RegisterNodeType<PlacementNode<RamaPlacement <6>, PlaceT::POINT, PlaceT::VECTOR>,2> pl3("placement_point_vector");
+static RegisterNodeType<PlacementNode<FixedPlacement<6>, PlaceT::POINT, PlaceT::VECTOR>,1> pl4("placement_fixed_point_vector");
+}
