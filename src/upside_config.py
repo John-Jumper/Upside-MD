@@ -195,14 +195,14 @@ def write_infer_H_O(fasta, excluded_residues):
 def write_environment(fasta, environment_library):
     cgrp = t.create_group(potential, 'environment_vector')
     cgrp._v_attrs.arguments = np.array(['placement_cb_only','placement4_weighted'])
-    # cgrp._v_attrs.arguments = np.array(['placement_rotamer','placement4_weighted'])
+    # cgrp._v_attrs.arguments = np.array(['placement_point_vector','placement4_weighted'])
 
     with tb.open_file(environment_library) as data:
          restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
 
     grp = t.create_group(potential, 'placement_cb_only')
-    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord',])
     create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    np.arange(len(fasta)))
     create_array(grp, 'affine_residue',  np.arange(len(fasta)))
@@ -220,7 +220,7 @@ def write_environment(fasta, environment_library):
     create_array(cgrp, 'id1',    np.arange(len(fasta)))
 
     # # group1 is the source sidechain rotamer
-    # rot_grp = t.root.input.potential.placement_rotamer
+    # rot_grp = t.root.input.potential.placement_point_vector
     # create_array(cgrp, 'index1', np.arange(len(rot_grp.beadtype_seq[:])))
     # create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.beadtype_seq[:]]))
     # create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
@@ -280,7 +280,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
          0.682, 1./0.05]]]))
 
     cgrp = t.create_group(potential, 'hbond_coverage')
-    cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_rotamer'])
+    cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_point_vector'])
 
     with tb.open_file(coverage_library) as data:
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
@@ -293,7 +293,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
                                                  infer_group.acceptors.residue[:]]))
 
     # group 2 is the sidechains
-    rseq = t.root.input.potential.placement_rotamer.beadtype_seq[:]
+    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
     create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
     create_array(cgrp, 'id2',    np.arange(len(rseq)))
@@ -700,8 +700,8 @@ def write_rama_coord():
 
 
 def write_backbone_dependent_point(fasta, library):
-    grp = t.create_group(potential, 'placement3_backbone_dependent_point')
-    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    grp = t.create_group(potential, 'placement_point_only_backbone_dependent_point')
+    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
 
     with tb.open_file(library) as data:
         n_restype = len(aa_num)
@@ -720,7 +720,7 @@ def write_backbone_dependent_point(fasta, library):
 
 def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
-    g._v_attrs.arguments = np.array(['placement3_backbone_dependent_point'])
+    g._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -764,7 +764,7 @@ def write_weighted_placement(fasta, placement_library):
         beadtype_seq   .extend([aa]*n_rot)
 
     grp = t.create_group(potential, 'placement4_weighted')
-    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
     create_array(grp, 'signature',       np.array(['point','scalar']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
@@ -829,8 +829,8 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
         beadtype_seq   .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
         id_seq        .extend(np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer))
 
-    grp = t.create_group(potential, 'placement_rotamer')
-    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    grp = t.create_group(potential, 'placement_point_vector')
+    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
     create_array(grp, 'signature',       np.array(['point','vector']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
@@ -840,7 +840,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     create_array(grp, 'id_seq',          np.array(id_seq))
 
     grp = t.create_group(potential, 'placement_scalar')
-    grp._v_attrs.arguments = np.array(['rama_coord','affine_alignment'])
+    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
     create_array(grp, 'signature',       np.array(['scalar']))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
@@ -850,7 +850,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
 def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
-    g._v_attrs.arguments = np.array(['placement_rotamer','placement_scalar'] + 
+    g._v_attrs.arguments = np.array(['placement_point_vector','placement_scalar'] + 
             (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []) +
             (['environment_energy'] if 'environment_energy' in t.root.input.potential else [])
             )
@@ -887,16 +887,16 @@ def write_rotamer(fasta, interaction_library, damping):
             type .append(restype)
             id   .append((base_id<<n_bit_rotamer) + no)
 
-    rseq = t.root.input.potential.placement_rotamer.beadtype_seq[:]
+    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))
     create_array(pg, 'type',  np.array([bead_num[s] for s in rseq]))
-    create_array(pg, 'id',    t.root.input.potential.placement_rotamer.id_seq[:])
+    create_array(pg, 'id',    t.root.input.potential.placement_point_vector.id_seq[:])
 
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
 		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
-    grp._v_attrs.arguments = np.array(['placement3_backbone_dependent_point'])
+    grp._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
 
     potential_library = tb.open_file(potential_library_path)
     resnames  = potential_library.root.names[:]

@@ -69,13 +69,13 @@ struct RamaMapPot : public PotentialNode
             const auto& p = params[nr];
             auto r = load_vec<2>(ramac, p.residue);
 
-            float map_value[3];
-            rama_map_data.evaluate_value_and_deriv(map_value, p.rama_map_id, 
+            float value,dx,dy;
+            rama_map_data.evaluate_value_and_deriv(&value,&dx,&dy, p.rama_map_id, 
                     (r.v[0]+shift)*scale, (r.v[1]+shift)*scale);
 
-            if(pot) {*pot += map_value[2]; residue_potential[nr] = map_value[2];}
-            rama_sens(0,p.residue) += map_value[0] * scale;
-            rama_sens(1,p.residue) += map_value[1] * scale;
+            if(pot) {*pot += value; residue_potential[nr] = value;}
+            rama_sens(0,p.residue) += dx * scale;
+            rama_sens(1,p.residue) += dy * scale;
         }
     }
 

@@ -29,7 +29,7 @@ void solve_periodic_2d_spline(
 
 
 template<typename T>
-inline void spline_value_and_deriv(T deriv[3], const T* c, T fx, T fy) {
+inline void spline_value_and_deriv(T &value, T &dx, T &dy, const T* c, T fx, T fy) {
     T fx2 = fx*fx; 
     T fx3 = fx*fx2;
 
@@ -45,10 +45,9 @@ inline void spline_value_and_deriv(T deriv[3], const T* c, T fx, T fy) {
     T vy2 = c[ 2] + fx*(c[ 6] + fx*(c[10] + fx*c[14]));
     T vy3 = c[ 3] + fx*(c[ 7] + fx*(c[11] + fx*c[15]));
 
-    // dx,dy,value is the order
-    deriv[0] = vx1 + T(2.f)*fx*vx2 + T(3.f)*fx2*vx3;
-    deriv[1] = vy1 + T(2.f)*fy*vy2 + T(3.f)*fy2*vy3;
-    deriv[2] = vx0 + fx*vx1 + fx2*vx2 + fx3*vx3;
+    dx    = vx1 + T(2.f)*fx*vx2 + T(3.f)*fx2*vx3;
+    dy    = vy1 + T(2.f)*fy*vy2 + T(3.f)*fy2*vy3;
+    value = vx0 + fx*vx1 + fx2*vx2 + fx3*vx3;
 }
 
 template<typename T>
@@ -280,7 +279,11 @@ struct LayeredPeriodicSpline2D {
     }
 
 
-    void evaluate_value_and_deriv(float* restrict result, int layer, float x, float y) const {
+    void evaluate_value_and_deriv(
+            float* restrict value, 
+            float* restrict dx, 
+            float* restrict dy, 
+            int layer, float x, float y) const {
         // order of answer is (dx1,dy1,value1, dx2,dy2,value2, ...)
         int x_bin = int(x);
         int y_bin = int(y);
@@ -291,7 +294,7 @@ struct LayeredPeriodicSpline2D {
         const float* c = coefficients.data() + (layer*nx*ny + x_bin*ny + y_bin)*16*NDIM_VALUE;
 
         for(int id=0; id<NDIM_VALUE; ++id) 
-            spline_value_and_deriv(result+id*3, c+id*16, fx, fy);
+            spline_value_and_deriv(value[id], dx[id], dy[id], c+id*16, fx, fy);
     }
 };
 

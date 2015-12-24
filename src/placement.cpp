@@ -11,61 +11,38 @@ using namespace h5;
 
 enum class PlaceType {SCALAR, VECTOR, POINT};
 
+constexpr int placetype_size(PlaceType t) {
+    return t==PlaceType::SCALAR ? 1 : 3;
+}
 
-template <int n_pos_dim> 
-struct RigidPlacementNode: public CoordNode {
+template <int n_pos_dim>
+struct RamaPlacement {
     struct Params {
         int layer_idx;
-        index_t affine_residue;
         index_t rama_residue;
     };
-
-    vector<PlaceType> signature;
-
+        
     CoordNode& rama;
-    CoordNode& alignment;
-
+    int n_elem;
     vector<Params> params;
     LayeredPeriodicSpline2D<n_pos_dim> spline;
     VecArrayStorage rama_deriv;
 
-    RigidPlacementNode(hid_t grp, CoordNode& rama_, CoordNode& alignment_):
-        CoordNode(get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
-        rama(rama_), alignment(alignment_),
-        params(n_elem), 
+    RamaPlacement(hid_t grp, CoordNode& rama_):
+        rama(rama_),
+        n_elem(get_dset_size(1, grp, "layer_index")[0]),
+        params(n_elem),
         spline(
                 get_dset_size(4, grp, "placement_data")[0],
                 get_dset_size(4, grp, "placement_data")[1],
                 get_dset_size(4, grp, "placement_data")[2]),
-
         rama_deriv(2*n_pos_dim, n_elem) // first is all phi deriv then all psi deriv
     {
-        // verify that the signature is as expected
-        int n_pos_dim_input = 0;
-        traverse_string_dset<1>(grp, "signature", [&](size_t i, string x){
-                if(x == "scalar") {
-                    signature.push_back(PlaceType::SCALAR);
-                    n_pos_dim_input += 1;
-                } else if(x == "vector") {
-                    signature.push_back(PlaceType::VECTOR);
-                    n_pos_dim_input += 3;
-                } else if(x == "point") {
-                    signature.push_back(PlaceType::POINT);
-                    n_pos_dim_input += 3;
-                } else {
-                    throw string("unrecognized type in signature");
-                }});
-        if(n_pos_dim_input != n_pos_dim) 
-            throw string("number of dimensions in input signature("+to_string(n_pos_dim_input)+") does not "
-                    "match compiled n_pos_dim("+to_string(n_pos_dim)+").  Unable to continue.");
-
         check_size(grp, "layer_index",    n_elem);
-        check_size(grp, "affine_residue", n_elem);
         check_size(grp, "rama_residue",   n_elem);
         check_size(grp, "placement_data", spline.n_layer, spline.nx, spline.ny, n_pos_dim);
 
         traverse_dset<1,int>(grp, "layer_index",    [&](size_t np, int x){params[np].layer_idx  = x;});
-        traverse_dset<1,int>(grp, "affine_residue", [&](size_t np, int x){params[np].affine_residue = x;});
         traverse_dset<1,int>(grp, "rama_residue",   [&](size_t np, int x){params[np].rama_residue  = x;});
 
         {
@@ -74,6 +51,148 @@ struct RigidPlacementNode: public CoordNode {
                     all_data_to_fit.push_back(x);});
             spline.fit_spline(all_data_to_fit.data());
         }
+    }
+
+    Vec<n_pos_dim> evaluate(int ne) {
+        const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
+        const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
+        const float shift = M_PI_F;
+
+        VecArray rama_pos   = rama.output;
+
+        auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue);
+
+        Vec<n_pos_dim> value;
+        spline.evaluate_value_and_deriv(
+                value.v, 
+                &rama_deriv(        0,ne),
+                &rama_deriv(n_pos_dim,ne),
+                params[ne].layer_idx, 
+                (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
+
+        return value;
+    }
+
+    void propagate_deriv(const Vec<n_pos_dim> &sens, int ne) {
+        const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
+        const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
+
+        VecArray r_sens = rama.sens;
+
+        auto my_rama_deriv = load_vec<2*n_pos_dim>(rama_deriv, ne);
+        auto rd = make_vec2(
+                scale_x*dot(sens, extract<        0,  n_pos_dim>(my_rama_deriv)),
+                scale_y*dot(sens, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
+
+        update_vec(r_sens, params[ne].rama_residue, rd);
+    }
+};
+
+
+// template <int n_pos_dim>
+// struct FixedPlacement {
+//     struct Params {
+//         int layer_idx;
+//     }
+//         
+//     VecArrayStorage placement_data_by_layer;
+// 
+//     FixedPlacementData(hid_t grp)
+// 
+//     Vec<n_pos_dim> evaluate(int ne) {
+//         return load_vec<n_pos_dim>(placement_data_by_layer, params[ne].layer_idx);
+//     }
+// 
+//     void push_derivative(float* deriv_value, int ne) {
+//         #ifdef PARAM_DERIV
+//             write some derivative info;
+//         #endif
+//     }
+// };
+
+template<PlaceType first>
+static constexpr int compute_pos_dim_from_signature() {
+    return placetype_size(first);
+}
+
+template<PlaceType first, PlaceType second, PlaceType ...rest>
+static constexpr int compute_pos_dim_from_signature() {
+    return placetype_size(first) + compute_pos_dim_from_signature<second,rest...>();
+}
+
+template<int offset>
+void do_transformations(const float* U, const float3& t, const float* val, float* pos) {}
+
+template<int offset, PlaceType first, PlaceType ... rest>
+void do_transformations(const float* U, const float3& t, const float* val, float* pos) {
+
+    switch(first) {
+        case PlaceType::SCALAR:
+            pos[offset] = val[offset];
+            break;
+
+        case PlaceType::VECTOR:
+            store_vec(pos+offset, apply_rotation(U,   make_vec3(val[offset],val[offset+1],val[offset+2])));
+            break;
+
+        case PlaceType::POINT:
+            store_vec(pos+offset, apply_affine  (U,t, make_vec3(val[offset],val[offset+1],val[offset+2])));
+            break;
+    }
+
+    do_transformations<offset+placetype_size(first), rest...>(U,t,val,pos);
+}
+
+
+template<int offset>
+void do_sens_transformations(
+        float* restrict ref_sens, float3& com_deriv, float3& torque, 
+        const float* U, const float3& t, const float* x, const float* sens) {}
+
+template<int offset, PlaceType first, PlaceType ... rest>
+void do_sens_transformations(
+        float* restrict ref_sens, float3& com_deriv, float3& torque, 
+        const float* U, const float3& t, const float* x, const float* sens) {
+
+    if(first==PlaceType::SCALAR) {
+        ref_sens[offset] = sens[offset];
+    } else if(first==PlaceType::POINT) {
+        auto s  = make_vec3(sens[offset],sens[offset+1],sens[offset+2]);
+        auto xv = make_vec3(x   [offset],x   [offset+1],x   [offset+2]);
+        store_vec(ref_sens+offset, apply_inverse_rotation(U,s));
+        com_deriv += s;
+        torque    += cross(xv-t, s);
+    } else if(first==PlaceType::VECTOR) {
+        auto s = make_vec3(sens[offset],sens[offset+1],sens[offset+2]);
+        auto xv = make_vec3(x   [offset],x   [offset+1],x   [offset+2]);
+        store_vec(ref_sens+offset, apply_inverse_rotation(U,s));
+        torque += cross(xv, s);
+    }
+
+    do_sens_transformations<offset+placetype_size(first), rest...>(ref_sens,com_deriv,torque, U,t,x,sens);
+}
+
+
+template <typename PlacementData, PlaceType ...signature>
+struct PlacementNode: public CoordNode
+{
+    static constexpr int n_pos_dim = compute_pos_dim_from_signature<signature...>();
+
+    PlacementData placement_data;
+    CoordNode& alignment;
+
+    vector<index_t> affine_residue;
+
+    template<typename ... Args>
+    PlacementNode(hid_t grp, CoordNode& alignment_, Args& ... placement_arguments):
+        CoordNode(get_dset_size(1,grp,"layer_index")[0], n_pos_dim),
+        placement_data(grp, placement_arguments...),
+        alignment(alignment_),
+        affine_residue(n_elem)
+    {
+        // static_assert(n_pos_dim == decltype(placement_data.evaluate(0)), "inconsistent n_pos_dim");
+        check_size(grp, "affine_residue", n_elem);
+        traverse_dset<1,int>(grp, "affine_residue", [&](size_t np, int x){affine_residue[np] = x;});
 
         if(logging(LOG_EXTENSIVE)) {
             // FIXME prepend the logging with the class name for disambiguation
@@ -85,119 +204,50 @@ struct RigidPlacementNode: public CoordNode {
         }
     }
 
-
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("placement"));
 
-        const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
-        const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
-        const float shift = M_PI_F;
-
         VecArray affine_pos = alignment.output;
-        VecArray rama_pos   = rama.output;
         VecArray pos        = output;
 
         for(int ne: range(n_elem)) {
-            auto aff = load_vec<7>(affine_pos, params[ne].affine_residue);
-            auto r   = load_vec<2>(rama_pos,   params[ne].rama_residue);
+            auto aff = load_vec<7>(affine_pos, affine_residue[ne]);
             auto t   = extract<0,3>(aff);
             float U[9]; quat_to_rot(U, aff.v+3);
 
-            float val[n_pos_dim*3];  // 3 here is deriv_x, deriv_y, value
-            spline.evaluate_value_and_deriv(val, params[ne].layer_idx, 
-                    (r[0]+shift)*scale_x, (r[1]+shift)*scale_y);
+            Vec<n_pos_dim> val = placement_data.evaluate(ne);
 
-            int j = 0; // index of dimension that we are on
-
-            #define READ3(i,j) make_vec3(val[((i)+0)*3+(j)], val[((i)+1)*3+(j)], val[((i)+2)*3+(j)])
-            for(PlaceType type: signature) {
-                switch(type) {
-                    case PlaceType::SCALAR:
-                        rama_deriv(j,ne)           = val[j*3+0] * scale_x;
-                        rama_deriv(n_pos_dim+j,ne) = val[j*3+1] * scale_y;
-                        pos  (j,ne) = val[j*3+2];
-                        j += 1;
-                        break;
-                    case PlaceType::VECTOR:
-                    case PlaceType::POINT:
-                        // This if-statement is strictly not necessary as we already checked that n_pos_dim >= 3
-                        // when we verified that the signature was consistent with n_pos_dim.  That being said,
-                        // the if statement will be optimized out at compile time and it suppresses some warnings 
-                        // from GCC at the time of writing.
-                        if(n_pos_dim >= 3) { 
-                            // point and vector differ only in shifting the final output
-                            auto my_phi_deriv = scale_x * apply_rotation(U, READ3(j,0));
-                            auto my_psi_deriv = scale_y * apply_rotation(U, READ3(j,1));
-                            auto my_pos = (type==PlaceType::POINT
-                                    ? apply_affine  (U,t, READ3(j,2))
-                                    : apply_rotation(U,   READ3(j,2)));
-
-                            for(int k: range(3)) rama_deriv(          j+k,ne) = my_phi_deriv[k];
-                            for(int k: range(3)) rama_deriv(n_pos_dim+j+k,ne) = my_psi_deriv[k];
-                            for(int k: range(3)) pos       (          j+k,ne) = my_pos[k];
-
-                            j += 3;
-                        }
-                        break;
-                }
-            }
-            #undef READ3
+            do_transformations<0, signature...>(U,t, val.v, &pos(0,ne));
         }
     }
 
     virtual void propagate_deriv() {
-        Timer timer(string("placement_deriv"));
+      Timer timer(string("placement_deriv"));
 
-        VecArray r_sens = rama.sens;
-        VecArray a_sens = alignment.sens;
-        VecArray affine_pos = alignment.output;
+      VecArray a_sens = alignment.sens;
+      VecArray affine_pos = alignment.output;
 
-        for(int ne: range(n_elem)) {
-            auto d = load_vec<n_pos_dim>(sens, ne);
+      for(int ne: range(n_elem)) {
+          auto d = load_vec<n_pos_dim>(sens, ne);
+          float* x = &output(0,ne);
 
-            auto my_rama_deriv = load_vec<2*n_pos_dim>(rama_deriv, ne);
-            auto rd = make_vec2(
-                        dot(d, extract<        0,  n_pos_dim>(my_rama_deriv)),
-                        dot(d, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
-
-            update_vec(r_sens, params[ne].rama_residue, rd);
-
-            // only difference between points and vectors is whether to subtract off the translation
-            auto z = make_zero<6>();
-            int j=0;
-
-            auto t  = load_vec<3>(affine_pos, params[ne].affine_residue);
-            for(PlaceType type: signature) {
-                switch(type) {
-                    case PlaceType::SCALAR:
-                        j+=1;  // no affine derivative
-                        break;
-                    case PlaceType::VECTOR:
-                    case PlaceType::POINT:
-                        // see note in compute_value for why this if-statement is unnecessary but harmless
-                        if(n_pos_dim >= 3) { 
-                            auto x  = make_vec3(output(j+0,ne), output(j+1,ne), output(j+2,ne));
-                            auto dx = make_vec3(d[j+0], d[j+1], d[j+2]);
-
-                            // torque relative to the residue center
-                            auto tq = cross((type==PlaceType::POINT?x-t:x), dx);
-
-                            // only points, not vectors, contribute to the CoM derivative
-                            if(type==PlaceType::POINT) { z[0] += dx[0]; z[1] += dx[1]; z[2] += dx[2]; }
-                            z[3] += tq[0]; z[4] += tq[1]; z[5] += tq[2];
-                            j += 3;
-                        }
-                        break;
-                }
-            }
-            update_vec(a_sens, params[ne].affine_residue, z);
-        }
+          auto aff = load_vec<7>(affine_pos, affine_residue[ne]);
+          auto t   = extract<0,3>(aff);
+          float U[9]; quat_to_rot(U, aff.v+3);
           
+          Vec<n_pos_dim> ref_frame_sens;
+          Vec<3> com_deriv = make_zero<3>();
+          Vec<3> torque    = make_zero<3>();
+
+          do_sens_transformations<0, signature...>(ref_frame_sens.v,com_deriv,torque, U,t,x, d.v);
+          placement_data.propagate_deriv(ref_frame_sens, ne);
+
+          update_vec(&a_sens(0,affine_residue[ne]), com_deriv);
+          update_vec(&a_sens(3,affine_residue[ne]), torque);
+      }
     }
 };
 
-static RegisterNodeType<RigidPlacementNode<1>,2> placement_scalar_node("placement_scalar");
-static RegisterNodeType<RigidPlacementNode<3>,2> placement3_node("placement3");
-static RegisterNodeType<RigidPlacementNode<4>,2> placement4_node("placement4");
-static RegisterNodeType<RigidPlacementNode<6>,2> placement_rotamer_node("placement_rotamer");
-static RegisterNodeType<RigidPlacementNode<6>,2> placement_cb_only_node("placement_cb_only");
+static RegisterNodeType<PlacementNode<RamaPlacement<1>, PlaceType::SCALAR                  >,2> pl_scalar_node      ("placement_scalar");
+static RegisterNodeType<PlacementNode<RamaPlacement<3>, PlaceType::POINT                   >,2> pl_point_node       ("placement_point_only");
+static RegisterNodeType<PlacementNode<RamaPlacement<6>, PlaceType::POINT, PlaceType::VECTOR>,2> pl_point_vector_node("placement_point_vector");
