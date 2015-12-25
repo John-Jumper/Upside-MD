@@ -284,12 +284,37 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
     with tb.open_file(coverage_library) as data:
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+         hydrophobe_placement = data.root.hydrophobe_placement[:]
 
     # group1 is the HBond partners
     create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
     create_array(cgrp, 'type1',  1*(np.arange(n_donor+n_acceptor) >= n_donor))  # donor is 0, acceptor is 1
     create_array(cgrp, 'id1',    np.concatenate([infer_group.donors   .residue[:],
                                                  infer_group.acceptors.residue[:]]))
+
+    # group 2 is the sidechains
+    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
+    create_array(cgrp, 'index2', np.arange(len(rseq)))
+    create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
+    create_array(cgrp, 'id2',    np.arange(len(rseq)))
+
+    grp = t.create_group(potential, 'placement_fixed_point_vector_scalar')
+    grp._v_attrs.arguments = np.array(['affine_alignment'])
+    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
+    create_array(grp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+    create_array(grp, 'placement_data',  hydrophobe_placement)
+
+    cgrp = t.create_group(potential, 'hbond_coverage_hydrophobe')
+    cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_scalar','placement_point_vector'])
+
+    with tb.open_file(coverage_library) as data:
+         create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
+         bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+
+    # group1 is the hydrophobes
+    create_array(cgrp, 'index1', np.arange(n_res))
+    create_array(cgrp, 'type1',  0*np.arange(n_res))
+    create_array(cgrp, 'id1',    np.arange(n_res))
 
     # group 2 is the sidechains
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
@@ -845,10 +870,13 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
 def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
-    g._v_attrs.arguments = np.array(['placement_point_vector','placement_scalar'] + 
-            (['hbond_coverage'] if 'hbond_coverage' in t.root.input.potential else []) +
-            (['environment_energy'] if 'environment_energy' in t.root.input.potential else [])
-            )
+    args = ['placement_point_vector','placement_scalar']
+    def arg_maybe(nm):
+        if nm in t.root.potential: args.append(nm)
+    arg_maybe('hbond_coverage')
+    arg_maybe('hbond_coverage_hydrophobe')
+
+    g._v_attrs.arguments = np.array(args)
     g._v_attrs.max_iter = 1000
     g._v_attrs.tol      = 1e-3
     g._v_attrs.damping  = damping

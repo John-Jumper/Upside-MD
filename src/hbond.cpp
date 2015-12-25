@@ -239,7 +239,7 @@ namespace {
 
     struct HBondCoverageInteraction {
         // radius scale angular_width angular_scale
-        // first group is donors; second group is acceptors
+        // first group is hb; second group is sc
 
         constexpr static bool  symmetric = false;
         constexpr static int   n_knot = 12, n_knot_angular=15;

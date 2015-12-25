@@ -313,5 +313,5 @@ struct PlacementNode: public CoordNode
 static RegisterNodeType<PlacementNode<RamaPlacement <1>, PlaceT::SCALAR               >,2> pl1("placement_scalar");
 static RegisterNodeType<PlacementNode<RamaPlacement <3>, PlaceT::POINT                >,2> pl2("placement_point_only");
 static RegisterNodeType<PlacementNode<RamaPlacement <6>, PlaceT::POINT, PlaceT::VECTOR>,2> pl3("placement_point_vector");
-static RegisterNodeType<PlacementNode<FixedPlacement<6>, PlaceT::POINT, PlaceT::VECTOR>,1> pl4("placement_fixed_point_vector");
+static RegisterNodeType<PlacementNode<FixedPlacement<7>, PlaceT::POINT, PlaceT::VECTOR, PlaceT::SCALAR>,1> pl4("placement_fixed_point_vector_scalar");
 }
