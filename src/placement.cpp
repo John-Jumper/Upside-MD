@@ -150,10 +150,12 @@ struct FixedPlacement {
     virtual std::vector<float> get_param() const {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = data(d,nl);
+        return ret;
     }
     virtual std::vector<float> get_param_deriv() const {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = param_deriv(d,nl);
+        return ret;
     }
 
     virtual void set_param(const std::vector<float>& new_param) {

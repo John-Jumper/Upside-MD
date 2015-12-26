@@ -251,7 +251,8 @@ namespace {
         }
 
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
-            return Int4() == Int4();  // No exclusions (all true)
+            // return Int4() == Int4();  // No exclusions (all true)
+            return id1 != id2; // exclude interactions on the same residue
         }
 
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],

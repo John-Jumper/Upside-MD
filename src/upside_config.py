@@ -285,6 +285,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
          hydrophobe_placement = data.root.hydrophobe_placement[:]
+         hydrophobe_interaction = data.root.hydrophobe_interaction[:]
 
     # group1 is the HBond partners
     create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
@@ -294,9 +295,10 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
 
     # group 2 is the sidechains
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
+    sc_resnum = t.root.input.potential.placement_point_vector.affine_residue[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
     create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
-    create_array(cgrp, 'id2',    np.arange(len(rseq)))
+    create_array(cgrp, 'id2',    sc_resnum)
 
     grp = t.create_group(potential, 'placement_fixed_point_vector_scalar')
     grp._v_attrs.arguments = np.array(['affine_alignment'])
@@ -311,6 +313,8 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
          create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
 
+    n_res = len(fasta)
+
     # group1 is the hydrophobes
     create_array(cgrp, 'index1', np.arange(n_res))
     create_array(cgrp, 'type1',  0*np.arange(n_res))
@@ -320,10 +324,8 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
     create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
-    create_array(cgrp, 'id2',    np.arange(len(rseq)))
+    create_array(cgrp, 'id2',    sc_resnum)
 
-
-    n_res = len(fasta)
     if hbond_energy > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
 
@@ -872,7 +874,7 @@ def write_rotamer(fasta, interaction_library, damping):
     g = t.create_group(t.root.input.potential, 'rotamer')
     args = ['placement_point_vector','placement_scalar']
     def arg_maybe(nm):
-        if nm in t.root.potential: args.append(nm)
+        if nm in t.root.input.potential: args.append(nm)
     arg_maybe('hbond_coverage')
     arg_maybe('hbond_coverage_hydrophobe')
 
@@ -1001,7 +1003,6 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     create_array(grp, 'energy',     membrane_energies * scale)
     grp.energy._v_attrs.z_min = z[0]
     grp.energy._v_attrs.z_max = z[-1]
-
 
 
 def parse_segments(s):

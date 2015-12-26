@@ -34,6 +34,9 @@ def unpack_param_maker():
     def read_cov(n):
         return read_param((2,n_restype,n))
 
+    def read_hyd(n):
+        return read_param((1,n_restype,n))
+
     def read_angular_spline(read_func):
         return T.nnet.sigmoid(read_func(n_knot_angular))  # bound on (0,1)
 
@@ -59,31 +62,54 @@ def unpack_param_maker():
         read_clamped_spline(read_cov,n_knot_hb), read_clamped_spline(read_cov,n_knot_hb)],
         axis=2)
 
-    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+2*n_restype*(n_angular+2*(n_knot_hb-3))
+    hyd_param = T.concatenate([
+        read_angular_spline(read_hyd), read_angular_spline(read_hyd),
+        read_clamped_spline(read_hyd,n_knot_hb), read_clamped_spline(read_hyd,n_knot_hb)],
+        axis=2)
 
-    return func(rot_param), func(cov_param), n_param
+    hydpl_com = read_param((1,3))
+    hydpl_dir_unnorm = read_param((1,3))
+    hydpl_dir = hydpl_dir_unnorm / T.sqrt((hydpl_dir_unnorm**2).sum(axis=-1,keepdims=True))
+    hydpl_param = T.concatenate([hydpl_com, hydpl_dir, T.zeros((1,1))], axis=-1)
 
-(unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr), n_param = unpack_param_maker()
+    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + 6
+
+    return func(rot_param), func(cov_param), func(hyd_param), func(hydpl_param), n_param
+
+(unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr), \
+        (unpack_hyd,unpack_hyd_expr), (unpack_hydpl, unpack_hydpl_expr), \
+        n_param = unpack_param_maker()
+unpack_params_expr = unpack_rot_expr, unpack_cov_expr, unpack_hyd_expr, unpack_hydpl_expr
+
+def unpack_params(state):
+    return unpack_rot(state), unpack_cov(state), unpack_hyd(state), unpack_hydpl(state)
 
 def pack_param_helper_maker():
-    loose_cov_var = T.dtensor3('loose_cov')
-    loose_rot_var = T.dtensor3('loose_rot')
-    discrep_expr = T.sum((unpack_rot_expr - loose_rot_var)**2) + T.sum((unpack_cov_expr - loose_cov_var)**2)
-    discrep   = theano.function([lparam,loose_rot_var,loose_cov_var], discrep_expr)
-    d_discrep = theano.function([lparam,loose_rot_var,loose_cov_var], T.grad(discrep_expr,lparam))
+    loose_cov_var   = T.dtensor3('loose_cov')
+    loose_rot_var   = T.dtensor3('loose_rot')
+    loose_hyd_var   = T.dtensor3('loose_hyd')
+    loose_hydpl_var = T.dmatrix('loose_hydpl')
+    discrep_expr = (
+            T.sum((unpack_rot_expr - loose_rot_var)**2) + 
+            T.sum((unpack_cov_expr - loose_cov_var)**2) +
+            T.sum((unpack_hyd_expr - loose_hyd_var)**2) +
+            T.sum((unpack_hydpl_expr - loose_hydpl_var)**2))
+    v = [lparam,loose_rot_var,loose_cov_var,loose_hyd_var,loose_hydpl_var]
+    discrep   = theano.function(v, discrep_expr)
+    d_discrep = theano.function(v, T.grad(discrep_expr,lparam))
     return discrep, d_discrep
 
 discrep, d_discrep = pack_param_helper_maker()
 
-def pack_param(loose_rot,loose_cov, check_accuracy=True):
+def pack_param(*args):
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
-            (lambda x: discrep(x, loose_rot, loose_cov)),
-            np.zeros(n_param),
+            (lambda x: discrep(x, *args)),
+            1e-4+np.zeros(n_param),
             method = 'L-BFGS-B',
-            jac = (lambda x: d_discrep(x, loose_rot, loose_cov)))
+            jac = (lambda x: d_discrep(x, *args)))
 
-    if not check_accuracy and not (discrep(results.x) < 1e-4):
+    if not (discrep(results.x, *args) < 1e-4):
         raise ValueError('Failed to converge')
 
     return results.x
@@ -120,7 +146,7 @@ class UpsideEnergyGap(theano.Op):
     def __init__(self, protein_data, node_names):
         self.protein_data = [None,None]
         self.change_protein_data(protein_data)   # (total_n_res, pos_fix_free)
-        self.node_names   = list(node_names)
+        self.node_names   = node_names  # should be OrderedDict
 
     def make_node(self, *param):
         assert len(param) == len(self.node_names)
@@ -128,7 +154,7 @@ class UpsideEnergyGap(theano.Op):
 
     def perform(self, node, inputs_storage, output_storage):
         total_n_res, pos_fix_free = self.protein_data
-        energy, deriv = bind_param_and_evaluate(pos_fix_free, self.node_names, inputs_storage)
+        energy, deriv = bind_param_and_evaluate(pos_fix_free, list(self.node_names), inputs_storage)
         output_storage[0][0] = (energy/total_n_res).astype('f8')
 
     def grad(self, inputs, output_gradients):
@@ -145,17 +171,18 @@ class UpsideEnergyGap(theano.Op):
 class UpsideEnergyGapGrad(theano.Op):
     def __init__(self, protein_data, node_names):
         self.protein_data = protein_data
-        self.node_names   = list(node_names)
+        self.node_names   = node_names
 
     def make_node(self, *param):
         assert len(param) == len(self.node_names)
+        size_conv = {1:T.dmatrix, 2:T.dtensor3, 3:T.dtensor4}
         return theano.Apply(self, 
                 [T.as_tensor_variable(p) for p in param], 
-                [T.dtensor4() for p in param])
+                [size_conv[len(sz)]() for nn,sz in self.node_names.items()])
 
     def perform(self, node, inputs_storage, output_storage):
         total_n_res, pos_fix_free = self.protein_data
-        energy, deriv = bind_param_and_evaluate(pos_fix_free, self.node_names, inputs_storage)
+        energy, deriv = bind_param_and_evaluate(pos_fix_free, list(self.node_names), inputs_storage)
 
         for i in range(len(output_storage)):
             output_storage[i][0] = (deriv[i]*(1./total_n_res)).astype('f8')
