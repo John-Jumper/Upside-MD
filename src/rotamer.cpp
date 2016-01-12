@@ -141,10 +141,18 @@ struct NodeHolder {
 
         template <int N_ROT>
         void standardize_belief_update(float damping) {
-            for(int ne: range(n_elem)) {
-                auto b = load_vec<N_ROT>(cur_belief, ne);
-                b = (1.f-damping)*rcp(max(b))*b + damping*load_vec<N_ROT>(old_belief, ne);
-                store_vec(cur_belief, ne, b);
+            if(damping != 0.f) {
+                for(int ne: range(n_elem)) {
+                    auto b = load_vec<N_ROT>(cur_belief, ne);
+                    b = (1.f-damping)*rcp(max(b))*b + damping*load_vec<N_ROT>(old_belief, ne);
+                    store_vec(cur_belief, ne, b);
+                }
+            } else {  // zero damping should not keep any info, even NaN from previous iteration
+                for(int ne: range(n_elem)) {
+                    auto b = load_vec<N_ROT>(cur_belief, ne);
+                    b = rcp(max(b))*b;
+                    store_vec(cur_belief, ne, b);
+                }
             }
         }
 
