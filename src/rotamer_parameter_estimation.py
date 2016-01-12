@@ -26,6 +26,7 @@ def read_param(shape):
     return ret
 
 
+n_fix = 3
 def unpack_param_maker():
     def read_symm(n):
         x = read_param((n_restype,n_restype,n))
@@ -35,7 +36,8 @@ def unpack_param_maker():
         return read_param((2,n_restype,n))
 
     def read_hyd(n):
-        return read_param((1,n_restype,n))
+        # return read_param((1,n_restype,n))
+        return read_param((n_fix,n_restype,n))
 
     def read_angular_spline(read_func):
         return T.nnet.sigmoid(read_func(n_knot_angular))  # bound on (0,1)
@@ -67,12 +69,12 @@ def unpack_param_maker():
         read_clamped_spline(read_hyd,n_knot_hb), read_clamped_spline(read_hyd,n_knot_hb)],
         axis=2)
 
-    hydpl_com = read_param((1,3))
-    hydpl_dir_unnorm = read_param((1,3))
+    hydpl_com = read_param((n_fix,3))
+    hydpl_dir_unnorm = read_param((n_fix,3))
     hydpl_dir = hydpl_dir_unnorm / T.sqrt((hydpl_dir_unnorm**2).sum(axis=-1,keepdims=True))
-    hydpl_param = T.concatenate([hydpl_com, hydpl_dir, T.zeros((1,1))], axis=-1)
+    hydpl_param = T.concatenate([hydpl_com, hydpl_dir, T.zeros((n_fix,1))], axis=-1)
 
-    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + 6
+    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6
 
     return func(rot_param), func(cov_param), func(hyd_param), func(hydpl_param), n_param
 

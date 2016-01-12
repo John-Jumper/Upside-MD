@@ -253,6 +253,8 @@ def write_environment(fasta, environment_library):
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library):
+    n_res = len(fasta)
+
     infer_group = t.get_node('/input/potential/infer_H_O')
 
     n_donor    = infer_group.donors   .id.shape[0]
@@ -302,8 +304,8 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
 
     grp = t.create_group(potential, 'placement_fixed_point_vector_scalar')
     grp._v_attrs.arguments = np.array(['affine_alignment'])
-    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
-    create_array(grp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+    create_array(grp, 'affine_residue',  np.arange(3*n_res)/3)
+    create_array(grp, 'layer_index',     np.arange(3*n_res)%3)
     create_array(grp, 'placement_data',  hydrophobe_placement)
 
     cgrp = t.create_group(potential, 'hbond_coverage_hydrophobe')
@@ -313,12 +315,13 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
          create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
 
-    n_res = len(fasta)
-
     # group1 is the hydrophobes
-    create_array(cgrp, 'index1', np.arange(n_res))
-    create_array(cgrp, 'type1',  0*np.arange(n_res))
-    create_array(cgrp, 'id1',    np.arange(n_res))
+    # create_array(cgrp, 'index1', np.arange(n_res))
+    # create_array(cgrp, 'type1',  0*np.arange(n_res))
+    # create_array(cgrp, 'id1',    np.arange(n_res))
+    create_array(cgrp, 'index1', np.arange(3*n_res))
+    create_array(cgrp, 'type1',  np.arange(3*n_res)%3)
+    create_array(cgrp, 'id1',    np.arange(3*n_res)/3)
 
     # group 2 is the sidechains
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
