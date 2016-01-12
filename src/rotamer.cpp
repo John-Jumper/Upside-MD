@@ -660,11 +660,6 @@ struct RotamerSidechain: public PotentialNode {
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
         for(int ne: range(edges11.nodes_to_edge.n_edge)) en += -logf(edges11.prob(0,ne));
         for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
-
-//        for(int nn: range(nodes1 .n_elem)) printf("en1  %4i % .2f\n",nn, nodes1 .node_free_energy<1>  (nn));
-//        for(int nn: range(nodes3 .n_elem)) printf("en3  %4i % .2f\n",nn, nodes3 .node_free_energy<3>  (nn));
-//        for(int ne: range(edges11.nodes_to_edge.n_edge)) printf("en11 %4i % .2f\n",ne, -logf(edges11.prob(0,ne)));
-//        for(int ne: range(edges33.nodes_to_edge.n_edge)) printf("en33 %4i % .2f\n",ne, edges33.edge_free_energy<3,3>(ne));
         return en;
     }
 

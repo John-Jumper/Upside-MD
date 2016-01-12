@@ -237,6 +237,11 @@ struct alignas(16) Float4
             else 
                 _mm_storeu_ps(vec_,vec);
         }
+
+        void store_scalar(float* x) {
+            _mm_store_ss(x,vec);
+        }
+
         Float4 update(float* vec_, Alignment align=Alignment::aligned) const { 
             Float4 new_val = *this + Float4(vec_,align);
             new_val.store(vec_,align);
@@ -415,7 +420,7 @@ inline Float4 expf(const Float4& x) {
     return Float4(result, Alignment::aligned);
 }
 
-// FIXME I should put in an efficient, approximate SSE expf
+// FIXME I should put in an efficient, approximate SSE logf
 //   but for now I will just make it work
 inline Float4 logf(const Float4& x) {
     alignas(16) float result[4] = {logf(x.x()), logf(x.y()), logf(x.z()), logf(x.w())};

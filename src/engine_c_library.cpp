@@ -118,8 +118,31 @@ int get_param_deriv(int n_param, float* deriv, DerivEngine* engine, const char* 
 }
 
 
+int get_sens(int n_output, float* sens, DerivEngine* engine, const char* node_name) try {
+    auto& dc = engine->get_computation<DerivComputation&>(string(node_name));
+
+    if(dc.potential_term) {
+        auto& p = dynamic_cast<PotentialNode&>(dc);
+        if(n_output!=1) throw string("wrong size for potential node");
+        *sens = p.potential;
+    } else {
+        auto& c = dynamic_cast<CoordNode&>(dc);
+        if(n_output != c.n_elem*c.elem_width) throw string("wrong size for CoordNode");
+        VecArray a = c.sens;
+        for(int ne: range(c.n_elem))
+            for(int d: range(c.elem_width))
+                sens[ne*c.elem_width + d] = a(d,ne);
+    }
+    return 0;
+} catch(const string& s) {
+    fprintf(stderr, "ERROR: %s\n", s.c_str());
+    return 1;
+} catch(...) {
+    return 1;
+}
+
+
 int get_output(int n_output, float* output, DerivEngine* engine, const char* node_name) try {
-    // I only support a single system here
     auto& dc = engine->get_computation<DerivComputation&>(string(node_name));
 
     if(dc.potential_term) {

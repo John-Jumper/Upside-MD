@@ -31,6 +31,9 @@ calc.get_param.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 calc.get_output_dims.restype  = ct.c_int
 calc.get_output_dims.argtypes = [ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 
+calc.get_sens.restype  = ct.c_int
+calc.get_sens.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
+
 calc.get_output.restype  = ct.c_int
 calc.get_output.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 
@@ -137,6 +140,19 @@ class Upside(object):
         retcode = calc.get_param(n_param, param.ctypes.data, self.engine, node_name)
         if retcode: raise RuntimeError('Unable to get param (was upside compiled for parameter derivatives?)')
         return param
+
+    def get_sens(self, node_name):
+        n_elem = np.zeros(1,dtype=np.intc)
+        elem_width = np.zeros(1,dtype=np.intc)
+        retcode = calc.get_output_dims(n_elem.ctypes.data, elem_width.ctypes.data, self.engine, node_name)
+        if retcode: raise RuntimeError('Unable to get output dims')
+        output_shape = (int(n_elem[0]), int(elem_width[0]))
+
+        n_output = int(np.prod(output_shape))
+        output = np.zeros(output_shape, dtype='f4')
+        retcode = calc.get_sens(n_output, output.ctypes.data, self.engine, node_name)
+        if retcode: raise RuntimeError('Unable to get output')
+        return output
 
     def get_output(self, node_name):
         n_elem = np.zeros(1,dtype=np.intc)

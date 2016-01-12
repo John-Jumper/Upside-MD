@@ -595,6 +595,48 @@ def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None):
                                      [coil_pots,    sheet_pots])
 
 
+def write_torus_dbn(seq, torus_dbn_library):
+    # FIXME use omega emission to handle CPR code
+    with tb.open_file(torus_dbn_library) as data:
+        dbn_aa_num = dict((x,i) for i,x in enumerate(data.root.restype_order[:]))
+
+        log_normalization = data.root.TORUS_LOGNORMCONST[:]
+        kappa = data.root.TORUS_KAPPA[:]
+        mu = data.root.TORUS_MU[:]
+        aa_emission_energy = -np.log(data.root.AA_EMISSION[:])
+
+        transition_matrix = data.root.HIDDEN_TRANSITION[:]
+
+        n_state = transition_matrix.shape[0]
+
+    rtype = np.array([dbn_aa_num[s] for s in seq])  # FIXME handle cis-proline, aka CPR
+    prior_offset = np.zeros((len(rtype),n_state),'f4')
+    
+    for i,r in enumerate(seq):
+        prior_offset[i,:] = aa_emission_energy[:,dbn_aa_num[r]]
+
+    basin_param = np.zeros((n_state,6),'f4')
+    basin_param[:,0] = log_normalization.ravel()
+    basin_param[:,1] = kappa[:,0]
+    basin_param[:,2] = mu   [:,0]
+    basin_param[:,3] = kappa[:,1]
+    basin_param[:,4] = mu   [:,1]
+    basin_param[:,5] = kappa[:,2]
+
+    egrp = t.create_group(potential, 'torus_dbn')
+    egrp._v_attrs.arguments = np.array(['rama_coord'])
+
+    create_array(egrp, 'id', np.arange(len(seq)))
+    create_array(egrp, 'prior_offset', prior_offset)
+    create_array(egrp, 'basin_param',  basin_param)
+
+    hgrp = t.create_group(potential, 'fixed_hmm')
+    hgrp._v_attrs.arguments = np.array(['torus_dbn'])
+
+    create_array(hgrp, 'index', np.arange(len(seq)))
+    create_array(hgrp, 'transition_matrix', transition_matrix)
+
+
 def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
@@ -1080,6 +1122,8 @@ def main():
             help='Angle spring constant in units of 1/dot_product (default 175)')
     parser.add_argument('--rama-library', default='',
             help='smooth Rama probability library')
+    parser.add_argument('--torus-dbn-library', default='',
+            help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
     parser.add_argument('--rama-sheet-mixing-energy', default=None, type=float,
@@ -1234,7 +1278,9 @@ def main():
     if args.rama_library:
         require_rama = True
         write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy)
-
+    elif args.torus_dbn_library:
+        require_rama = True
+        write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)
     else:
         print>>sys.stderr, 'WARNING: running without any Rama potential !!!'
 
