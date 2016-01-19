@@ -7,14 +7,20 @@ import theano
 import theano.tensor as T
 import cPickle as cp
 import scipy.optimize as opt
-import threading
-import concurrent.futures
+import collections
 
+n_fix = 3
 n_knot_angular = 15
 n_angular = 2*n_knot_angular
 n_restype = 24
 n_knot_sc = 16
 n_knot_hb = 12
+
+param_shapes = collections.OrderedDict()
+param_shapes['rotamer']=(n_restype,n_restype,2*n_knot_angular+2*n_knot_sc)
+param_shapes['hbond_coverage']=(2,n_restype,2*n_knot_angular+2*n_knot_hb)
+param_shapes['hbond_coverage_hydrophobe']=(n_fix,n_restype,2*n_knot_angular+2*n_knot_hb)
+param_shapes['placement_fixed_point_vector_scalar']=(n_fix,7)
 
 lparam = T.dvector('lparam')
 func = lambda expr: (theano.function([lparam],expr),expr)
@@ -26,7 +32,6 @@ def read_param(shape):
     return ret
 
 
-n_fix = 3
 def unpack_param_maker():
     def read_symm(n):
         x = read_param((n_restype,n_restype,n))
@@ -280,3 +285,67 @@ class SGD_Solver(object):
         self.momentum = [read_comp(self.mu,i)*self.momentum[i] - read_comp(self.learning_rate,i)*grad[i] 
                 for i in range(self.n_comp)]
         return [1.*x for x in self.momentum]  # make sure the user doesn't smash the momentum
+
+
+class UpsideTrajEnergy(theano.Op):
+    def __init__(self, param_shapes_dict):
+        self.engine_traj = [None,None]
+        self.param_shapes_dict = collections.OrderedDict(param_shapes_dict)
+
+    def make_node(self, *param):
+        assert len(param) == len(self.param_shapes_dict)
+        return theano.Apply(self, [T.as_tensor_variable(x) for x in param], [T.dvector()])
+
+    def perform(self, node, inputs_storage, output_storage):
+        engine,traj = self.engine_traj
+
+        energy = np.zeros(traj.shape[0])
+        for nm, pm in zip(self.param_shapes_dict, inputs_storage):
+            engine.set_param(pm, nm) 
+
+        for nf,x in enumerate(traj):
+            energy[nf] = engine.energy(x)
+
+        output_storage[0][0] = energy
+
+    def grad(self, inputs, output_gradients):
+        grad_func = UpsideTrajEnergyGrad(self.engine_traj, self.param_shapes_dict)  # grad will have linked data
+        return grad_func(output_gradients[0], *inputs)
+
+    def change_protein_data(self, engine, traj):
+        self.engine_traj[0] = engine
+        self.engine_traj[1] = traj
+
+
+class UpsideTrajEnergyGrad(theano.Op):
+    def __init__(self, engine_traj, param_shapes_dict):
+        self.engine_traj = engine_traj
+        self.param_shapes_dict = param_shapes_dict
+
+    def make_node(self, output_sens, *param):
+        assert len(param) == len(self.param_shapes_dict)
+        size_conv = {0:T.dscalar, 1:T.dvector, 2:T.dmatrix, 3:T.dtensor3}
+        return theano.Apply(self, 
+                [T.as_tensor_variable(p) for p in (output_sens,)+param], 
+                [size_conv[len(sz)]() for nn,sz in self.param_shapes_dict.items()])
+
+    def perform(self, node, inputs_storage, output_storage):
+        engine,traj = self.engine_traj
+
+        for i,(nm,sp) in enumerate(self.param_shapes_dict.items()):
+            assert inputs_storage[1+i].shape == sp
+
+        for nm, pm in zip(self.param_shapes_dict, inputs_storage[1:]):
+            engine.set_param(pm, nm) 
+
+        deriv = [np.zeros(shape) for nm,shape in self.param_shapes_dict.items()]
+        sens = inputs_storage[0]
+        for nf,x in enumerate(traj):
+            engine.energy(x)  # ensure derivatives are correct
+            s = sens[nf]
+
+            for nm,d in zip(self.param_shapes_dict,deriv):
+                d[slice(None,None,None) if len(d.shape) else ()] += s*engine.get_param_deriv(d.shape, nm) 
+
+        for i in range(len(output_storage)):
+            output_storage[i][0] = deriv[i]

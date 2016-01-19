@@ -428,5 +428,14 @@ struct HBondEnergy : public HBondCounter
         potential = tot_hb*Ep;
         n_hbond = tot_hb;
     }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const {return vector<float>(1,E_protein);}
+    virtual std::vector<float> get_param_deriv() const {return vector<float>(1,float(n_hbond));}
+    virtual void set_param(const std::vector<float>& new_param) {
+        if(new_param.size() != 1u) throw string("expected 1 param to hbond_energy but got "+to_string(new_param.size()));
+        E_protein = new_param[0];
+    }
+#endif
 };
 static RegisterNodeType<HBondEnergy,1> hbond_energy_node("hbond_energy");
