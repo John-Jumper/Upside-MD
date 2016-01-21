@@ -13,6 +13,7 @@ upside_dir = os.path.expanduser('~/upside/')
 def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=True, 
                   sidechain=False, hbond=None, sheet_mix_energy=None, environment=None,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, rama_pot=True,
+                  torus_dbn = None,
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5'):
     
@@ -20,6 +21,8 @@ def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=T
 
     if init:
         args.append('--initial-structures=%s'%init)
+    if torus_dbn is not None:
+        args.append('--torus-dbn-library=%s'%torus_dbn)
     if rama_pot:
         args.append('--rama-library=%s'%(params_dir+'rama_libraries.h5'))
     if sheet_mix_energy is not None:

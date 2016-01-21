@@ -1284,6 +1284,20 @@ def main():
     else:
         print>>sys.stderr, 'WARNING: running without any Rama potential !!!'
 
+    # hack to fix reference state issues for Rama potential
+    if args.reference_state_rama:
+        # define correction
+        ref_state_cor =  np.log(cPickle.load(open(args.reference_state_rama)))
+        ref_state_cor -= ref_state_cor.mean()
+
+        grp = t.create_group(potential, 'rama_map_pot_ref')
+        grp._v_attrs.arguments = np.array(['rama_coord'])
+        grp._v_attrs.log_pot = False
+
+        create_array(grp, 'residue_id',   obj=np.arange(len(fasta_seq)))
+        create_array(grp, 'rama_map_id',  obj=np.zeros(len(fasta_seq), dtype='i4'))
+        create_array(grp, 'rama_pot',     obj=ref_state_cor[None])
+
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)
 
@@ -1365,12 +1379,6 @@ def main():
         create_array(grp, 'pivot_restype', potential.rama_map_pot.rama_map_id[:][non_terminal_residue])
         create_array(grp, 'pivot_range',   np.column_stack((grp.pivot_atom[:,4]+1,np.zeros(sum(non_terminal_residue),'i')+n_atom)))
 
-    # hack to fix reference state issues for Rama potential
-    if args.reference_state_rama:
-        ref_state_pot = -np.log(cPickle.load(open(args.reference_state_rama)))
-        ref_state_pot -= ref_state_pot.mean()
-        potential.rama_map_pot.rama_pot[:] = potential.rama_map_pot.rama_pot[:] - ref_state_pot
-    
     t.close()
 
 

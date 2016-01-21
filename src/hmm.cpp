@@ -65,7 +65,7 @@ struct FixedHMM : public PotentialNode
 
         float pot = 0.f;
 
-        Timer tprep("hmm_prep");
+        // Timer tprep("hmm_prep");
         // convert energies to emission probabilities
         for(int nr=0; nr<n_residue; ++nr) {
             float* x = &n1b(0,params[nr].index);
@@ -91,9 +91,9 @@ struct FixedHMM : public PotentialNode
             for(int ns=0; ns<n_state; ns+=4)
                 expf(e_min - Float4(x+ns)).store(p+ns);
         }
-        tprep.stop();
+        // tprep.stop();
 
-        Timer tforw("hmm_forward");
+        // Timer tforw("hmm_forward");
         // compute forward probabilities
         RowVectorXf forward = RowVectorXf::Ones(n_state);
         for(int nr=0; nr<n_residue; ++nr) {
@@ -105,9 +105,9 @@ struct FixedHMM : public PotentialNode
             Map<RowVectorXf>(&forward_belief(0,nr), n_state) = forward;
         }
         if(mode==PotentialAndDerivMode) potential = pot;
-        tforw.stop();
+        // tforw.stop();
 
-        Timer tback("hmm_backward");
+        // Timer tback("hmm_backward");
         // compute backward probabilities and marginal probabilities
         VecArray sens = node_1body.sens;
         VectorXf backward = VectorXf::Ones(n_state);
@@ -140,7 +140,7 @@ struct FixedHMM : public PotentialNode
             }
 
         }
-        tback.stop();
+        // tback.stop();
     }
 };
 static RegisterNodeType<FixedHMM,1> fixed_hmm_node("fixed_hmm");

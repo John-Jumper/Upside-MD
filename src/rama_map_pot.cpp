@@ -19,6 +19,7 @@ struct RamaMapPot : public PotentialNode
     vector<RamaMapParams> params;
     LayeredPeriodicSpline2D<1> rama_map_data;
     vector<float> residue_potential;
+    bool log_pot; // if false, never log potential
 
     RamaMapPot(hid_t grp, CoordNode& rama_):
         PotentialNode(),
@@ -29,7 +30,8 @@ struct RamaMapPot : public PotentialNode
                 get_dset_size(3, grp, "rama_pot")[0], 
                 get_dset_size(3, grp, "rama_pot")[1], 
                 get_dset_size(3, grp, "rama_pot")[2]),
-        residue_potential(n_residue)
+        residue_potential(n_residue),
+        log_pot(read_attribute<int>(grp,".","log_pot",1))
     {
         auto& r = rama_map_data;
         check_size(grp, "residue_id",     n_residue);
@@ -45,7 +47,7 @@ struct RamaMapPot : public PotentialNode
                 raw_data[(il*r.nx + ix)*r.ny + iy] = x;});
         r.fit_spline(raw_data.data());
 
-        if(logging(LOG_DETAILED)) 
+        if(log_pot && logging(LOG_DETAILED))
             default_logger->add_logger<float>("rama_map_potential", {n_residue}, [&](float* buffer) {
                 for(int nr: range(n_residue)) 
                     buffer[nr] = residue_potential[nr];
