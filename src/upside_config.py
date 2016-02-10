@@ -626,18 +626,20 @@ def write_torus_dbn(seq, torus_dbn_library):
     egrp = t.create_group(potential, 'torus_dbn')
     egrp._v_attrs.arguments = np.array(['rama_coord'])
 
-    create_array(egrp, 'id', np.arange(len(seq)))
-    create_array(egrp, 'prior_offset', prior_offset)
+    # since Rama angles are not valid for the first and last angles,
+    # don't confuse the HMM by including them
+    create_array(egrp, 'id', np.arange(1,len(seq)-1))
+    create_array(egrp, 'prior_offset', prior_offset[1:-1])
     create_array(egrp, 'basin_param',  basin_param)
 
     hgrp = t.create_group(potential, 'fixed_hmm')
     hgrp._v_attrs.arguments = np.array(['torus_dbn'])
 
-    create_array(hgrp, 'index', np.arange(len(seq)))
+    create_array(hgrp, 'index', np.arange(egrp.id.shape[0]))
     create_array(hgrp, 'transition_matrix', transition_matrix)
 
 
-def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None):
+def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_energy_shift=None):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
 
@@ -649,6 +651,14 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None):
         grp._v_attrs.sheet_eps = eps
         create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
         create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
+
+    if helical_energy_shift is not None:
+        assert len(rama_pot.shape) == 3
+        phi = np.linspace(-np.pi,np.pi,rama_pot.shape[1],endpoint=False)[:,None]
+        psi = np.linspace(-np.pi,np.pi,rama_pot.shape[2],endpoint=False)[None,:]
+        sigmoid_lessthan = lambda a,b: 1./(1.+np.exp(-(b-a)/(10.*deg)))
+        helical_basin = sigmoid_lessthan(phi,0.*deg) * sigmoid_lessthan(-100.*deg,psi) * sigmoid_lessthan(psi,50.*deg)
+        rama_pot += (helical_energy_shift * helical_basin)[None,:,:]
 
     # let's remove the average energy from each Rama map 
     # so that the Rama potential emphasizes its variation
@@ -1126,6 +1136,9 @@ def main():
             help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
+    parser.add_argument('--helical-energy-shift', default=None, type=float,
+            help='Energy shift to add to the helical basin (defined as -180.<phi<0 and -100.<psi<50, '+
+            'slightly smoothed at edges).')
     parser.add_argument('--rama-sheet-mixing-energy', default=None, type=float,
             help='reference energy for sheets when mixing with coil library.  More negative numbers mean more '+
             'sheet content in the final structure.  Default is no sheet mixing.')
@@ -1277,7 +1290,7 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy)
+        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy, args.helical_energy_shift)
     elif args.torus_dbn_library:
         require_rama = True
         write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)
@@ -1292,7 +1305,7 @@ def main():
 
         grp = t.create_group(potential, 'rama_map_pot_ref')
         grp._v_attrs.arguments = np.array(['rama_coord'])
-        grp._v_attrs.log_pot = False
+        grp._v_attrs.log_pot = 0
 
         create_array(grp, 'residue_id',   obj=np.arange(len(fasta_seq)))
         create_array(grp, 'rama_map_id',  obj=np.zeros(len(fasta_seq), dtype='i4'))

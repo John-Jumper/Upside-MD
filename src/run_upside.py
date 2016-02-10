@@ -11,7 +11,7 @@ upside_dir = os.path.expanduser('~/upside/')
 
 
 def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=True, 
-                  sidechain=False, hbond=None, sheet_mix_energy=None, environment=None,
+                  sidechain=False, hbond=None, sheet_mix_energy=None, helical_energy_shift=None,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, rama_pot=True,
                   torus_dbn = None,
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
@@ -27,6 +27,8 @@ def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=T
         args.append('--rama-library=%s'%(params_dir+'rama_libraries.h5'))
     if sheet_mix_energy is not None:
         args.append('--rama-sheet-mixing-energy=%f'%sheet_mix_energy)
+    if helical_energy_shift is not None:
+        args.append('--helical-energy-shift=%f'%helical_energy_shift)
     if dimer:
         args.append('--dimer-basin-library=%s'%(params_dir+'TCB_count_matrices.pkl'))
     if not backbone:
@@ -40,13 +42,10 @@ def upside_config(fasta, output, n_system, dimer=False, backbone=True, rotamer=T
     if restraint_spring is not None:
         args.append('--restraint-spring-constant=%f'%restraint_spring)
         
-    if rotamer or environment:
+    if rotamer:
         args.append('--rotamer-placement=%s'%(params_dir+'rotamer-MJ-1996-with-direc.h5'))
-
     if rotamer:
         args.append('--rotamer-interaction=%s'%rotamer_interaction_param)
-    if environment:
-        args.append('--environment=%s'%environment)
     
     if sidechain:
         args.append('--sidechain-radial=%s'%(params_dir+'radial-MJ-1996.h5'))
