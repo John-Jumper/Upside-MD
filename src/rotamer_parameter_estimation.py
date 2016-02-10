@@ -122,6 +122,33 @@ def pack_param(*args):
     return results.x
 
 
+def quadspline_energy(params, n_knots):
+    # assert sum(n_knots) == params.shape[-1]
+    dp1   = params[:,:,                :sum(n_knots[:1])]
+    dp2   = params[:,:,sum(n_knots[:1]):sum(n_knots[:2])]
+    uni   = params[:,:,sum(n_knots[:2]):sum(n_knots[:3])]
+    direc = params[:,:,sum(n_knots[:3]):                ]
+
+    ev = lambda sp: (1./6.)*sp[:,:,:-2] + (2./3.)*sp[:,:,1:-1] + (1./6.)*sp[:,:,2:]
+
+    return ev(uni)[:,:,:,None,None] + ev(dp1)[:,:,None,:,None]*ev(dp2)[:,:,None,None,:]*ev(direc)[:,:,:,None,None]
+
+def multimin(a,axes):
+    for ax in axes:
+        a = a.min(axis=ax,keepdims=1)
+    return a
+
+def quadspline_prob(energies):
+    # assert len(energies.shape) == 5
+    r_weights = T.arange(1,energies.shape[2]+1)**2
+    prob_unnorm = T.exp(multimin(energies,(-3,-2,-1)) - energies) * r_weights[None,None,:,None,None]
+    return prob_unnorm*(1./prob_unnorm.sum(axis=(-3,-2,-1), keepdims=1))
+    
+
+def quadspline_expectation(prob_norm, observable):
+    return (prob_norm*observable).sum(axis=(-3,-2,-1))
+
+
 def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
     energy = np.zeros(2)
     deriv = [np.zeros((2,)+pm.shape) for pm in param_matrices]
