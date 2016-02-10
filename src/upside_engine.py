@@ -37,6 +37,9 @@ calc.get_sens.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 calc.get_output.restype  = ct.c_int
 calc.get_output.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p]
 
+calc.get_value_by_name.restype  = ct.c_int
+calc.get_value_by_name.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_char_p, ct.c_char_p]
+
 calc.get_clamped_value_and_deriv.restype  = ct.c_int
 calc.get_clamped_value_and_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_int, ct.c_void_p]
 
@@ -123,22 +126,23 @@ class Upside(object):
         return deriv
 
     def set_param(self, param, node_name):
+        param_size = param.shape
         param = np.require(param.ravel(), dtype='f4', requirements='C')  # flatten and make contiguous
         retcode = calc.set_param(int(param.shape[0]), param.ctypes.data, self.engine, node_name)
-        if retcode: raise RuntimeError('Unable to set param (was upside compiled for parameter derivatives?)')
+        if retcode: raise RuntimeError('Unable to set param with size %s for node %s'%(param_size,node_name))
 
     def get_param_deriv(self, param_shape, node_name):
         n_param = int(np.prod(param_shape))
         deriv = np.zeros(param_shape, dtype='f4')
         retcode = calc.get_param_deriv(n_param, deriv.ctypes.data, self.engine, node_name)
-        if retcode: raise RuntimeError('Unable to get param deriv (was upside compiled for parameter derivatives?)')
+        if retcode: raise RuntimeError('Unable to get param deriv')
         return deriv
 
     def get_param(self, param_shape, node_name):
         n_param = int(np.prod(param_shape))
         param = np.zeros(param_shape, dtype='f4')
         retcode = calc.get_param(n_param, param.ctypes.data, self.engine, node_name)
-        if retcode: raise RuntimeError('Unable to get param (was upside compiled for parameter derivatives?)')
+        if retcode: raise RuntimeError('Unable to get param')
         return param
 
     def get_sens(self, node_name):
@@ -166,6 +170,13 @@ class Upside(object):
         retcode = calc.get_output(n_output, output.ctypes.data, self.engine, node_name)
         if retcode: raise RuntimeError('Unable to get output')
         return output
+
+    def get_value_by_name(self, value_shape, node_name, log_name):
+        n_param = int(np.prod(value_shape))
+        value = np.zeros(value_shape, dtype='f4')
+        retcode = calc.get_value_by_name(n_param, value.ctypes.data, self.engine, node_name, log_name)
+        if retcode: raise RuntimeError('Unable to get value by name')
+        return value
 
     def __del__(self):
         calc.free_deriv_engine(self.engine)

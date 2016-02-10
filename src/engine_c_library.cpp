@@ -185,6 +185,22 @@ int get_output_dims(int* n_elem, int* elem_width, DerivEngine* engine, const cha
     return 1;
 }
 
+
+int get_value_by_name(int n_output, float* output, DerivEngine* engine, const char* node_name, const char* log_name)
+try {
+    auto& dc = engine->get_computation<DerivComputation&>(string(node_name));
+    auto value = dc.get_value_by_name(log_name);
+    if(n_output != int(value.size())) throw string("expected size inconsistent with actual size");
+    copy(begin(value),end(value), output);
+    return 0;
+} catch(const string& s) {
+    fprintf(stderr, "ERROR: %s\n", s.c_str());
+    return 1;
+} catch(...) {
+    return 1;
+}
+
+
 int clamped_spline_value(int N, float* result, const float* bspline_coeff, int nx, float* x) {
     const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff, bspline_coeff, bspline_coeff};
     int i;

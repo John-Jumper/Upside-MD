@@ -571,6 +571,25 @@ struct RotamerSidechain: public PotentialNode {
         }
     }
 
+    virtual vector<float> get_value_by_name(const char* log_name) override {
+        if(!strcmp(log_name, "rotamer_free_energy")) {
+            return residue_free_energies();
+        } else if(!strcmp(log_name, "rotamer_1body_energy")) {
+            int n_elem = 0; for(auto& i: n_elem_rot) n_elem += i;
+            vector<float> result(n_elem*n_prob_nodes);
+
+            for(int npn: range(n_prob_nodes)) {
+                auto energies = rotamer_1body_energy(npn);
+                if(energies.size() != size_t(n_elem)) throw string("impossible");
+                for(int i: range(n_elem))
+                    result[i*n_prob_nodes + npn] = energies[i];
+            }
+
+            return result;
+        } else {
+            throw string("Value ") + log_name + string(" not implemented");
+        }
+    }
 
     void ensure_fresh_energy() {
         if(!energy_fresh_relative_to_derivative) compute_value(PotentialAndDerivMode);
