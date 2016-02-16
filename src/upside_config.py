@@ -945,28 +945,6 @@ def write_rotamer(fasta, interaction_library, damping):
          create_array(pg, 'interaction_param', data.root.pair_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
 
-    # now I need to create index, type, and id
-    index = []
-    type  = []
-    id    = []
-
-    count_by_n_rot = dict()
-    for rnum,aa in enumerate(fasta):
-        restype = restype_num[aa]
-        start,stop = start_stop[restype]
-        n_rot = stop-start
-
-        if n_rot not in count_by_n_rot: 
-            count_by_n_rot[n_rot] = 0;
-
-        base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
-        count_by_n_rot[n_rot] += 1
-
-        for no in range(n_rot): 
-            index.append(len(index))  # just an increasing counter
-            type .append(restype)
-            id   .append((base_id<<n_bit_rotamer) + no)
-
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))
     create_array(pg, 'type',  np.array([bead_num[s] for s in rseq]))
@@ -1343,12 +1321,6 @@ def main():
 	                         args.membrane_potential_exclude_residues, 
 	                         args.membrane_potential_unsatisfied_hbond_residues_type1,
 	                         args.membrane_potential_unsatisfied_hbond_residues_type2)
-    if require_placement:
-        if args.rotamer_placement is None:
-            parser.error('--rotamer_placement is required, based on other options.')
-        require_rama = True
-        require_affine = True
-        write_rotamer_placement(fasta_seq, args.rotamer_placement)
 
     if require_backbone_point:
         if args.backbone_dependent_point is None:
