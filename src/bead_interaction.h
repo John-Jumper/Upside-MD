@@ -115,7 +115,7 @@ namespace {
         // spline is constant over [0,dx] to avoid funniness at origin
         // spline should be clamped at zero at the large end for cutoffs
 
-        constexpr static float inv_dx = 1.f/0.5f;  // half-angstrom bins
+        constexpr static float inv_dx = 1.f/0.50f;  // half-angstrom bins
         constexpr static bool  symmetric = true;
         constexpr static int   n_param=16, n_dim1=3, n_dim2=3, simd_width=1;  // 8 angstrom cutoff
 
