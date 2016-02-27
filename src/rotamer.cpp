@@ -90,13 +90,33 @@ struct EdgeLocator {
         }
 };
 
-    
+
+float softplus(float& deriv, float x) {
+    // softplus is defined as log(1+e^x) or equivalently x + log(1+e^-x)
+    // it has the property that softplus(x) is approximately x for x large but also softplus(x)>0
+    // we must avoid overflow for either very large or very small x
+    // the derivative is given by e^x/(1+e^x) or equivalently 1/(1+e^-x)
+
+    float value;
+    if(x<0.f) {
+        float y = expf(x);  // this number is < 1
+        deriv = y*rcp(1.f+y);
+        value = logf(1.f+y);
+    } else {
+        float z = expf(-x); // this number is < 1
+        deriv = rcp(1.f+z);
+        value = x + logf(1.f+z);
+    }
+    return value;
+}
+
 
 struct NodeHolder {
         const int n_rot;
         const int n_elem;
 
         VecArrayStorage prob;
+        VecArrayStorage energy_capping_deriv;
 
         VecArrayStorage cur_belief;
         VecArrayStorage old_belief;
@@ -107,6 +127,7 @@ struct NodeHolder {
             n_rot(n_rot_),
             n_elem(n_elem_),
             prob         (n_rot,n_elem),
+            energy_capping_deriv(n_rot,n_elem),
             cur_belief   (n_rot,n_elem),
             old_belief   (n_rot,n_elem),
 
@@ -120,14 +141,22 @@ struct NodeHolder {
         void reset() { fill(prob, 0.f); } // prob array initially contains energy
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
-        void convert_energy_to_prob() {
+        void convert_energy_to_prob(float e_cap, float e_cap_width) {
             // prob array should initially contain energy
             // prob array is not normalized at the end (one of the entries will be 1.),
             //   but should be sanely scaled to resist underflow/overflow
             // It might be more effective to l1 normalize the probabilities at the end,
             //   but then I would need an extra logf to add to the offset if we are in energy mode
 
+            float inv_e_cap_width = rcp(e_cap_width);
             for(int ne: range(n_elem)) {
+                for(int d=0; d<n_rot; ++d) {
+                    // ensure that node energies are not too large
+                    float deriv;
+                    prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
+                    energy_capping_deriv(d,ne) = deriv;
+                }
+
                 auto e_offset = prob(0,ne);
                 for(int d=1; d<n_rot; ++d)
                     e_offset = min(e_offset, prob(d,ne));
@@ -514,6 +543,9 @@ struct RotamerSidechain: public PotentialNode {
     EdgeHolder* edge_holders_matrix[UPPER_ROT][UPPER_ROT];
     EdgeHolder edges11, edges13, edges33; // initialize these with sane max_n_edge
 
+    float energy_cap;
+    float energy_cap_width;
+
     float damping;
     int   max_iter;
     float tol;
@@ -534,6 +566,9 @@ struct RotamerSidechain: public PotentialNode {
         edges11(nodes1,nodes1,n_elem_rot[1]*(n_elem_rot[1]+1)/2),
         edges13(nodes1,nodes3,n_elem_rot[1]* n_elem_rot[3]),
         edges33(nodes3,nodes3,n_elem_rot[3]*(n_elem_rot[3]+1)/2),
+
+        energy_cap      (read_attribute<float>(grp,"pair_interaction","energy_cap")),
+        energy_cap_width(read_attribute<float>(grp,"pair_interaction","energy_cap_width")),
 
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
@@ -595,7 +630,7 @@ struct RotamerSidechain: public PotentialNode {
         if(!energy_fresh_relative_to_derivative) compute_value(PotentialAndDerivMode);
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         fill_holders();
@@ -643,7 +678,7 @@ struct RotamerSidechain: public PotentialNode {
         }
         for(int n_rot: range(1,UPPER_ROT))
             if(node_holders_matrix[n_rot])
-                node_holders_matrix[n_rot]->convert_energy_to_prob();
+                node_holders_matrix[n_rot]->convert_energy_to_prob(energy_cap, energy_cap_width);
 
         // Fill edge probabilities
         igraph.compute_edges();
@@ -773,8 +808,10 @@ struct RotamerSidechain: public PotentialNode {
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
 
-            for(int i: range(n_prob_nodes))
-                sens_1body[i](0,igraph.loc1[n]) += node_holders_matrix[n_rot]->cur_belief(rot,id);
+            for(int i: range(n_prob_nodes)) {
+                NodeHolder* nh = node_holders_matrix[n_rot];
+                sens_1body[i](0,igraph.loc1[n]) += nh->energy_capping_deriv(rot,id) * nh->cur_belief(rot,id);
+            }
         }
     }
 

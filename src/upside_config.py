@@ -649,8 +649,8 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_e
         # support finite differencing for potential derivative
         eps = 1e-2
         grp._v_attrs.sheet_eps = eps
-        create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
-        create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
+        #create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
+        #create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
 
     if helical_energy_shift is not None:
         assert len(rama_pot.shape) == 3
@@ -944,6 +944,8 @@ def write_rotamer(fasta, interaction_library, damping):
     with tb.open_file(interaction_library) as data:
          create_array(pg, 'interaction_param', data.root.pair_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+         pg._v_attrs.energy_cap = data.root._v_attrs.energy_cap_1body
+         pg._v_attrs.energy_cap_width = data.root._v_attrs.energy_cap_width_1body
 
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))
