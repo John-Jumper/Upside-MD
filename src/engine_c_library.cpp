@@ -200,6 +200,16 @@ try {
     return 1;
 }
 
+int clamped_spline_solve(int N_coeff, float* bspline_coeff, const float* values) {
+    vector<double> temp(3*N_coeff);
+    vector<double> bspline_coeff_d(N_coeff);
+    vector<double> values_d(values, values+(N_coeff-2));
+
+    solve_clamped_1d_spline_for_bsplines(N_coeff, bspline_coeff_d.data(), values_d.data(), temp.data());
+    for(int i: range(N_coeff)) bspline_coeff[i] = bspline_coeff_d[i];
+    return 0;
+}
+
 
 int clamped_spline_value(int N, float* result, const float* bspline_coeff, int nx, float* x) {
     const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff, bspline_coeff, bspline_coeff};

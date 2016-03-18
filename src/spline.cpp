@@ -155,6 +155,39 @@ void solve_periodic_1d_spline(
     }
 }
 
+void solve_clamped_1d_spline_for_bsplines(
+        int n_coeff, 
+        double* coefficients, // length n_coeff
+        const double* data,   // length n_coeff-2
+        double* temp_storage) // length 3*n_coeff
+{
+    int n = n_coeff-2;
+    double* a = temp_storage+0*n_coeff;
+    double* b = temp_storage+1*n_coeff;
+    double* c = temp_storage+2*n_coeff;
+
+    // b-spline coefficients for the natural cubic on integer grid
+    for(int i=0; i<n; ++i) a[i] = 1./6.;
+    for(int i=0; i<n; ++i) b[i] = 2./3.;
+    for(int i=0; i<n; ++i) c[i] = 1./6.;
+    for(int i=0; i<n; ++i) coefficients[i+1] = data[i];
+
+    // this is a homogenous boundary condition and quite convenient for cartesian potentials
+    // for a zero-clamped spline, we must have coeff[-1] == coeff[1] and coeff[N-2] == coeff[N]
+    // this conditions break the tridiagonal condition if added naively.
+    // Instead, I can fold the condition into the matrix by doubling the (0,1) and (N-2,N-1)
+    // elements of the tridiagonal matrix.  These would be elements c[0] and a[n-1].
+    // Then, I need to remember to add the special basis functions that I absorbed
+    // when computing the coefficients below.
+
+    a[n-1] *= 2.;
+    c[0]   *= 2.;
+    solve_tridiagonal_system(n_coeff-2, coefficients+1, a+1, b, c);
+
+    coefficients[0] = coefficients[2];
+    coefficients[n_coeff-1] = coefficients[n_coeff-3];
+}
+
 
 void solve_clamped_1d_spline(
         int n, 

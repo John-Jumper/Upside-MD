@@ -253,7 +253,7 @@ namespace {
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             // return Int4() == Int4();  // No exclusions (all true)
             // return id1 != id2; // exclude interactions on the same residue
-            auto sequence_exclude = Int4(2);  // exclude i,i, i,i+1
+            auto sequence_exclude = Int4(2);  // exclude i,i, i,i+1, and i,i+2
             return (sequence_exclude < id1-id2) | (sequence_exclude < id2-id1);
         }
 
@@ -398,6 +398,14 @@ struct HBondCoverage : public CoordNode {
     virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
     virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
 #endif
+
+    virtual vector<float> get_value_by_name(const char* log_name) override {
+        if(!strcmp(log_name, "count_edges_by_type")) {
+            return igraph.count_edges_by_type();
+        } else {
+            throw string("Value ") + log_name + string(" not implemented");
+        }
+    }
 };
 static RegisterNodeType<HBondCoverage,2> coverage_node("hbond_coverage");
 

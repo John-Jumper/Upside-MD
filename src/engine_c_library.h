@@ -21,6 +21,7 @@ extern "C" {
     int get_value_by_name(int n_output, float* output, DerivEngine* engine,
             const char* node_name, const char* log_name);
 
+    int clamped_spline_solve       (int N, float* bspline_coeff, const float* values);
     int clamped_spline_value       (int N, float* result, const float* bspline_coeff, int nx, float* x);
     int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff, int nx, float* x);
     int get_clamped_coeff_deriv    (int N, float* result, const float* bspline_coeff, float x);

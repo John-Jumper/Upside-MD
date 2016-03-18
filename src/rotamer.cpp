@@ -116,7 +116,7 @@ struct NodeHolder {
         const int n_elem;
 
         VecArrayStorage prob;
-        VecArrayStorage energy_capping_deriv;
+        // VecArrayStorage energy_capping_deriv;
 
         VecArrayStorage cur_belief;
         VecArrayStorage old_belief;
@@ -127,7 +127,7 @@ struct NodeHolder {
             n_rot(n_rot_),
             n_elem(n_elem_),
             prob         (n_rot,n_elem),
-            energy_capping_deriv(n_rot,n_elem),
+            // energy_capping_deriv(n_rot,n_elem),
             cur_belief   (n_rot,n_elem),
             old_belief   (n_rot,n_elem),
 
@@ -148,14 +148,14 @@ struct NodeHolder {
             // It might be more effective to l1 normalize the probabilities at the end,
             //   but then I would need an extra logf to add to the offset if we are in energy mode
 
-            float inv_e_cap_width = rcp(e_cap_width);
+            // float inv_e_cap_width = rcp(e_cap_width);
             for(int ne: range(n_elem)) {
-                for(int d=0; d<n_rot; ++d) {
-                    // ensure that node energies are not too large
-                    float deriv;
-                    prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
-                    energy_capping_deriv(d,ne) = deriv;
-                }
+                // for(int d=0; d<n_rot; ++d) {
+                //     // ensure that node energies are not too large
+                //     float deriv;
+                //     prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
+                //     energy_capping_deriv(d,ne) = deriv;
+                // }
 
                 auto e_offset = prob(0,ne);
                 for(int d=1; d<n_rot; ++d)
@@ -567,8 +567,11 @@ struct RotamerSidechain: public PotentialNode {
         edges13(nodes1,nodes3,n_elem_rot[1]* n_elem_rot[3]),
         edges33(nodes3,nodes3,n_elem_rot[3]*(n_elem_rot[3]+1)/2),
 
-        energy_cap      (read_attribute<float>(grp,"pair_interaction","energy_cap")),
-        energy_cap_width(read_attribute<float>(grp,"pair_interaction","energy_cap_width")),
+        // energy_cap      (read_attribute<float>(grp,"pair_interaction","energy_cap")),
+        // energy_cap_width(read_attribute<float>(grp,"pair_interaction","energy_cap_width")),
+
+        energy_cap      (-4.),
+        energy_cap_width( 1.),
 
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
@@ -607,6 +610,8 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     virtual vector<float> get_value_by_name(const char* log_name) override {
+        int n_edge33 = edges33.nodes_to_edge.n_edge;
+
         if(!strcmp(log_name, "rotamer_free_energy")) {
             return residue_free_energies();
         } else if(!strcmp(log_name, "rotamer_1body_energy")) {
@@ -621,6 +626,29 @@ struct RotamerSidechain: public PotentialNode {
             }
 
             return result;
+        } else if(!strcmp(log_name, "count_edges_by_type")) {
+            return igraph.count_edges_by_type();
+        } else if(!strcmp(log_name, "graph_nodes_edges_sizes")) {
+            vector<float> ret;  // really an int return but interface requires float
+            ret.push_back(float(nodes3.n_elem));
+            ret.push_back(float(n_edge33));
+            return ret;
+        } else if(!strcmp(log_name, "graph_node_prob")) {
+            vector<float> ret(nodes3.n_elem*3);
+            for(int ne: range(nodes3.n_elem)) for(int no: range(3)) ret[ne*3+no] = nodes3.prob(no,ne);
+            return ret;
+        } else if(!strcmp(log_name, "graph_edge_prob")) {
+            vector<float> ret(n_edge33*9);
+            for(int ne: range(n_edge33)) for(int no1: range(3)) for(int no2: range(3))
+                ret[ne*9+no1*3+no2] = edges33.prob(no1*ru(3)+no2,ne); // note careful indexing
+            return ret;
+        } else if(!strcmp(log_name, "graph_edge_indices")) {
+            vector<float> ret(n_edge33*2);  // really an int return but interface requires float
+            for(int ne: range(n_edge33)) {
+                ret[ne*2+0] = float(edges33.edge_indices1[ne]);
+                ret[ne*2+1] = float(edges33.edge_indices2[ne]);
+            }
+            return ret;
         } else {
             throw string("Value ") + log_name + string(" not implemented");
         }
@@ -810,7 +838,8 @@ struct RotamerSidechain: public PotentialNode {
 
             for(int i: range(n_prob_nodes)) {
                 NodeHolder* nh = node_holders_matrix[n_rot];
-                sens_1body[i](0,igraph.loc1[n]) += nh->energy_capping_deriv(rot,id) * nh->cur_belief(rot,id);
+                // sens_1body[i](0,igraph.loc1[n]) += nh->energy_capping_deriv(rot,id) * nh->cur_belief(rot,id);
+                sens_1body[i](0,igraph.loc1[n]) += nh->cur_belief(rot,id);
             }
         }
     }

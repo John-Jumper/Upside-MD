@@ -20,6 +20,12 @@ void solve_clamped_1d_spline(
         const double* data,   // length n
         double* temp_storage);// length 4*n
 
+void solve_clamped_1d_spline_for_bsplines(
+        int n_coeff, 
+        double* coefficients, // length n_coeff
+        const double* data,   // length n_coeff-2
+        double* temp_storage);// length 3*n_coeff
+
 
 void solve_periodic_2d_spline(
         int nx, int ny,

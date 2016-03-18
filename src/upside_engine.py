@@ -46,6 +46,9 @@ calc.get_clamped_value_and_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p,
 calc.clamped_spline_value.restype  = ct.c_int
 calc.clamped_spline_value.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_int, ct.c_void_p]
 
+calc.clamped_spline_solve.restype  = ct.c_int
+calc.clamped_spline_solve.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p]
+
 calc.get_clamped_coeff_deriv.restype  = ct.c_int
 calc.get_clamped_coeff_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
 
@@ -65,6 +68,18 @@ def clamped_spline_value(bspline_coeff, x):
             len(x),
             x.ctypes.data): raise RuntimeError("spline evaluation error")
     return result
+
+def clamped_spline_solve(values):
+    values = np.require(values, dtype='f4', requirements='C')
+    assert len(values.shape) == 1
+
+    bspline_coeff = np.zeros(len(values)+2, dtype='f4')
+
+    if calc.clamped_spline_solve(
+            len(bspline_coeff),
+            bspline_coeff.ctypes.data,
+            values.ctypes.data): raise RuntimeError("spline solve error")
+    return bspline_coeff
 
 def clamped_value_and_deriv(bspline_coeff, x):
     x = np.require(x, dtype='f4', requirements='C')
@@ -108,6 +123,9 @@ class Upside(object):
         self.n_atom = int(n_atom)
         self.engine = calc.construct_deriv_engine(self.n_atom, self.config_file_path, bool(quiet))
         if self.engine is None: raise RuntimeError('Unable to initialize upside engine')
+
+    def __repr__(self):
+        return 'Upside(%r, %r)'%(self.n_atom, self.config_file_path)
 
     def energy(self, pos):
         pos = np.require(pos, dtype='f4', requirements='C')
@@ -181,6 +199,12 @@ class Upside(object):
     def __del__(self):
         calc.free_deriv_engine(self.engine)
 
+def get_rotamer_graph(engine):
+    n_node, n_edge = engine.get_value_by_name((2,),         'rotamer', 'graph_nodes_edges_sizes').astype('i')
+    node_prob      = engine.get_value_by_name((n_node,3),   'rotamer', 'graph_node_prob')
+    edge_prob      = engine.get_value_by_name((n_edge,3,3), 'rotamer', 'graph_edge_prob')
+    edge_indices   = engine.get_value_by_name((n_edge,2),   'rotamer', 'graph_edge_indices').astype('i')
+    return node_prob, edge_prob, edge_indices
 
 def freeze_nodes(new_h5_path, old_h5_path, nodes_to_freeze, additional_nodes_to_delete, quiet=False):
     '''Replace computation nodes with constant nodes that give the same answer on the initial structure'''

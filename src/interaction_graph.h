@@ -181,6 +181,22 @@ struct InteractionGraph{
     }
     #endif
 
+    std::vector<float> count_edges_by_type() {
+        // must be called after compute_edges 
+        // return type is really an int vector but float is convenient for other interfaces
+        std::vector<float> retval(n_type1*n_type2, 0.f);
+        for(int ne=0; ne<n_edge; ++ne) {
+            auto i1 = edge_indices1[ne];
+            auto i2 = edge_indices2[ne];
+            auto t1 = types1[i1];
+            auto t2 = types2[i2];
+            auto interaction_index = t1*n_type2 + t2;
+
+            retval[interaction_index] += 1.f;
+        }
+        return retval;
+    }
+
     void compute_edges() {
         // Copy in the data to packed arrays to ensure contiguity
         {
