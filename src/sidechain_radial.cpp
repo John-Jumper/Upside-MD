@@ -10,13 +10,6 @@
 using namespace std;
 using namespace h5;
 
-struct ContactPair {
-    index_t loc[2];
-    float3    sc_ref_pos[2];
-    float     r0;
-    float     scale;
-    float     energy;
-};
 
 namespace {
 template <bool is_symmetric>
@@ -123,90 +116,62 @@ struct HBondSidechainRadialPairs : public PotentialNode
         }
     }
 };
-}
 
-
-/*
-void contact_energy(
-        float* potential,
-        const CoordArray   rigid_body,
-        const ContactPair* contact_param,
-        int n_contacts, float cutoff)
-{
-    if(potential) potential[0] = 0.f;
-    for(int nc=0; nc<n_contacts; ++nc) {
-        ContactPair p = contact_param[nc];
-        AffineCoord<> r1(rigid_body, p.loc[0]);
-        AffineCoord<> r2(rigid_body, p.loc[1]);
-
-        float3 x1 = r1.apply(p.sc_ref_pos[0]);
-        float3 x2 = r2.apply(p.sc_ref_pos[1]);
-
-        float3 disp = x1-x2;
-        float  dist = mag(disp);
-        float  reduced_coord = p.scale * (dist - p.r0);
-
-        if(reduced_coord<cutoff) {
-            float  z = expf(reduced_coord);
-            float  w = 1.f / (1.f + z);
-            if(potential) potential[0] += p.energy * w;
-            float  deriv_over_r = -p.scale/dist * p.energy * z * (w*w);
-            float3 deriv = deriv_over_r * disp;
-
-            r1.add_deriv_at_location(x1,  deriv);
-            r2.add_deriv_at_location(x2, -deriv);
-        }
-
-        r1.flush();
-        r2.flush();
-    }
-}
 
 struct ContactEnergy : public PotentialNode
 {
+    struct Param {
+        index_t   loc[2];
+        float     r0;
+        float     scale;
+        float     energy;
+    };
+
     int n_contact;
-    CoordNode& alignment;
-    vector<ContactPair> params;
+    CoordNode& bead_pos;
+    vector<Param> params;
     float cutoff;
 
-    ContactEnergy(hid_t grp, CoordNode& alignment_):
+    ContactEnergy(hid_t grp, CoordNode& bead_pos_):
         PotentialNode(),
         n_contact(get_dset_size(2, grp, "id")[0]),
-        alignment(alignment_), 
-        params(n_contact),
-        cutoff(read_attribute<float>(grp, ".", "cutoff"))
+        bead_pos(bead_pos_), 
+        params(n_contact)
     {
-        check_elem_width(alignment, 7);
-
         check_size(grp, "id",         n_contact, 2);
-        check_size(grp, "sc_ref_pos", n_contact, 2, 3);
         check_size(grp, "r0",         n_contact);
         check_size(grp, "scale",      n_contact);
         check_size(grp, "energy",     n_contact);
 
-        traverse_dset<2,int  >(grp, "id",         [&](size_t nc, size_t i, int x) {params[nc].loc[i] = x;});
-        traverse_dset<3,float>(grp, "sc_ref_pos", [&](size_t nc, size_t i, size_t d, float x) {
-                params[nc].sc_ref_pos[i][d] = x;});
-
+        traverse_dset<2,int  >(grp, "id",     [&](size_t nc, size_t i, int x) {params[nc].loc[i] = x;});
         traverse_dset<1,float>(grp, "r0",     [&](size_t nc, float x) {params[nc].r0     = x;});
-        traverse_dset<1,float>(grp, "scale",  [&](size_t nc, float x) {params[nc].scale  = x;});
+        traverse_dset<1,float>(grp, "scale",  [&](size_t nc, float x) {params[nc].scale = x;});
         traverse_dset<1,float>(grp, "energy", [&](size_t nc, float x) {params[nc].energy = x;});
 
-        for(int j=0; j<2; ++j) 
-            for(size_t i=0; i<params.size(); ++i) 
-                alignment.slot_machine.add_request(1, params[i].loc[j]);
+        // FIXME introduce logging of this potential
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("contact_energy"));
-        contact_energy((mode==PotentialAndDerivMode ? &potential : nullptr),
-                alignment.coords(), params.data(), 
-                n_contact, cutoff);
-    }
+        VecArray pos  = bead_pos.output;
+        VecArray sens = bead_pos.sens;
+        potential = 0.f;
 
-    virtual double test_value_deriv_agreement() {return -1.;}
+        for(int nc=0; nc<n_contact; ++nc) {
+            const auto& p = params[nc];
+            auto disp = load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]);
+            auto dist = mag(disp);
+            // I could introduce cutoffs for extra performance, but it is probably inessential
+            Vec<2> contact = compact_sigmoid(dist-p.r0, p.scale);
+            potential += p.energy*contact.x();
+            auto deriv = (p.energy*contact.y()*rcp(dist)) * disp;
+            update_vec(sens, p.loc[0],  deriv);
+            update_vec(sens, p.loc[1], -deriv);
+        }
+    }
 };
-static RegisterNodeType<ContactEnergy,1>        contact_node("contact");
-*/
-static RegisterNodeType<SidechainRadialPairs,1> radial_node ("radial");
+}
+
+static RegisterNodeType<ContactEnergy,1>             contact_node("contact");
+static RegisterNodeType<SidechainRadialPairs,1>      radial_node ("radial");
 static RegisterNodeType<HBondSidechainRadialPairs,2> hbond_sc_radial_node ("hbond_sc_radial");

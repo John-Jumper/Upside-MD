@@ -22,28 +22,6 @@ deg=np.deg2rad(1)
 default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 n_bit_rotamer = 4
 
-base_sc_ref = {
- 'ALA': np.array([-0.01648328,  1.50453228,  1.20193768]),
- 'ARG': np.array([-0.27385093,  3.43874264,  2.24442499]),
- 'ASN': np.array([-0.27119135,  2.28878532,  1.32214314]),
- 'ASP': np.array([-0.19836569,  2.23864046,  1.36505725]),
- 'CYS': np.array([-0.17532601,  1.92513503,  1.34296652]),
- 'GLN': np.array([-0.28652696,  2.84800873,  1.60009894]),
- 'GLU': np.array([-0.26377398,  2.80887008,  1.69621717]),
- 'GLY': np.array([ -1.56136239e-02,   5.46052464e-01,  -5.67664281e-19]),
- 'HIS': np.array([-0.32896151,  2.66635893,  1.42411271]),
- 'ILE': np.array([-0.23956042,  2.26489309,  1.49776818]),
- 'LEU': np.array([-0.23949426,  2.67123263,  1.3032201 ]),
- 'LYS': np.array([-0.26626635,  3.18256448,  1.85836641]),
- 'MET': np.array([-0.21000946,  2.79544428,  1.52568726]),
- 'PHE': np.array([-0.27214755,  2.83761534,  1.45094383]),
- 'PRO': np.array([-1.10993493,  0.89959734,  1.41005877]),
- 'SER': np.array([-0.00692474,  1.56683138,  1.475341  ]),
- 'THR': np.array([-0.14662723,  1.80061252,  1.42785569]),
- 'TRP': np.array([-0.01433503,  3.07506159,  1.56167948]),
- 'TYR': np.array([-0.2841611 ,  3.02555746,  1.50123341]),
- 'VAL': np.array([-0.02436993,  1.97251406,  1.32782961])}
-
 def vmag(x):
     assert x.shape[-1]
     return np.sqrt(x[:,0]**2+x[:,1]**2+x[:,2]**2)
@@ -739,11 +717,9 @@ def write_contact_energies(parser, fasta, contact_table):
     n_contact = len(fields)
 
     g = t.create_group(t.root.input.potential, 'contact')
-    g._v_attrs.arguments = np.array(['affine_alignment'])
-    g._v_attrs.cutoff = 6.   # in units of width
+    g._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
 
     id         = np.zeros((n_contact,2), dtype='i')
-    sc_ref_pos = np.zeros((n_contact,2,3))
     r0         = np.zeros((n_contact,))
     scale      = np.zeros((n_contact,))
     energy     = np.zeros((n_contact,))
@@ -753,18 +729,16 @@ def write_contact_energies(parser, fasta, contact_table):
         msg = 'Contact energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
         if not (0 <= id[i,0] < len(fasta)): raise ValueError(msg % (id[i,0], len(fasta)))
         if not (0 <= id[i,1] < len(fasta)): raise ValueError(msg % (id[i,1], len(fasta)))
-        sc_ref_pos[i] = (base_sc_ref[fasta[id[i,0]]], base_sc_ref[fasta[id[i,1]]])
 
-        r0[i]     =    float(f[2])
-        scale[i]  = 1./float(f[3])
-        energy[i] =    float(f[4])
+        r0[i]     =     float(f[2])
+        scale[i]  = 0.5/float(f[3])  # compact_sigmoid cuts off at +/- 1/scale
+        energy[i] =     float(f[4])
 
     if energy.max() > 0.:
         print ('\nWARNING: Some contact energies are positive (repulsive).\n'+
                  '         Please ignore this warning if you intendent to have repulsive contacts.')
 
     create_array(g, 'id',         obj=id)
-    create_array(g, 'sc_ref_pos', obj=sc_ref_pos)
     create_array(g, 'r0',         obj=r0)
     create_array(g, 'scale',      obj=scale)
     create_array(g, 'energy',     obj=energy)
@@ -1335,7 +1309,7 @@ def main():
         write_rama_coord()
 
     if args.contact_energies:
-        require_affine = True
+        require_backbone_point = True
         write_contact_energies(parser, fasta_seq, args.contact_energies)
 
     if require_affine:
