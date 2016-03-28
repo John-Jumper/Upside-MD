@@ -15,7 +15,7 @@ endif()
 
 set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
-set (OPT     "-O3 -ffast-math -fno-omit-frame-pointer -march=${ARCH}")
+set (OPT     "-DCOLLECT_PROFILE -O3 -ffast-math -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
 
 set (CMAKE_CXX_FLAGS "${OMP_FLAGS} ${CMAKE_CXX_FLAGS} ${DEBUG_FLAGS} -std=c++11 ${DEFINES} ${OPT} ${WARN}" )
@@ -82,3 +82,7 @@ python_executable(support estimate_rama_distributions.py)
 add_executable(compute_rotamer_centers generate_from_rotamer.cpp compute_rotamer_centers.cpp h5_support.cpp)
 target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES})
 set_target_properties(compute_rotamer_centers PROPERTIES EXCLUDE_FROM_ALL 1)
+
+add_executable(compute_rotamer_pos generate_from_rotamer.cpp compute_rotamer_pos.cpp h5_support.cpp)
+target_link_libraries(compute_rotamer_pos stdc++ m ${HDF5_LIBRARIES})
+set_target_properties(compute_rotamer_pos PROPERTIES EXCLUDE_FROM_ALL 1)

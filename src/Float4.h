@@ -446,21 +446,16 @@ inline Float4 max(const Float4& a, const Float4& b) {
 inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
 inline Float4 approx_rcp  (const Float4& x) {return x.approx_rcp  ();}
 
-inline Float4 left_multiply_3x3(const Float4& row0, const Float4& row1, const Float4& row2, const Float4& x) {
-    return row0.dp<1,0,0,0, 1,1,1,0>(x) | 
-           row1.dp<0,1,0,0, 1,1,1,0>(x) | 
-           row2.dp<0,0,1,0, 1,1,1,0>(x);
-}
-
-inline Float4 right_multiply_3x3(const Float4 x, const Float4& row0, const Float4& row1, const Float4& row2) {
-    auto tmp0 =       x.broadcast<0>()*row0;
-    auto tmp1 = fmadd(x.broadcast<1>(),row1, tmp0);
-    auto tmp2 = fmadd(x.broadcast<2>(),row2, tmp1);
-    return tmp2;
-}
 
 inline Float4 horizontal_add(const Float4& x1, const Float4& x2) {
     return Float4(_mm_hadd_ps(x1.vec, x2.vec));
+}
+
+template <int out_mask0, int out_mask1, int out_mask2, int out_mask3,
+          int sum_mask0, int sum_mask1, int sum_mask2, int sum_mask3>
+Float4 dp(const Float4& x, const Float4& y) {
+    return x.dp<out_mask0, out_mask1, out_mask2, out_mask3,
+                sum_mask0, sum_mask1, sum_mask2, sum_mask3>(y);
 }
 
 inline Float4 dot(const Float4& x, const Float4& y) {

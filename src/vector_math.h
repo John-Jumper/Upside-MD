@@ -526,9 +526,9 @@ inline S mag(const Vec<ndim,S>& a) {
 
 template <int D, typename S>
 inline S sum(const Vec<D,S>& a) {
-    S m = zero<S>();
+    S m = a[0];
     #pragma unroll
-    for(int i=0; i<D; ++i) m += a[i];
+    for(int i=1; i<D; ++i) m += a[i];
     return m;
 }
 

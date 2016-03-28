@@ -10,11 +10,125 @@
 #include "state_logger.h"
 #include <tuple>
 #include <set>
+#include "Float4.h"
 
 using namespace std;
 using namespace h5;
 
 constexpr static int UPPER_ROT = 4;  // 1 more than the most possible rotamers (handle 0)
+
+template <int N_Float4>
+Vec<N_Float4,Float4> read4vec(float* address, Alignment align=Alignment::aligned) {
+    Vec<N_Float4,Float4> ret;
+    #pragma unroll
+    for(int i=0; i<N_Float4; ++i) ret[i] = Float4(address+4*i,align);
+    return ret;
+}
+
+template <int N_Float4>
+Vec<N_Float4,Float4> store4vec(float* address, const Vec<N_Float4,Float4>& a, Alignment align=Alignment::aligned) {
+    #pragma unroll
+    for(int i=0; i<N_Float4; ++i) a[i].store(address+4*i,align);
+    return a;
+}
+
+
+template <int D1, int D2>
+struct PaddedMatrix {
+    static constexpr int w1=(D1+3)/4;
+    static constexpr int w2=(D2+3)/4;
+
+    // I am having some weird type errors that I don't understand related to
+    //   things like v[0].broadcast<0>() that do not correctly interpret as a method call.
+    // This function will fix that will fix them, but I do not know why it is necessary.
+    // C++ can be humbling some times.  I am sure that my mental block is something silly.
+    template<int i_bcast>
+    static Float4 bcast(const Float4& v) {return v.broadcast<i_bcast>();}
+
+    Float4 row[D1][w2];
+
+    PaddedMatrix(float* address) {
+        for(int nr=0; nr<D1; ++nr)
+            for(int i2=0; i2<w2; ++i2)
+                row[nr][i2] = Float4(address + nr*4*w2 + 4*i2);
+    }
+
+    Vec<w1,Float4> apply_left(const Vec<w2,Float4>& v) {
+        Vec<w1,Float4> z;
+        if(D1==3 && D2==3) {
+            z[0] = dp<1,0,0,0, 1,1,1,0>(row[0][0],v[0]) |
+                   dp<0,1,0,0, 1,1,1,0>(row[1][0],v[0]) | 
+                   dp<0,0,1,0, 1,1,1,0>(row[2][0],v[0]);
+        } else if(D1==3 && D2==6) {
+            auto a = dp<1,0,0,0, 1,1,1,1>(row[0][0],v[0]) | 
+                     dp<0,1,0,0, 1,1,1,1>(row[1][0],v[0]) | 
+                     dp<0,0,1,0, 1,1,1,1>(row[2][0],v[0]);
+
+            auto b = dp<1,0,0,0, 1,1,0,0>(row[0][1],v[1]) | 
+                     dp<0,1,0,0, 1,1,0,0>(row[1][1],v[1]) | 
+                     dp<0,0,1,0, 1,1,0,0>(row[2][1],v[1]);
+            z[0] = a+b;
+        } else if(D1==6 && D2==6) {
+            auto a1 = dp<1,0,0,0, 1,1,1,1>(row[0][0],v[0]) | 
+                      dp<0,1,0,0, 1,1,1,1>(row[1][0],v[0]) | 
+                      dp<0,0,1,0, 1,1,1,1>(row[2][0],v[0]) |
+                      dp<0,0,0,1, 1,1,1,1>(row[3][0],v[0]);
+            auto a2 = dp<1,0,0,0, 1,1,1,1>(row[4][0],v[0]) | 
+                      dp<0,1,0,0, 1,1,1,1>(row[5][0],v[0]);
+
+            auto b1 = dp<1,0,0,0, 1,1,0,0>(row[0][1],v[1]) | 
+                      dp<0,1,0,0, 1,1,0,0>(row[1][1],v[1]) | 
+                      dp<0,0,1,0, 1,1,0,0>(row[2][1],v[1]) |
+                      dp<0,0,0,1, 1,1,0,0>(row[3][1],v[1]);
+            auto b2 = dp<1,0,0,0, 1,1,0,0>(row[4][1],v[1]) | 
+                      dp<0,1,0,0, 1,1,0,0>(row[5][1],v[1]);
+
+            z[0] = a1+b1;
+            z[1] = a2+b2;
+        }
+        return z;
+    }
+
+    Vec<w2,Float4> apply_right(const Vec<w1,Float4>& v) {
+        Vec<w2,Float4> z;
+        if(D1==3 && D2==3) {
+            auto tmp0 =       bcast<0>(v[0])*row[0][0];
+            auto tmp1 = fmadd(bcast<1>(v[0]),row[1][0], tmp0);
+            auto tmp2 = fmadd(bcast<2>(v[0]),row[2][0], tmp1);
+            z[0] = tmp2;
+        } else if(D1==3 && D2==6) {
+            // input in length 3 and output is length 6
+            auto tmp0a =       bcast<0>(v[0])*row[0][0];
+            auto tmp1a = fmadd(bcast<1>(v[0]),row[1][0], tmp0a);
+            auto tmp2a = fmadd(bcast<2>(v[0]),row[2][0], tmp1a);
+            auto tmp0b =       bcast<3>(v[0])*row[0][1];
+            auto tmp1b = fmadd(bcast<0>(v[0]),row[1][1], tmp0b);
+            auto tmp2b = fmadd(bcast<1>(v[0]),row[2][1], tmp1b);
+            z[0] = tmp2a;
+            z[1] = tmp2b;
+        } else if(D1==6 && D2==6) {
+            // FIXME I could tree out the additions to expose more instruction parallelism
+            auto tmp0a =       bcast<0>(v[0])*row[0][0];
+            auto tmp1a = fmadd(bcast<1>(v[0]),row[1][0], tmp0a);
+            auto tmp2a = fmadd(bcast<2>(v[0]),row[2][0], tmp1a);
+            auto tmp3a = fmadd(bcast<3>(v[0]),row[3][0], tmp2a);
+            auto tmp4a = fmadd(bcast<0>(v[1]),row[4][0], tmp3a);
+            auto tmp5a = fmadd(bcast<1>(v[1]),row[5][0], tmp4a);
+
+            auto tmp0b =       bcast<0>(v[0])*row[0][1];
+            auto tmp1b = fmadd(bcast<1>(v[0]),row[1][1], tmp0b);
+            auto tmp2b = fmadd(bcast<2>(v[0]),row[2][1], tmp1b);
+            auto tmp3b = fmadd(bcast<3>(v[0]),row[3][1], tmp2b);
+            auto tmp4b = fmadd(bcast<0>(v[1]),row[4][1], tmp3b);
+            auto tmp5b = fmadd(bcast<1>(v[1]),row[5][1], tmp4b);
+
+            z[0] = tmp5a;
+            z[1] = tmp5b;
+        }
+        return z;
+    }
+};
+
 
 struct EdgeLocator {
     protected:
@@ -363,120 +477,159 @@ struct EdgeHolder {
             return en;
         }
 
-        void update_beliefs33() {
-            // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
+        template <int N_ROT1, int N_ROT2>
+            void update_beliefs() {
+                constexpr const int w1 = (N_ROT1+3)/4;
+                constexpr const int w2 = (N_ROT2+3)/4;
+                constexpr const int ws = w1+w2;
+                // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
 
-            float* vec_old_node_belief1 = nodes1.old_belief.x.get();
-            float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
+                float* vec_old_node_belief1 = nodes1.old_belief.x.get();
+                float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
 
-            float* vec_old_node_belief2 = nodes2.old_belief.x.get();
-            float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
+                float* vec_old_node_belief2 = nodes2.old_belief.x.get();
+                float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
 
-            int n_edge = nodes_to_edge.n_edge;
+                int n_edge = nodes_to_edge.n_edge;
 
-            for(int ne=0; ne<n_edge; ++ne) {
-                int i1 = edge_indices1[ne]*4;
-                int i2 = edge_indices2[ne]*4;
+                auto p3 = [](const char* nm, const Float4& v) {printf("%s=np.array([%.4f, %.4f, %.4f]);\n", nm, v.x(),v.y(),v.z());};
+                // auto p4 = [](const char* nm, const Float4& v, bool newline) {printf("%s [%.3f, %.3f, %.3f, %.3f]%s", nm, v.x(),v.y(),v.z(),v.w(), newline?"\n":"");};
 
-                auto old_edge_belief1 = Float4(old_belief.x + ne*4*2 + 0);
-                auto old_edge_belief2 = Float4(old_belief.x + ne*4*2 + 4);
+                for(int ne=0; ne<n_edge; ++ne) {
+                    int i1 = edge_indices1[ne]*4*w1;
+                    int i2 = edge_indices2[ne]*4*w2;
 
-                auto old_node_belief1 = Float4(vec_old_node_belief1 + i1);
-                auto old_node_belief2 = Float4(vec_old_node_belief2 + i2);
+                    auto old_edge_belief1 = read4vec<w1>(old_belief.x + ne*4*ws + 0);
+                    auto old_edge_belief2 = read4vec<w2>(old_belief.x + ne*4*ws + 4*w1);
 
-                auto v1 = old_node_belief1 * rcp(Float4(1e-10f) + old_edge_belief1);
-                auto v2 = old_node_belief2 * rcp(Float4(1e-10f) + old_edge_belief2);
+                    auto old_node_belief1 = read4vec<w1>(vec_old_node_belief1 + i1);
+                    auto old_node_belief2 = read4vec<w2>(vec_old_node_belief2 + i2);
 
-                // load the edge probability matrix
-                auto ep_row1 = Float4(prob.x + ne*4*3 + 0);
-                auto ep_row2 = Float4(prob.x + ne*4*3 + 4);
-                auto ep_row3 = Float4(prob.x + ne*4*3 + 8);
+                    auto v1 = old_node_belief1 * vec_rcp(Float4(1e-10f) + old_edge_belief1);
+                    auto v2 = old_node_belief2 * vec_rcp(Float4(1e-10f) + old_edge_belief2);
 
-                // cur_edge_belief1 =  left_multiply_matrix(ep, v2));
-                auto cur_edge_belief1 =  left_multiply_3x3(    ep_row1,ep_row2,ep_row3, v2);
-                auto cur_edge_belief2 = right_multiply_3x3(v1, ep_row1,ep_row2,ep_row3);
+                    // load the edge probability matrix
+                    auto eprob = PaddedMatrix<N_ROT1,N_ROT2>(prob.x + ne*N_ROT1*4*w2);
+                    auto cur_edge_belief1 = eprob.apply_left (v2);
+                    auto cur_edge_belief2 = eprob.apply_right(v1);
 
-                auto cur_node_belief1 = cur_edge_belief1 * Float4(vec_cur_node_belief1 + i1);
-                auto cur_node_belief2 = cur_edge_belief2 * Float4(vec_cur_node_belief2 + i2);
+        // printf("\nne %i\n", ne);
+        // printf("row=np.zeros((3,3));\n");
+        // p3("row[0]",eprob.row[0][0]);
+        // p3("row[1]",eprob.row[1][0]);
+        // p3("row[2]",eprob.row[2][0]);
+        // p3("v1",v1[0]);
+        // p3("v2",v2[0]);
+        // p3("m_v2",cur_edge_belief1[0]);
+        // p3("v1_m",cur_edge_belief2[0]);
 
-                // I might be able to do the normalization only every few steps if I wanted
-                cur_edge_belief1.store(cur_belief.x + ne*8 + 0);
-                cur_edge_belief2.store(cur_belief.x + ne*8 + 4);
-                cur_node_belief1.store(vec_cur_node_belief1 + i1);
-                cur_node_belief2.store(vec_cur_node_belief2 + i2);
+                    auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
+                    auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
+
+                    // I might be able to do the normalization only every few steps if I wanted
+                    store4vec<w1>(cur_belief.x + ne*4*ws + 0,    cur_edge_belief1);
+                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1, cur_edge_belief2);
+                    store4vec<w1>(vec_cur_node_belief1 + i1,     cur_node_belief1);
+                    store4vec<w2>(vec_cur_node_belief2 + i2,     cur_node_belief2);
+                }
+
+                // Perform edge normalization for all edges
+                // We could perform it in the loop above, but it would insert a long dependency chain in the 
+                // middle of the algorithm.  The hope is that the processor will expose much more instruction
+                // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal adds.
+                for(int ne=0; ne<n_edge; ne+=2) {
+                    auto cb11 = read4vec<w1>(cur_belief.x + ne*4*ws + 0);
+                    auto cb12 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*w1);
+                    auto cb21 = read4vec<w1>(cur_belief.x + ne*4*ws + 4*ws);
+                    auto cb22 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1));
+
+                    // let's approximately l1 normalize everything edges to avoid any numerical problems later
+                    Float4 scales_for_unit_l1 = approx_rcp(horizontal_add(
+                                horizontal_add(sum(cb11), sum(cb12)),
+                                horizontal_add(sum(cb21), sum(cb22))));
+
+                    store4vec<w1>(cur_belief.x + ne*4*ws + 0,         cb11*scales_for_unit_l1.broadcast<0>());
+                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1,      cb12*scales_for_unit_l1.broadcast<1>());
+                    store4vec<w1>(cur_belief.x + ne*4*ws + 4*ws,      cb21*scales_for_unit_l1.broadcast<2>());
+                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1), cb22*scales_for_unit_l1.broadcast<3>());
+                }
             }
-
-            // Perform edge normalization for all edges
-            // We could perform it in the loop above, but it would insert a long dependency chain in the 
-            // middle of the algorithm.  The hope is that the processor will expose much more instruction
-            // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal adds.
-            for(int ne=0; ne<n_edge; ne+=2) {
-                auto cb11 = Float4(cur_belief.x + ne*8 +  0);
-                auto cb12 = Float4(cur_belief.x + ne*8 +  4);
-                auto cb21 = Float4(cur_belief.x + ne*8 +  8);
-                auto cb22 = Float4(cur_belief.x + ne*8 + 12);
-
-                // let's approximately l1 normalize everything edges to avoid any numerical problems later
-                auto scales_for_unit_l1 = approx_rcp(horizontal_add(
-                        horizontal_add(cb11, cb12),
-                        horizontal_add(cb21, cb22)));
-
-                (cb11*scales_for_unit_l1.broadcast<0>()).store(cur_belief.x + ne*8 +  0);
-                (cb12*scales_for_unit_l1.broadcast<1>()).store(cur_belief.x + ne*8 +  4);
-                (cb21*scales_for_unit_l1.broadcast<2>()).store(cur_belief.x + ne*8 +  8);
-                (cb22*scales_for_unit_l1.broadcast<3>()).store(cur_belief.x + ne*8 + 12);
-            }
-        }
-
-        // template <int N_ROT1, int N_ROT2>
-        // void update_beliefs(float damping) {
-        //     Timer timer(std::string("update_beliefs"));
-        //     // FIXME ASSERT(n_rot1 == N_ROT1)
-        //     // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
-        //     VecArray vec_old_node_belief1 = nodes1.old_belief;
-        //     VecArray vec_cur_node_belief1 = nodes1.cur_belief;
-
-        //     VecArray vec_old_node_belief2 = nodes2.old_belief;
-        //     VecArray vec_cur_node_belief2 = nodes2.cur_belief;
-
-        //     // note that edges in [n_edge,round_up(n_edge,4)) must be set to point to
-        //     //   the dummy node
-        //     for(int ne=0; ne<n_edge; ne+=4) {
-        //         auto offset1 = Int4(edge_indices1+ne) * Int4(round_up(N_ROT1,4));
-        //         auto offset2 = Int4(edge_indices2+ne) * Int4(round_up(N_ROT2,4));
-
-        //         auto old_node_belief1 = aligned_gather_vec<N_ROT1>(vec_old_node_belief1.x, offset1);
-        //         auto old_node_belief2 = aligned_gather_vec<N_ROT2>(vec_old_node_belief2.x, offset2);
-
-        //         auto ep = load_whole_vec<N_ROT1*N_ROT2>(prob, ne);
-
-        //         auto b = load_whole_vec<N_ROT1+N_ROT2>(old_belief, ne);
-        //         auto old_edge_belief1 = extract<0,     N_ROT1>       (b);
-        //         auto old_edge_belief2 = extract<N_ROT1,N_ROT1+N_ROT2>(b);
-
-        //         auto cur_edge_belief1 =  left_multiply_matrix(ep, old_node_belief2 * vec_rcp(old_edge_belief2));
-        //         auto cur_edge_belief2 = right_multiply_matrix(    old_node_belief1 * vec_rcp(old_edge_belief1), ep);
-        //         cur_edge_belief1 *= rcp(max(cur_edge_belief1)); // rescale to avoid underflow in the future
-        //         cur_edge_belief2 *= rcp(max(cur_edge_belief2));
-
-        //         // store edge beliefs
-        //         Vec<N_ROT1+N_ROT2,Float4> neb;
-        //         store<0,     N_ROT1>       (neb, cur_edge_belief1);
-        //         store<N_ROT1,N_ROT1+N_ROT2>(neb, cur_edge_belief2);
-        //         store_whole_vec(cur_belief,ne,neb);
-
-        //         // Update our beliefs about nodes (normalization keeps us near 1)
-        //         node_update_scatter(vec_cur_node_belief1.x, offset1, cur_edge_belief1);
-        //         node_update_scatter(vec_cur_node_belief2.x, offset2, cur_edge_belief2);
-        //     }
-        // }
 };
+
+
+
+
+/*
+template <>
+void EdgeHolder::update_beliefs<3,3>() {
+    // FIXME ROTX write update_beliefs36 and update_beliefs66 -- templating may make this easier
+    // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
+
+    float* vec_old_node_belief1 = nodes1.old_belief.x.get();
+    float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
+
+    float* vec_old_node_belief2 = nodes2.old_belief.x.get();
+    float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
+
+    int n_edge = nodes_to_edge.n_edge;
+
+    for(int ne=0; ne<n_edge; ++ne) {
+        int i1 = edge_indices1[ne]*4;
+        int i2 = edge_indices2[ne]*4;
+
+        auto old_edge_belief1 = Float4(old_belief.x + ne*4*2 + 0);
+        auto old_edge_belief2 = Float4(old_belief.x + ne*4*2 + 4);
+
+        auto old_node_belief1 = Float4(vec_old_node_belief1 + i1);
+        auto old_node_belief2 = Float4(vec_old_node_belief2 + i2);
+
+        auto v1 = old_node_belief1 * rcp(Float4(1e-10f) + old_edge_belief1);
+        auto v2 = old_node_belief2 * rcp(Float4(1e-10f) + old_edge_belief2);
+
+        // load the edge probability matrix
+        auto ep_row1 = Float4(prob.x + ne*4*3 + 0);
+        auto ep_row2 = Float4(prob.x + ne*4*3 + 4);
+        auto ep_row3 = Float4(prob.x + ne*4*3 + 8);
+
+        auto cur_edge_belief1 =  left_multiply_3x3(    ep_row1,ep_row2,ep_row3, v2);
+        auto cur_edge_belief2 = right_multiply_3x3(v1, ep_row1,ep_row2,ep_row3);
+
+        auto cur_node_belief1 = cur_edge_belief1 * Float4(vec_cur_node_belief1 + i1);
+        auto cur_node_belief2 = cur_edge_belief2 * Float4(vec_cur_node_belief2 + i2);
+
+        // I might be able to do the normalization only every few steps if I wanted
+        cur_edge_belief1.store(cur_belief.x + ne*8 + 0);
+        cur_edge_belief2.store(cur_belief.x + ne*8 + 4);
+        cur_node_belief1.store(vec_cur_node_belief1 + i1);
+        cur_node_belief2.store(vec_cur_node_belief2 + i2);
+    }
+
+    // Perform edge normalization for all edges
+    // We could perform it in the loop above, but it would insert a long dependency chain in the 
+    // middle of the algorithm.  The hope is that the processor will expose much more instruction
+    // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal adds.
+    for(int ne=0; ne<n_edge; ne+=2) {
+        auto cb11 = Float4(cur_belief.x + ne*8 +  0);
+        auto cb12 = Float4(cur_belief.x + ne*8 +  4);
+        auto cb21 = Float4(cur_belief.x + ne*8 +  8);
+        auto cb22 = Float4(cur_belief.x + ne*8 + 12);
+
+        // let's approximately l1 normalize everything edges to avoid any numerical problems later
+        auto scales_for_unit_l1 = approx_rcp(horizontal_add(
+                    horizontal_add(cb11, cb12),
+                    horizontal_add(cb21, cb22)));
+
+        (cb11*scales_for_unit_l1.broadcast<0>()).store(cur_belief.x + ne*8 +  0);
+        (cb12*scales_for_unit_l1.broadcast<1>()).store(cur_belief.x + ne*8 +  4);
+        (cb21*scales_for_unit_l1.broadcast<2>()).store(cur_belief.x + ne*8 +  8);
+        (cb22*scales_for_unit_l1.broadcast<3>()).store(cur_belief.x + ne*8 + 12);
+    }
+}
+*/
+
 
 template<>
 void EdgeHolder::calculate_marginals<3,3>() {
-    // FIXME ASSERT(n_rot1 == N_ROT1)
-    // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
-
     int n_edge = nodes_to_edge.n_edge;
     for(int ne=0; ne<n_edge; ++ne) {
         auto b1 = Float4(nodes1.cur_belief.x + 4*edge_indices1[ne]);
@@ -539,9 +692,11 @@ struct RotamerSidechain: public PotentialNode {
 
     NodeHolder* node_holders_matrix[UPPER_ROT];
     NodeHolder  nodes1, nodes3; // initialize these with sane max_n_edge
+    // FIXME ROTX NodeHolder  nodes6; 
 
     EdgeHolder* edge_holders_matrix[UPPER_ROT][UPPER_ROT];
     EdgeHolder edges11, edges13, edges33; // initialize these with sane max_n_edge
+    // FIXME ROTX EdgeHolder edges16, edges36, edges66;
 
     float energy_cap;
     float energy_cap_width;
@@ -562,10 +717,15 @@ struct RotamerSidechain: public PotentialNode {
 
         nodes1(1,n_elem_rot[1]),
         nodes3(3,n_elem_rot[3]),
+        // FIXME ROTX nodes6(6,n_elem_rot[6]),
 
         edges11(nodes1,nodes1,n_elem_rot[1]*(n_elem_rot[1]+1)/2),
         edges13(nodes1,nodes3,n_elem_rot[1]* n_elem_rot[3]),
         edges33(nodes3,nodes3,n_elem_rot[3]*(n_elem_rot[3]+1)/2),
+        // FIXME ROTX nodes6
+        // edges16(nodes1,nodes6,n_elem_rot[1]* n_elem_rot[6]),
+        // edges36(nodes3,nodes6,n_elem_rot[3]* n_elem_rot[6]),
+        // edges66(nodes6,nodes6,n_elem_rot[6]*(n_elem_rot[6]+1)/2),
 
         // energy_cap      (read_attribute<float>(grp,"pair_interaction","energy_cap")),
         // energy_cap_width(read_attribute<float>(grp,"pair_interaction","energy_cap_width")),
@@ -583,11 +743,15 @@ struct RotamerSidechain: public PotentialNode {
         for(int i: range(UPPER_ROT)) node_holders_matrix[i] = nullptr;
         node_holders_matrix[1] = &nodes1;
         node_holders_matrix[3] = &nodes3;
+        // FIXME ROTX node_holders_matrix[6] = &nodes6;
 
         for(int i: range(UPPER_ROT)) for(int j: range(UPPER_ROT)) edge_holders_matrix[i][j] = nullptr;
         edge_holders_matrix[1][1] = &edges11;
         edge_holders_matrix[1][3] = &edges13;
         edge_holders_matrix[3][3] = &edges33;
+        // FIXME ROTX edge_holders_matrix[1][6] = &edges16;
+        // FIXME ROTX edge_holders_matrix[3][6] = &edges36;
+        // FIXME ROTX edge_holders_matrix[6][6] = &edges66;
 
         for(int i: range(prob_nodes.size())) 
             if(igraph.pos_node1->n_elem != prob_nodes[i]->n_elem)
@@ -596,7 +760,7 @@ struct RotamerSidechain: public PotentialNode {
                         to_string(prob_nodes[i]->n_elem) + " elements.");
 
         if(logging(LOG_DETAILED)) {
-            default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem}, 
+            default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem /*FIXME ROTX +nodes6.n_elem */}, 
                     [&](float* buffer) {
                        auto en = residue_free_energies();
                        copy(begin(en), end(en), buffer);});
@@ -629,6 +793,7 @@ struct RotamerSidechain: public PotentialNode {
         } else if(!strcmp(log_name, "count_edges_by_type")) {
             return igraph.count_edges_by_type();
         } else if(!strcmp(log_name, "graph_nodes_edges_sizes")) {
+            // FIXME ROTX handle this generically (maybe pretend everyone is a nodes6 ?
             vector<float> ret;  // really an int return but interface requires float
             ret.push_back(float(nodes3.n_elem));
             ret.push_back(float(n_edge33));
@@ -740,36 +905,55 @@ struct RotamerSidechain: public PotentialNode {
         float en = 0.f;
         for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_energy<1>  (nn);
         for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
+        // FIXME ROTX for(int nn: range(nodes6 .n_elem)) en += nodes6 .node_free_energy<6>  (nn);
         for(int ne: range(edges11.nodes_to_edge.n_edge)) en += -logf(edges11.prob(0,ne));
         for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
+        // FIXME ROTX for(int ne: range(edges36.nodes_to_edge.n_edge)) en += edges36.edge_free_energy<3,6>(ne);
+        // FIXME ROTX for(int ne: range(edges66.nodes_to_edge.n_edge)) en += edges66.edge_free_energy<6,6>(ne);
         return en;
     }
 
     vector<float> residue_free_energies() {
         vector<float> e1(nodes1.n_elem, 0.f);
         vector<float> e3(nodes3.n_elem, 0.f);
+        // FIXME ROTX vector<float> e6(nodes6.n_elem, 0.f);
 
         for(int nn: range(nodes1 .n_elem)) {float en = nodes1.node_free_energy<1>(nn); e1[nn] += en;}
         for(int nn: range(nodes3 .n_elem)) {float en = nodes3.node_free_energy<3>(nn); e3[nn] += en;}
+        // FIXME ROTX for(int nn: range(nodes6 .n_elem)) {float en = nodes6.node_free_energy<6>(nn); e6[nn] += en;}
 
         for(int ne: range(edges11.nodes_to_edge.n_edge)) {
-            float         en = -logf(edges11.prob(0,ne));
+            float en = -logf(edges11.prob(0,ne));
             e1[edges11.edge_indices1[ne]] += 0.5*en;
             e1[edges11.edge_indices2[ne]] += 0.5*en;
         }
 
         for(int ne: range(edges33.nodes_to_edge.n_edge)) {
-            float         en = edges33.edge_free_energy<3,3>(ne);
+            float en = edges33.edge_free_energy<3,3>(ne);
             e3[edges33.edge_indices1[ne]] += 0.5*en;
             e3[edges33.edge_indices2[ne]] += 0.5*en;
         }
 
-        return arrange_energies(e1,e3);
+        // FIXME ROTX
+        // for(int ne: range(edges36.nodes_to_edge.n_edge)) {
+        //     float en = edges36.edge_free_energy<3,6>(ne);
+        //     e3[edges36.edge_indices1[ne]] += 0.5*en;
+        //     e6[edges36.edge_indices2[ne]] += 0.5*en;
+        // }
+
+        // for(int ne: range(edges66.nodes_to_edge.n_edge)) {
+        //     float en = edges66.edge_free_energy<6,6>(ne);
+        //     e6[edges66.edge_indices1[ne]] += 0.5*en;
+        //     e6[edges66.edge_indices2[ne]] += 0.5*en;
+        // }
+
+        return arrange_energies(e1,e3/*,FIXME ROTX e6*/);
     }
 
     vector<float> rotamer_1body_energy(int prob_node_index) {
         vector<float> e1(nodes1.n_elem, 0.f);
         vector<float> e3(nodes3.n_elem, 0.f);
+        // FIXME ROTX vector<float> e6(nodes6.n_elem, 0.f);
 
         VecArray energy_1body = prob_nodes[prob_node_index]->output;
         for(int n: range(igraph.n_elem1)) {
@@ -782,15 +966,16 @@ struct RotamerSidechain: public PotentialNode {
             switch(n_rot) {
                 case 1: e1[id] += nodes1.cur_belief(rot,id) * energy_1body(0,index); break;
                 case 3: e3[id] += nodes3.cur_belief(rot,id) * energy_1body(0,index); break;
+                // FIXME ROTX case 6: e6[id] += nodes6.cur_belief(rot,id) * energy_1body(0,index); break;
                 default: throw string("impossible");
             }
         }
 
-        return arrange_energies(e1,e3);
+        return arrange_energies(e1,e3 /*FIXME ROTX ,e6*/);
     }
 
-    vector<float> arrange_energies(const vector<float>& e1, const vector<float>& e3) {
-        vector<float> energies(n_elem_rot[1]+n_elem_rot[3]);
+    vector<float> arrange_energies(const vector<float>& e1, const vector<float>& e3 /*FIXME ROTX , const vector<float>& e3*/) {
+        vector<float> energies(n_elem_rot[1]+n_elem_rot[3]/*FIXME ROTX+n_elem_rot[6]*/);
         auto en_loc = begin(energies);
 
         set<unsigned> known_ids;
@@ -808,6 +993,7 @@ struct RotamerSidechain: public PotentialNode {
             switch(n_rot) {
                 case 1: *en_loc = e1[id]; ++en_loc; break;
                 case 3: *en_loc = e3[id]; ++en_loc; break;
+                // FIXME ROTX case 6: *en_loc = e6[id]; ++en_loc; break;
                 default: throw string("impossible");
             }
         }
@@ -821,8 +1007,12 @@ struct RotamerSidechain: public PotentialNode {
             igraph.edge_sensitivity[el.edge_num] = 1.f;
         for(auto &el: edges13.edge_loc)
             igraph.edge_sensitivity[el.edge_num] = nodes3 .cur_belief(el.dim, edges13.edge_indices2[el.ne]);
-        for(auto &el: edges33.edge_loc)
-            igraph.edge_sensitivity[el.edge_num] = edges33.marginal  (el.dim, el.ne);
+        // FIXME ROTX
+        // for(auto &el: edges16.edge_loc)
+        //     igraph.edge_sensitivity[el.edge_num] = nodes6 .cur_belief(el.dim, edges16.edge_indices2[el.ne]);
+        for(auto edge_set: {&edges33 /*FIXME ROTX ,&edges36,&edges66*/})
+            for(auto &el: edge_set->edge_loc)
+                igraph.edge_sensitivity[el.edge_num] = edge_set->marginal(el.dim, el.ne);
         igraph.propagate_derivatives();
 
         vector<VecArray> sens_1body;
@@ -845,14 +1035,23 @@ struct RotamerSidechain: public PotentialNode {
     }
 
 
-    void calculate_new_beliefs(float damping_for_this_iteration) {
+    void calculate_new_beliefs(float damping_for_this_iteration, bool do_swap_for_initial=false) {
         copy(nodes3.prob, nodes3.cur_belief);
-        edges33.update_beliefs33();
+        // FIXME ROTX copy(nodes6.prob, nodes6.cur_belief);
+        edges33.update_beliefs<3,3>();
+        // FIXME ROTX edges36.update_beliefs<3,6>();
+        // FIXME ROTX edges66.update_beliefs<6,6>();
+        if(do_swap_for_initial) {
+            nodes3.swap_beliefs();  // we want the "old" values here
+            // FIXME ROTX nodes6.swap_beliefs();
+        }
         nodes3.standardize_belief_update<3>(damping_for_this_iteration);
+        // FIXME ROTX nodes6.standardize_belief_update<6>(damping_for_this_iteration);
     }
     
 
     pair<int,float> solve_for_marginals() {
+        // FIXME ROTX this hasn't been updated yet -- note that the beliefs will get larger
         Timer timer(std::string("rotamer_solve"));
         // first initialize old node beliefs to just be probability to speed convergence
         for(auto nh: node_holders_matrix)
@@ -861,20 +1060,27 @@ struct RotamerSidechain: public PotentialNode {
                     for(int ne: range(nh->n_elem))
                         nh->old_belief(no,ne) = nh->prob(no,ne);
 
-        alignas(16) float start_belief[4] = {1.f,1.f,1.f,0.f};
-        auto sb = Float4(start_belief);
+        alignas(16) float start_belief3 [4] = {1.f,1.f,1.f,0.f}; auto sb3  = Float4(start_belief3);
+        // FIXME ROTX alignas(16) float start_belief6a[4] = {1.f,1.f,1.f,1.f}; auto sb6a = Float4(start_belief6a);
+        // FIXME ROTX alignas(16) float start_belief6b[4] = {1.f,1.f,0.f,0.f}; auto sb6b = Float4(start_belief6b);
         for(int ne=0; ne<edges33.nodes_to_edge.n_edge; ++ne) {
-            sb.store(edges33.old_belief.x+ne*8+0);
-            sb.store(edges33.old_belief.x+ne*8+4);
+            sb3 .store(edges33.old_belief.x+ne*8+0);
+            sb3 .store(edges33.old_belief.x+ne*8+4);
         }
-        // fill(edges33.old_belief, 1.f);
+        // FIXME ROTX
+        // for(int ne=0; ne<edges36.nodes_to_edge.n_edge; ++ne) {
+        //     sb3 .store(edges36.old_belief.x+ne*12+0);
+        //     sb6a.store(edges36.old_belief.x+ne*12+4);
+        //     sb6b.store(edges36.old_belief.x+ne*12+8);
+        // }
+        // for(int ne=0; ne<edges66.nodes_to_edge.n_edge; ++ne) {
+        //     sb6a.store(edges66.old_belief.x+ne*16+ 0);
+        //     sb6b.store(edges66.old_belief.x+ne*16+ 4);
+        //     sb6a.store(edges66.old_belief.x+ne*16+ 8);
+        //     sb6b.store(edges66.old_belief.x+ne*16+12);
+        // }
 
-        // this will fix consistent values in cur_belief for edges but put poor values in cur_belief for the nodes
-        copy(nodes3.prob, nodes3.old_belief);
-        edges33.update_beliefs33();  // put good values in the edge beliefs
-        nodes3.swap_beliefs();  // we want the "old" values here
-        nodes3.standardize_belief_update<3>(0.f); // ensure normalization here
-
+        calculate_new_beliefs(0.f, true);
         float max_deviation = 1e10f;
         int iter = 0;
 
@@ -882,15 +1088,23 @@ struct RotamerSidechain: public PotentialNode {
             for(int j=0; j<iteration_chunk_size; ++j) {
                 nodes3 .swap_beliefs();
                 edges33.swap_beliefs();
+                // FIXME ROTX
+                // nodes6 .swap_beliefs()
+                // edges36.swap_beliefs()
+                // edges66.swap_beliefs()
                 calculate_new_beliefs(damping);
             }
 
             // compute max deviation
-            max_deviation = nodes3.max_deviation(); // max(nodes3.max_deviation(), edges33.max_deviation());
+            max_deviation = nodes3.max_deviation(); // FIXME ROTX max(nodes3.max_deviation(), nodes6.max_deviation());
         }
 
         nodes3 .calculate_marginals<3>  ();
         edges33.calculate_marginals<3,3>();
+        // FIXME ROTX
+        // nodes6 .calculate_marginals<6>  ();
+        // edges36.calculate_marginals<3,6>();
+        // edges66.calculate_marginals<6,6>();
         return make_pair(iter, max_deviation);
     }
 
