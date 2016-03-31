@@ -827,28 +827,60 @@ def write_weighted_placement(fasta, placement_library):
 
 
 def write_rotamer_placement(fasta, placement_library, fix_rotamer):
+    def compute_chi1_state(angles):
+        chi1_state = np.ones(angles.shape, dtype='i')
+        chi1_state[(   0.*deg<=angles)&(angles<120.*deg)] = 0
+        chi1_state[(-120.*deg<=angles)&(angles<  0.*deg)] = 2
+        return chi1_state
+
     with tb.open_file(placement_library) as data:
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
         placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
         placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
         start_stop = data.root.rotamer_start_stop_bead[:]
+        find_restype =                       data.root.restype_and_chi_and_state[:,0].astype('i')
+        find_chi1 =                          data.root.restype_and_chi_and_state[:,1]
+        find_chi1_state = compute_chi1_state(data.root.restype_and_chi_and_state[:,1])
+        find_chi2 =                          data.root.restype_and_chi_and_state[:,2]
+        find_state =                         data.root.restype_and_chi_and_state[:,3].astype('i')
 
     fix = dict()
     if fix_rotamer:
-        fields = [x.split()[:3] for x in list(open(fix_rotamer))]  # only consider first 3 columns
+        fields = [x.split()[:4] for x in list(open(fix_rotamer))]  # only consider first 4 column
 
-        header = 'residue restype rotamer'
+        header = 'residue restype chi1 chi2'
         actual_header = [x.lower() for x in fields[0]]
         if actual_header != header.split():
             parser.error('First line of fix-rotamer table must be "%s" but is "%s"'
                     %(header," ".join(actual_header)))
 
-        for residue, restype, rotamer in fields[1:]:
+        for residue, restype, chi1, chi2 in fields[1:]:
             if fasta[int(residue)] != (restype if restype != 'CPR' else 'PRO'): 
                 raise RuntimeError("fix-rotamer file does not match FASTA"
                     + ", residue %i should be %s but fix-rotamer file has %s"%(
                         int(residue), fasta[int(residue)], restype))
-            fix[int(residue)] = int(rotamer)
+            chi1 = float(chi1)*deg  # convert to radians internally
+            chi2 = float(chi2)*deg
+
+            if restype == 'GLY' or restype == 'ALA':
+                fix_state = 0
+            else:
+                # determine states that have the right restype and compatible chi1
+                chi1_state = compute_chi1_state(np.array([chi1]))[0]
+                restype_admissible = find_restype == restype_num[fasta[int(residue)]]
+                chi1_admissible = find_chi1_state == chi1_state
+                admissible = restype_admissible&chi1_admissible
+                admissible_chi2 = find_chi2[admissible]
+                admissible_state = find_state[admissible]
+                if len(admissible_state)==1:  # handle short residues (like VAL)
+                    fix_state = admissible_state[0]
+                else:
+                    # now find the closest chi2 among those states and read off the state index
+                    chi2_dist = (admissible_chi2-chi2)%(2*np.pi)
+                    chi2_dist[chi2_dist>np.pi] -= 2*np.pi  # find closest periodic image
+                    fix_state = admissible_state[np.argmin(chi2_dist)]
+
+            fix[int(residue)] = fix_state
 
     rama_residue = []
     affine_residue = []
@@ -879,7 +911,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
         rama_residue  .extend([rnum]*(stop-start))
         affine_residue.extend([rnum]*(stop-start))
         layer_index   .extend(np.arange(start,stop))
-        beadtype_seq   .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
+        beadtype_seq  .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
         id_seq        .extend(np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer))
 
     grp = t.create_group(potential, 'placement_point_vector')
@@ -918,8 +950,8 @@ def write_rotamer(fasta, interaction_library, damping):
     with tb.open_file(interaction_library) as data:
          create_array(pg, 'interaction_param', data.root.pair_interaction[:])
          bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
-         pg._v_attrs.energy_cap = data.root._v_attrs.energy_cap_1body
-         pg._v_attrs.energy_cap_width = data.root._v_attrs.energy_cap_width_1body
+         # pg._v_attrs.energy_cap = data.root._v_attrs.energy_cap_1body
+         # pg._v_attrs.energy_cap_width = data.root._v_attrs.energy_cap_width_1body
 
     rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))

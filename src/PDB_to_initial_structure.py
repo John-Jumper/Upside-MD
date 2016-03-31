@@ -39,7 +39,7 @@ def dihedral(x1,x2,x3,x4):
             b2mag * (b1*b2b3).sum(axis=-1),
             (np.cross(b1,b2) * b2b3).sum(axis=-1))
 
-Residue = collections.namedtuple('Residue', 'resnum restype phi psi omega N CA C CB CG chi1')
+Residue = collections.namedtuple('Residue', 'resnum restype phi psi omega N CA C CB CG CD chi1 chi2')
 
 def read_residues(chain):
     ignored_restypes = dict()
@@ -68,8 +68,11 @@ def read_residues(chain):
 
         adict   = dict((a.getName(),a.getCoords()) for a in res.iterAtoms())
         cg_list = [v for k,v in adict.items() if re.match("[^H]G1?$",k)]
+        cd_list = [v for k,v in adict.items() if re.match("[^H]D1?$",k)]
         if len(cg_list) not in (0,1):
             raise RuntimeError('CG-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]G1?$",k)],))
+        if len(cd_list) not in (0,1):
+            raise RuntimeError('CD-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]D1?$",k)],))
 
         r = Residue(
             res.getResnum(),
@@ -80,8 +83,9 @@ def read_residues(chain):
             adict.get('C',  np.nan*np.ones(3)),
             adict.get('CB', np.nan*np.ones(3)),
             cg_list[0] if cg_list else np.nan*np.ones(3),
-            np.nan)
-        r = r._replace(chi1=dihedral(r.N,r.CA,r.CB,r.CG))
+            cd_list[0] if cd_list else np.nan*np.ones(3),
+            np.nan, np.nan)
+        r = r._replace(chi1=dihedral(r.N,r.CA,r.CB,r.CG), chi2=dihedral(r.CA,r.CB,r.CG,r.CD))
         residues.append(r)
 
     return residues, ignored_restypes
@@ -138,9 +142,10 @@ def main():
 
             coords.extend([r.N,r.CA,r.C])
             sequence.append(r.restype)
-            chi.append(r.chi1)
+            chi.append((r.chi1,r.chi2))
         print
     coords = np.array(coords)
+    chi = np.array(chi)
 
     if unexpected_chain_breaks and not args.allow_unexpected_chain_breaks:
         print >>sys.stderr, ('ERROR: see above for unexpected chain breaks, probably missing residues in crystal '+
@@ -160,17 +165,17 @@ def main():
             print >>f,  fasta_seq[80*nl:80*(nl+1)]
     
     with open(args.basename+'.chi','w') as f:
-        print >>f, 'residue restype rotamer chi1'
+        print >>f, 'residue restype      chi1     chi2'
         for nr,restype in enumerate(sequence):
-            if np.isnan(chi[nr]): continue  # no chi1 data to write
+            # if np.isnan(chi[nr]): continue  # no chi1 data to write
 
-            # PRO is a special case since it only has two states
-            # the PRO state 1 is the state from -120 to 0
-            chi1_state = 1
-            if    0.*deg <= chi[nr] < 120.*deg: chi1_state = 0
-            if -120.*deg <= chi[nr] <   0.*deg and restype not in ('PRO','CPR'): chi1_state = 2
+            # # PRO is a special case since it only has two states
+            # # the PRO state 1 is the state from -120 to 0
+            # chi1_state = 1
+            # if    0.*deg <= chi[nr] < 120.*deg: chi1_state = 0
+            # if -120.*deg <= chi[nr] <   0.*deg and restype not in ('PRO','CPR'): chi1_state = 2
 
-            print >>f, '% 3i %3s %i % 8.3f' % (nr, restype, chi1_state, chi[nr]/deg)
+            print >>f, '% 7i %7s  % 8.3f % 8.3f' % (nr, restype, chi[nr,0]/deg, chi[nr,1]/deg)
 
 
 if __name__ == '__main__':
