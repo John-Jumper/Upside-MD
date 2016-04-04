@@ -521,6 +521,8 @@ struct EdgeHolder {
                     //     p6("oeb2", old_edge_belief2[0], old_edge_belief2[1]);
                     //     p3("ceb1", cur_edge_belief1[0]);
                     //     p6("ceb2", cur_edge_belief2[0], cur_edge_belief2[1]);
+                    //     p3("onb1", old_node_belief1[0]);
+                    //     p6("onb2", old_node_belief2[0], old_node_belief2[1]);
                     //     printf("\n");
 
                     //     printf("row=np.zeros((3,6));\n");
@@ -553,11 +555,15 @@ struct EdgeHolder {
                     //     p4("v1_m",cur_edge_belief2[0],0); p4("",cur_edge_belief2[1],1);
                     // }
 
-
                     auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
                     auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
+                    
+                    // node normalization is needed for avoid NaN
+                    // FIXME investigate edge scalings that could obviate this
+                    // FIXME investigate scaling the edges only every N somethings to reduce expense
+                    cur_node_belief1 *= rcp(sum(cur_node_belief1).sum_in_all_entries());
+                    cur_node_belief2 *= rcp(sum(cur_node_belief2).sum_in_all_entries());
 
-                    // I might be able to do the normalization only every few steps if I wanted
                     store4vec<w1>(cur_belief.x + ne*4*ws + 0,    cur_edge_belief1);
                     store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1, cur_edge_belief2);
                     store4vec<w1>(vec_cur_node_belief1 + i1,     cur_node_belief1);
