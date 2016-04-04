@@ -627,8 +627,8 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_e
         # support finite differencing for potential derivative
         eps = 1e-2
         grp._v_attrs.sheet_eps = eps
-        #create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
-        #create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
+        create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
+        create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
 
     if helical_energy_shift is not None:
         assert len(rama_pot.shape) == 3
@@ -865,6 +865,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
             if restype == 'GLY' or restype == 'ALA':
                 fix_state = 0
             else:
+                if np.isnan(chi1): continue
                 # determine states that have the right restype and compatible chi1
                 chi1_state = compute_chi1_state(np.array([chi1]))[0]
                 restype_admissible = find_restype == restype_num[fasta[int(residue)]]
@@ -875,6 +876,7 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
                 if len(admissible_state)==1:  # handle short residues (like VAL)
                     fix_state = admissible_state[0]
                 else:
+                    if np.isnan(chi2): continue
                     # now find the closest chi2 among those states and read off the state index
                     chi2_dist = (admissible_chi2-chi2)%(2*np.pi)
                     chi2_dist[chi2_dist>np.pi] -= 2*np.pi  # find closest periodic image

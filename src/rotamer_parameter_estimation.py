@@ -172,8 +172,10 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
         energy[0] += fix .energy(pos)
         energy[1] += free.energy(pos)
 
-        if np.isnan(energy[0]): raise RuntimeError('NaN energy for %s'%fix)
-        if np.isnan(energy[1]): raise RuntimeError('NaN energy for %s'%free)
+        if np.isnan(energy[0]): raise RuntimeError('NaN energy for %s %s'%(fix,
+            [np.any(np.isnan(x)) for x in param_matrices]))
+        if np.isnan(energy[1]): raise RuntimeError('NaN energy for %s %s'%(free,
+            [x for x in param_matrices]))
 
         this_deriv = [(fix .get_param_deriv(d[0].shape, nm),
                        free.get_param_deriv(d[0].shape, nm)) for d,nm in zip(deriv,node_names)]
@@ -186,35 +188,25 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
 
 
 class UpsideEnergyGap(theano.Op):
-    def __init__(self, protein_data, node_names, count_names):
+    def __init__(self, protein_data, node_names):
         self.protein_data = [None,None]
         self.change_protein_data(protein_data)   # (total_n_res, pos_fix_free)
         self.node_names   = node_names  # should be OrderedDict
-        self.count_names  = list(count_names)
 
     def make_node(self, *param):
         assert len(param) == len(self.node_names)
         return theano.Apply(self, [T.as_tensor_variable(x) for x in param],
-                                  [T.dvector()] + [T.dmatrix() for nm in self.count_names])
+                                  [T.dvector()])
 
     def perform(self, node, inputs_storage, output_storage):
         total_n_res, pos_fix_free = self.protein_data
         energy, deriv = bind_param_and_evaluate(pos_fix_free, list(self.node_names), inputs_storage)
         output_storage[0][0] = (energy/total_n_res).astype('f8')
 
-        if self.count_names:
-            counts = [np.zeros(self.node_names[nm][:-1]) for nm in self.count_names]
-            for pos,fix,free in pos_fix_free:
-                for i,nm in enumerate(self.count_names):
-                    counts[i] += fix.get_value_by_name(counts[i].shape, nm, 'count_edges_by_type')
-            for i,c in enumerate(counts):
-                output_storage[i+1][0] = c*(1./total_n_res)
-
     def grad(self, inputs, output_gradients):
         grad_func = UpsideEnergyGapGrad(self.protein_data, self.node_names)  # grad will have linked data
         gf = grad_func(*inputs)
         if len(inputs) == 1: gf = [gf]  # single inputs cause problems
-        # note that we implicitly treat the derivative of the count matrices as 0
         return [T.tensordot(output_gradients[0], x, axes=(0,0)) for x in gf]
 
     def change_protein_data(self, new_protein_data):
@@ -402,3 +394,14 @@ class UpsideTrajEnergyGrad(theano.Op):
 
         for i in range(len(output_storage)):
             output_storage[i][0] = deriv[i]
+
+def low_rank_approximation(m, rank):
+    m = m.astype('f8')
+    u,s,vh = np.linalg.svd(m, full_matrices=True)
+    u [:,rank:] = 0.
+    s [rank:]   = 0.
+    vh[rank:,:] = 0.
+    m_approx = np.dot(u,s[:,None]*vh)
+    return m_approx
+
+
