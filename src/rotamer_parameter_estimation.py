@@ -14,9 +14,12 @@ import collections
 n_fix = 3
 n_knot_angular = 15
 n_angular = 2*n_knot_angular
-n_restype = 24
+# n_restype = 24
+n_restype = 20
 n_knot_sc = 16
 n_knot_hb = 12
+hb_dr = 0.5
+sc_dr = 0.5
 
 param_shapes = collections.OrderedDict()
 param_shapes['rotamer']=(n_restype,n_restype,2*n_knot_angular+2*n_knot_sc)
@@ -117,8 +120,8 @@ def pack_param(*args):
     # solve the resulting equations so I don't have to work out the formula
     results = opt.minimize(
             (lambda x: discrep(x, *args)),
-            1e-4+np.zeros(n_param),
-            method = 'L-BFGS-B',
+            0.5+np.zeros(n_param),
+            method = 'L-BFGS-B', options=dict(maxiter=10000),
             jac = (lambda x: d_discrep(x, *args)))
 
     if not (discrep(results.x, *args) < 1e-4):
