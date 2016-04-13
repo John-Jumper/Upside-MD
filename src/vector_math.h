@@ -647,7 +647,7 @@ inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
     S y = x*sharpness;
     Vec<2,S> z = make_vec2(S(0.25f)*(y+S(2.f))*(y-S(1.f))*(y-one<S>()), (sharpness*S(0.75f))*(sqr(y)-one<S>()));
 
-    auto too_big   = y>S( 1.f);
+    auto too_big   = S( 1.f)<y;
     auto too_small = y<S(-1.f);
 
     // apply cutoffs

@@ -23,8 +23,8 @@ default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 n_bit_rotamer = 4
 
 def vmag(x):
-    assert x.shape[-1]
-    return np.sqrt(x[:,0]**2+x[:,1]**2+x[:,2]**2)
+    assert x.shape[-1] == 3
+    return np.sqrt(x[...,0]**2+x[...,1]**2+x[...,2]**2)
 
 def create_array(grp, nm, obj=None):
     return t.create_earray(grp, nm, obj=obj, filters=default_filter)
@@ -171,63 +171,74 @@ def write_infer_H_O(fasta, excluded_residues):
 
 
 def write_environment(fasta, environment_library):
-    cgrp = t.create_group(potential, 'environment_vector')
-    cgrp._v_attrs.arguments = np.array(['placement_cb_only','placement4_weighted'])
-    # cgrp._v_attrs.arguments = np.array(['placement_point_vector','placement4_weighted'])
+    with tb.open_file(environment_library) as lib:
+        energies = lib.root.energies[:]
+        restype_order = dict([(str(x),i) for i,x in enumerate(lib.root.restype_order[:])])
 
-    with tb.open_file(environment_library) as data:
-         restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
-         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
+        coverage_transform = lib.root.coverage_transform_bspline[:]
+        coverage_transform_offset = lib.root.coverage_transform_bspline._v_attrs.offset
+        coverage_transform_inv_dx = lib.root.coverage_transform_bspline._v_attrs.inv_dx
 
-    grp = t.create_group(potential, 'placement_cb_only')
-    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord',])
-    create_array(grp, 'rama_residue',    np.arange(len(fasta)))
-    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
-    create_array(grp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+        interaction_param = np.array([
+            lib.root._v_attrs.r0,
+            lib.root._v_attrs.r_sharpness,
+            lib.root._v_attrs.dot0,
+            lib.root._v_attrs.dot_sharpness])[None,None,:]
 
-    CB_placement_pos_and_dir = np.zeros((1,36,36,6), dtype='f4')
-    CB_placement_pos_and_dir[:] = [-0.02366877,  1.51042092,  1.20528042, 
-                                   -0.00227792,  0.61587566, 0.78784013]
+    # Place CB
+    pgrp = t.create_group(potential, 'placement_fixed_point_vector_only_CB')
+    pgrp._v_attrs.arguments = np.array(['affine_alignment'])
+    ref_pos = np.zeros((4,3))
+    ref_pos[0] = (-1.19280531, -0.83127186,  0.)        # N
+    ref_pos[1] = ( 0.,          0.,          0.)        # CA
+    ref_pos[2] = ( 1.25222632, -0.87268266,  0.)        # C
+    ref_pos[3] = ( 0.,          0.94375626,  1.2068012) # CB
+    ref_pos -= ref_pos.mean(axis=0,keepdims=1)
+    
+    placement_data = np.zeros((1,6))
+    placement_data[0,0:3] = ref_pos[3]
+    placement_data[0,3:6] = (ref_pos[3]-ref_pos[2])/vmag(ref_pos[3]-ref_pos[2])
 
-    create_array(grp, 'placement_data',  CB_placement_pos_and_dir)
+    create_array(pgrp, 'affine_residue',  np.arange(len(fasta)))
+    create_array(pgrp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+    create_array(pgrp, 'placement_data',  placement_data)
 
-    # group1 is the source sidechain rotamer
+    # Bring position and probability together for the side chains
+    wgrp = t.create_group(potential, 'weighted_pos')
+    wgrp._v_attrs.arguments = np.array(['placement_point_vector', 'placement_scalar'])
+    g_sc_pl = t.root.input.potential.placement_point_vector
+    n_sc = g_sc_pl.affine_residue.shape[0]
+    create_array(wgrp, 'index_pos',   np.arange(n_sc))
+    create_array(wgrp, 'index_weight', np.arange(n_sc))
+
+    # Compute SC coverage of the CB
+    cgrp = t.create_group(potential, 'environment_coverage')
+    cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_only_CB','weighted_pos'])
+
+    # group1 is the source CB
     create_array(cgrp, 'index1', np.arange(len(fasta)))
-    create_array(cgrp, 'type1',  np.array([restype_order[s] for s in fasta]))
+    create_array(cgrp, 'type1',  np.zeros (len(fasta)))  # only a single type of CB
     create_array(cgrp, 'id1',    np.arange(len(fasta)))
 
-    # # group1 is the source sidechain rotamer
-    # rot_grp = t.root.input.potential.placement_point_vector
-    # create_array(cgrp, 'index1', np.arange(len(rot_grp.beadtype_seq[:])))
-    # create_array(cgrp, 'type1',  np.array([restype_order[s] for s in rot_grp.beadtype_seq[:]]))
-    # create_array(cgrp, 'id1',    rot_grp.affine_residue[:])
-
     # group 2 is the weighted points to interact with
-    w_grp = t.root.input.potential.placement4_weighted
-    create_array(cgrp, 'index2', np.arange(len(w_grp.beadtype_seq[:])))
-    create_array(cgrp, 'type2',  np.array([restype_order[s] for s in w_grp.beadtype_seq[:]]))
-    create_array(cgrp, 'id2',    w_grp.affine_residue[:])
+    create_array(cgrp, 'index2', np.arange(n_sc))
+    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types
+    create_array(cgrp, 'id2',    g_sc_pl.affine_residue[:])
 
-    # egrp = t.create_group(potential, 'environment_energy')
-    # egrp._v_attrs.arguments = np.array(['environment_vector'])
+    create_array(cgrp, 'interaction_param', interaction_param)
 
-    # with tb.open_file(environment_library) as data:
-    #      restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
-    #      create_array(egrp, "linear_weight0", obj=data.root.linear_weight0[:])
-    #      create_array(egrp, "linear_shift0",  obj=data.root.linear_shift0 [:])
-    #      create_array(egrp, "linear_weight1", obj=data.root.linear_weight1[:])
-    #      create_array(egrp, "linear_shift1",  obj=data.root.linear_shift1 [:])
-    # create_array(egrp, 'output_restype',  np.array([restype_order[s] for s in rot_grp.beadtype_seq[:]]))
+    # Transform coverage to [0,1] scale (1 indicates the most buried)
+    tgrp = t.create_group(potential, 'uniform_transform_environment')
+    tgrp._v_attrs.arguments = np.array(['environment_coverage'])
+    create_array(tgrp, 'bspline_coeff', coverage_transform)
+    tgrp.bspline_coeff._v_attrs.spline_offset = coverage_transform_offset
+    tgrp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_inv_dx
 
-    egrp = t.create_group(potential, 'simple_environment')
-    egrp._v_attrs.arguments = np.array(['environment_vector'])
-
-    with tb.open_file(environment_library) as data:
-         restype_order = dict([(str(x),i) for i,x in enumerate(data.root.restype_order[:])])
-         restype_coeff = data.root.restype_coeff[:]
-
-    coeff = np.array([restype_coeff[restype_order[s]] for s in fasta])
-    create_array(egrp, 'coefficients', obj=coeff);
+    # Linearly couple the transform to energies
+    egrp = t.create_group(potential, 'linear_coupling_environment')
+    egrp._v_attrs.arguments = np.array(['uniform_transform_environment'])
+    create_array(egrp, 'couplings', energies)
+    create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library):
@@ -791,41 +802,6 @@ def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
         create_array(g, 'interaction_param', obj=params.root.interaction_param[:])
 
 
-def write_weighted_placement(fasta, placement_library):
-    assert not 'Weighted placement is currently broken because it does not handle bead types'
-    with tb.open_file(placement_library) as data:
-        restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
-        placement_pos  = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
-        placement_prob = data.root.rotamer_prob  [:].transpose((2,0,1))[...,None]
-        start_stop = data.root.rotamer_start_stop[:]
-
-    # truncate to only take the first point from the pos
-    placement_data = np.concatenate((placement_pos[...,:3], placement_prob), axis=-1)
-
-    rama_residue = []
-    affine_residue = []
-    layer_index = []
-    beadtype_seq = []
-
-    for rnum,aa in enumerate(fasta):
-        restype = restype_num[aa]
-        start,stop = start_stop[restype]
-        n_rot = stop-start
-
-        rama_residue  .extend([rnum]*n_rot)
-        affine_residue.extend([rnum]*n_rot)
-        layer_index   .extend(np.arange(start,stop))
-        beadtype_seq   .extend([aa]*n_rot)
-
-    grp = t.create_group(potential, 'placement4_weighted')
-    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
-    create_array(grp, 'rama_residue',    rama_residue)
-    create_array(grp, 'affine_residue',  affine_residue)
-    create_array(grp, 'layer_index',     layer_index)
-    create_array(grp, 'placement_data',  placement_data)
-    create_array(grp, 'beadtype_seq',     beadtype_seq)
-
-
 def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     def compute_chi1_state(angles):
         chi1_state = np.ones(angles.shape, dtype='i')
@@ -1256,15 +1232,14 @@ def main():
 
     if args.rotamer_interaction:
         if args.rotamer_placement is None:
-            parser.error('--rotamer_placement is required, based on other options.')
+            parser.error('--rotamer-placement is required, based on other options.')
         require_rama = True
         require_affine = True
         write_rotamer_placement(fasta_seq, args.rotamer_placement,args.fix_rotamer)
 
     if args.environment_potential:
         if args.rotamer_placement is None:
-            parser.error('--rotamer_placement is required, based on other options.')
-        write_weighted_placement(fasta_seq, args.rotamer_placement)
+            parser.error('--rotamer-placement is required, based on other options.')
         write_environment(fasta_seq, args.environment_potential)
 
     if args.hbond_energy:
