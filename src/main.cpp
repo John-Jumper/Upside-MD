@@ -6,6 +6,7 @@
 #include "thermostat.h"
 #include <chrono>
 #include <algorithm>
+#include <set>
 #include "random.h"
 #include "state_logger.h"
 
@@ -99,7 +100,19 @@ struct ReplicaExchange {
         }
 
         for(auto& ss: swap_sets) {
+            set<int> systems_in_set;
             for(auto& sw: ss) {
+                if(systems_in_set.count(sw.sys1) ||
+                   systems_in_set.count(sw.sys2) ||
+                   sw.sys1==sw.sys2) {
+                    throw string("Overlapping indices in swap set.  "
+                            "No replica index can appear more than once in a swap set.  "
+                            "You probably (but maybe not; I didn't look that closely) need more "
+                            "swap sets to get non-overlapping pairs.");
+                }
+                systems_in_set.insert(sw.sys1);
+                systems_in_set.insert(sw.sys2);
+
                 participating_swaps[sw.sys1].push_back(&sw);
                 participating_swaps[sw.sys2].push_back(&sw);
             }
@@ -540,7 +553,9 @@ try {
                 System& sys = systems[ns];
                 for(bool do_break=false; (!do_break) && (sys.round_num<n_round); ++sys.round_num) {
                     int nr = sys.round_num;
-                    if(pivot_interval && !(nr%pivot_interval)) 
+                    // don't pivot at t=0 so that a partially strained system may relax before the
+                    // first pivot
+                    if(nr && pivot_interval && !(nr%pivot_interval)) 
                         sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
@@ -565,6 +580,7 @@ try {
                                 get_n_hbond(sys.engine), Rg, sys.engine.potential);
                         fflush(stdout);
                     }
+
                     if(!(nr%thermostat_interval)) {
                         // Handle simulated annealing if applicable
                         if(anneal_factor != 1.)
