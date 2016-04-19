@@ -172,12 +172,18 @@ def write_infer_H_O(fasta, excluded_residues):
 
 def write_environment(fasta, environment_library):
     with tb.open_file(environment_library) as lib:
-        energies = lib.root.energies[:]
+        energies    = lib.root.energies[:]
+        energies_hb = lib.root.energies_hb[:]
         restype_order = dict([(str(x),i) for i,x in enumerate(lib.root.restype_order[:])])
+        # FIXME I should also read hb_order
 
         coverage_transform = lib.root.coverage_transform_bspline[:]
         coverage_transform_offset = lib.root.coverage_transform_bspline._v_attrs.offset
         coverage_transform_inv_dx = lib.root.coverage_transform_bspline._v_attrs.inv_dx
+
+        coverage_transform_hb = lib.root.coverage_transform_bspline_hb[:]
+        coverage_transform_hb_offset = lib.root.coverage_transform_bspline_hb._v_attrs.offset
+        coverage_transform_hb_inv_dx = lib.root.coverage_transform_bspline_hb._v_attrs.inv_dx
 
         interaction_param = np.array([
             lib.root._v_attrs.r0,
@@ -217,8 +223,28 @@ def write_environment(fasta, environment_library):
 
     # group1 is the source CB
     create_array(cgrp, 'index1', np.arange(len(fasta)))
-    create_array(cgrp, 'type1',  np.zeros (len(fasta)))  # only a single type of CB
+    create_array(cgrp, 'type1',  np.zeros (len(fasta),dtype='i'))  # only a single type of CB
     create_array(cgrp, 'id1',    np.arange(len(fasta)))
+
+    # group 2 is the weighted points to interact with
+    create_array(cgrp, 'index2', np.arange(n_sc))
+    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types
+    create_array(cgrp, 'id2',    g_sc_pl.affine_residue[:])
+
+    create_array(cgrp, 'interaction_param', interaction_param)
+
+    # Compute SC coverage of the HBond partners
+    cgrp = t.create_group(potential, 'environment_coverage_hb')
+    cgrp._v_attrs.arguments = np.array(['protein_hbond','weighted_pos'])
+
+    # group1 is the source HBond partner
+    infer_group = t.get_node('/input/potential/infer_H_O')
+    n_donor    = infer_group.donors   .id.shape[0]
+    n_acceptor = infer_group.acceptors.id.shape[0]
+    n_hb = n_donor+n_acceptor
+    create_array(cgrp, 'index1', np.arange(n_hb))
+    create_array(cgrp, 'type1',  np.zeros (n_hb,dtype='i'))  # only need a single type for this
+    create_array(cgrp, 'id1',    t.root.input.potential.hbond_coverage.id1[:])
 
     # group 2 is the weighted points to interact with
     create_array(cgrp, 'index2', np.arange(n_sc))
@@ -234,14 +260,30 @@ def write_environment(fasta, environment_library):
     tgrp.bspline_coeff._v_attrs.spline_offset = coverage_transform_offset
     tgrp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_inv_dx
 
+    # Transform coverage to [0,1] scale (1 indicates the most buried)
+    t2grp = t.create_group(potential, 'uniform_transform_environment_hb')
+    t2grp._v_attrs.arguments = np.array(['environment_coverage_hb'])
+    create_array(t2grp, 'bspline_coeff', coverage_transform_hb)
+    t2grp.bspline_coeff._v_attrs.spline_offset = coverage_transform_hb_offset
+    t2grp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_hb_inv_dx
+
     # Linearly couple the transform to energies
-    egrp = t.create_group(potential, 'linear_coupling_environment')
+    egrp = t.create_group(potential, 'linear_coupling_uniform_environment')
     egrp._v_attrs.arguments = np.array(['uniform_transform_environment'])
     create_array(egrp, 'couplings', energies)
     create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
 
+    # Linearly couple the transform to energies
+    e2grp = t.create_group(potential, 'linear_coupling_with_inactivation_environment_hb')
+    e2grp._v_attrs.arguments = np.array(['uniform_transform_environment_hb', 'protein_hbond'])
+    create_array(e2grp, 'couplings', energies_hb)
+    create_array(e2grp, 'coupling_types', t.root.input.potential.hbond_coverage.type1[:])
+    e2grp._v_attrs.inactivation_dim = 6
 
-def write_count_hbond(fasta, hbond_energy, coverage_library):
+
+
+
+def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
     n_res = len(fasta)
 
     infer_group = t.get_node('/input/potential/infer_H_O')
@@ -263,11 +305,11 @@ def write_count_hbond(fasta, hbond_energy, coverage_library):
     create_array(igrp, 'id2',    infer_group.acceptors.residue[:])
 
     # parameters are inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
-    # FIXME currently changing these has no effect
     create_array(igrp, 'interaction_param', np.array([[
-        [1.4,   1./0.10,
-         2.5,   1./0.125,
-         0.682, 1./0.05]]]))
+        [(0.5   if loose_hbond else 1.4  ), 1./0.10,
+         (3.1   if loose_hbond else 2.5  ), 1./0.125,
+         (0.182 if loose_hbond else 0.682), 1./0.05,
+         0.,   0.]]]))
 
     cgrp = t.create_group(potential, 'hbond_coverage')
     cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_point_vector'])
@@ -1110,6 +1152,10 @@ def main():
             help='energy for forming a protein-protein hydrogen bond.  Default is no HBond energy.')
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors') 
+    parser.add_argument('--loose-hbond-criteria', default=False, action='store_true',
+            help='Use far more permissive angles and distances to judge HBonding.  Do not use for simulation. '+
+            'This is only useful for static backbone training when crystal or NMR structures have poor '+
+            'hbond geometry.') 
     parser.add_argument('--helix-energy-perturbation', default=None,
             help='hbond energy perturbation file for helices')
     parser.add_argument('--z-flat-bottom', default='', 
@@ -1237,14 +1283,14 @@ def main():
         require_affine = True
         write_rotamer_placement(fasta_seq, args.rotamer_placement,args.fix_rotamer)
 
+    if args.hbond_energy:
+        write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
+        write_count_hbond(fasta_seq, args.hbond_energy, args.rotamer_interaction, args.loose_hbond_criteria)
+
     if args.environment_potential:
         if args.rotamer_placement is None:
             parser.error('--rotamer-placement is required, based on other options.')
         write_environment(fasta_seq, args.environment_potential)
-
-    if args.hbond_energy:
-        write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
-        write_count_hbond(fasta_seq, args.hbond_energy, args.rotamer_interaction)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):

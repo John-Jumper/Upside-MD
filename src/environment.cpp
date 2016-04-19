@@ -238,19 +238,45 @@ struct LinearCoupling : public PotentialNode {
     CoordNode& input;
     vector<float> couplings;      // length n_restype
     vector<int>   coupling_types; // length input n_elem
+    CoordNode* inactivation;  // 0 to 1 variable to inactivate energy
+    int inactivation_dim;
+
+    LinearCoupling(hid_t grp, CoordNode& input_, CoordNode& inactivation_):
+        LinearCoupling(grp, &input_, &inactivation_) {}
 
     LinearCoupling(hid_t grp, CoordNode& input_):
+        LinearCoupling(grp, &input_, nullptr) {}
+
+    LinearCoupling(hid_t grp, CoordNode* input_, CoordNode* inactivation_):
         PotentialNode(),
-        input(input_),
+        input(*input_),
         couplings(get_dset_size(1,grp,"couplings")[0]),
-        coupling_types(input.n_elem)
+        coupling_types(input.n_elem),
+        inactivation(inactivation_),
+        inactivation_dim(inactivation ? read_attribute<int>(grp, ".", "inactivation_dim") : 0)
     {
         check_elem_width(input, 1);  // could be generalized
+
+        if(inactivation) {
+            if(input.n_elem != inactivation->n_elem)
+                throw string("Inactivation size must match input size");
+            check_elem_width_lower_bound(*inactivation, inactivation_dim+1);
+        }
 
         check_size(grp, "coupling_types", input.n_elem);
         traverse_dset<1,float>(grp,"couplings",[&](size_t nt, float x){couplings[nt]=x;});
         traverse_dset<1,int>(grp,"coupling_types",[&](size_t ne, int x){coupling_types[ne]=x;});
         for(int i: coupling_types) if(i<0 || i>=int(couplings.size())) throw string("invalid coupling type");
+
+        if(logging(LOG_DETAILED)) {
+            default_logger->add_logger<float>(
+                    (inactivation ? "linear_coupling_with_inactivation" : "linear_coupling_uniform"), 
+                    {input.n_elem}, [&](float* buffer) {
+                    for(int ne: range(input.n_elem)) {
+                        float c = couplings[coupling_types[ne]];
+                        buffer[ne] = c*input.output(0,ne);
+                    }});
+        }
     }
 
     virtual void compute_value(ComputeMode mode) override {
@@ -259,8 +285,11 @@ struct LinearCoupling : public PotentialNode {
         float pot = 0.f;
         for(int ne=0; ne<n_elem; ++ne) {
             float c = couplings[coupling_types[ne]];
-            pot += c*input.output(0,ne);
-            input.sens(0,ne) += c;
+            float act = inactivation ? sqr(1.f-inactivation->output(inactivation_dim,ne)) : 1.f; 
+            float val = input.output(0,ne);
+            pot += c * val * act;
+            input.sens(0,ne) += c*act;
+            if(inactivation) inactivation->sens(inactivation_dim,ne) -= c*val;
         }
         potential = pot;
     }
@@ -275,7 +304,8 @@ struct LinearCoupling : public PotentialNode {
 
         int n_elem = input.n_elem;
         for(int ne=0; ne<n_elem; ++ne) {
-            deriv[coupling_types[ne]] += input.output(0,ne);
+            float act = inactivation ? 1.f - inactivation->output(inactivation_dim,ne) : 1.f; 
+            deriv[coupling_types[ne]] += input.output(0,ne) * act;
         }
         return deriv;
     }
@@ -287,6 +317,84 @@ struct LinearCoupling : public PotentialNode {
     }
 #endif
 };
-static RegisterNodeType<LinearCoupling,1> linear_coupling_node("linear_coupling");
+static RegisterNodeType<LinearCoupling,1> linear_coupling_node1("linear_coupling_uniform");
+static RegisterNodeType<LinearCoupling,2> linear_coupling_node2("linear_coupling_with_inactivation");
+
+
+struct NonlinearCoupling : public PotentialNode {
+    CoordNode& input;
+    int n_restype, n_coeff;
+    float spline_offset, spline_inv_dx;
+    vector<float> coeff;      // length n_restype*n_coeff
+    vector<int>   coupling_types; // length input n_elem
+
+    NonlinearCoupling(hid_t grp, CoordNode& input_):
+        PotentialNode(),
+        input(input_),
+        n_restype(get_dset_size(2,grp,"coeff")[0]),
+        n_coeff  (get_dset_size(2,grp,"coeff")[1]),
+        spline_offset(read_attribute<float>(grp,"coeff","spline_offset")),
+        spline_inv_dx(read_attribute<float>(grp,"coeff","spline_inv_dx")),
+        coeff(n_restype*n_coeff),
+        coupling_types(input.n_elem)
+    {
+        check_elem_width(input, 1);  // could be generalized
+
+        check_size(grp, "coupling_types", input.n_elem);
+        traverse_dset<2,float>(grp,"coeff",[&](size_t nt, size_t nc, float x){coeff[nt*n_coeff+nc]=x;});
+        traverse_dset<1,int>(grp,"coupling_types",[&](size_t ne, int x){coupling_types[ne]=x;});
+        for(int i: coupling_types) if(i<0 || i>=n_restype) throw string("invalid coupling type");
+
+        if(logging(LOG_DETAILED)) {
+            default_logger->add_logger<float>("nonlinear_coupling", {input.n_elem}, [&](float* buffer) {
+                    for(int ne: range(input.n_elem)) {
+                        auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
+                        buffer[ne] = clamped_deBoor_value_and_deriv(
+                                coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff)[0];
+                    }});
+        }
+    }
+
+    virtual void compute_value(ComputeMode mode) override {
+        Timer timer("nonlinear_coupling");
+        int n_elem = input.n_elem;
+        float pot = 0.f;
+        for(int ne=0; ne<n_elem; ++ne) {
+            auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
+            auto v = clamped_deBoor_value_and_deriv(coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff);
+            pot              += v[0];
+            input.sens(0,ne) += v[1]*spline_inv_dx;
+        }
+        potential = pot;
+    }
+
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param() const override {
+        return coeff;
+    }
+        
+    virtual std::vector<float> get_param_deriv() const override {
+        vector<float> deriv(coeff.size(), 0.f);
+
+        int n_elem = input.n_elem;
+        for(int ne=0; ne<n_elem; ++ne) {
+            int starting_bin;
+            float result[4];
+            auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
+            clamped_deBoor_coeff_deriv(&starting_bin, result,
+                    coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff);
+            for(int i: range(4)) deriv[coupling_types[ne]*n_coeff+starting_bin+i] += result[i];
+        }
+        return deriv;
+    }
+
+    virtual void set_param(const std::vector<float>& new_param) override {
+        if(new_param.size() != coeff.size()) 
+            throw string("attempting to change size of coeff vector on set_param");
+        copy(begin(new_param),end(new_param), begin(coeff));
+    }
+#endif
+};
+static RegisterNodeType<NonlinearCoupling,1> nonlinear_coupling_node("nonlinear_coupling");
 
 }

@@ -15,6 +15,7 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, 
                   rama_pot=params_dir+'rama_libraries.h5',
                   fix_rotamer = '',
+                  environment=None,
                   torus_dbn = None,
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5'):
@@ -50,6 +51,9 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         args.append('--rotamer-interaction=%s'%rotamer_interaction_param)
     if fix_rotamer:
         args.append('--fix-rotamer=%s'%fix_rotamer)
+
+    if environment:
+        args.append('--environment=%s'%environment)
     
     if sidechain:
         args.append('--sidechain-radial=%s'%(params_dir+'radial-MJ-1996.h5'))

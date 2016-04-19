@@ -126,13 +126,11 @@ static RegisterNodeType<Infer_H_O,1> infer_node("infer_H_O");
 #define angular_cutoff (0.f)
 
 template <typename S>
-Vec<2,S> hbond_radial_potential(S input)
+Vec<2,S> hbond_radial_potential(const S& input,
+        const S& inner_barrier, const S& inv_inner_width,
+        const S& outer_barrier, const S& inv_outer_width
+        )
 {
-    const S outer_barrier    = S(2.5f);
-    const S inner_barrier    = S(1.4f);   // barrier to prevent H-O overlap
-    const S inv_outer_width  = S(1.f/0.125f);
-    const S inv_inner_width  = S(1.f/0.10f);
-
     Vec<2,S> outer_sigmoid = sigmoid((outer_barrier-input)*inv_outer_width);
     Vec<2,S> inner_sigmoid = sigmoid((input-inner_barrier)*inv_inner_width);
 
@@ -143,56 +141,11 @@ Vec<2,S> hbond_radial_potential(S input)
 
 
 template <typename S>
-Vec<2,S> hbond_angular_potential(S dotp)
+Vec<2,S> hbond_angular_potential(const S& dotp, const S& wall_dp, const S& inv_dp_width)
 {
-    const S wall_dp = S(0.682f);  // half-height is at 47 degrees
-    const S inv_dp_width = S(1.f/0.05f);
-
     Vec<2,S> v = sigmoid((dotp-wall_dp)*inv_dp_width);
     return make_vec2(v.x(), inv_dp_width*v.y());
 }
-
-
-template <typename S>
-S hbond_score(
-        Vec<3,S>   H, Vec<3,S>   O, Vec<3,S>   rHN, Vec<3,S>   rOC,
-        Vec<3,S>& dH, Vec<3,S>& dO, Vec<3,S>& drHN, Vec<3,S>& drOC)
-{
-    auto HO = H-O;
-
-    auto magHO2 = mag2(HO) + S(1e-6f); // a bit of paranoia to avoid division by zero later
-    auto invHOmag = rsqrt(magHO2);
-    auto magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
-
-    auto rHO = HO*invHOmag;
-
-    auto dotHOC =  dot(rHO,rOC);
-    auto dotOHN = -dot(rHO,rHN);
-
-    auto within_angular_cutoff = (S(angular_cutoff) < dotHOC) & (S(angular_cutoff) < dotOHN);
-    if(none(within_angular_cutoff)) {
-        dH=dO=drHN=drOC=make_zero<3,S>();
-        return zero<S>();
-    }
-
-    auto radial   = hbond_radial_potential (magHO );  // x has val, y has deriv
-    auto angular1 = hbond_angular_potential(dotHOC);
-    auto angular2 = hbond_angular_potential(dotOHN);
-
-    auto val =  radial.x() * angular1.x() * angular2.x();
-    auto c0  =  radial.y() * angular1.x() * angular2.x();
-    auto c1  =  radial.x() * angular1.y() * angular2.x();
-    auto c2  = -radial.x() * angular1.x() * angular2.y();
-
-    drOC = c1*rHO;
-    drHN = c2*rHO;
-
-    dH = c0*rHO + (c1*invHOmag)*(rOC-dotHOC*rHO) + (c2*invHOmag)*(rHN+dotOHN*rHO);
-    dO = -dH;
-
-    return val;
-}
-
 
 
 namespace {
@@ -200,7 +153,7 @@ namespace {
         // inner_barrier, inner_scale, outer_barrier, outer_scale, wall_dp, inv_dp_width
         // first group is donors; second group is acceptors
         constexpr static const bool symmetric=false;
-        constexpr static const int n_param=6, n_dim1=6, n_dim2=6, simd_width=1;
+        constexpr static const int n_param=8, n_dim1=6, n_dim2=6, simd_width=1;
 
         static float cutoff(const float* p) {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
@@ -213,10 +166,58 @@ namespace {
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
                 const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
             auto one = Float4(1.f);
-            Vec<3,Float4> dH,dO,drHN,drOC;
 
-            auto hb = hbond_score(extract<0,3>(x1), extract<0,3>(x2), extract<3,6>(x1), extract<3,6>(x2),
-                                   dH,               dO,               drHN,             drOC);
+            auto  H = extract<0,3>(x1);
+            auto  O = extract<0,3>(x2);
+            auto  rHN = extract<3,6>(x1);
+            auto  rOC = extract<3,6>(x2);
+
+            auto HO = H-O;
+
+            auto magHO2 = mag2(HO) + Float4(1e-6f); // a bit of paranoia to avoid division by zero later
+            auto invHOmag = rsqrt(magHO2);
+            auto magHO    = magHO2 * invHOmag;  // avoid a sqrtf later
+
+            auto rHO = HO*invHOmag;
+
+            auto dotHOC =  dot(rHO,rOC);
+            auto dotOHN = -dot(rHO,rHN);
+
+            Vec<3,Float4> dH,dO,drHN,drOC;
+            Float4 hb;
+            auto within_angular_cutoff = (Float4(angular_cutoff) < dotHOC) & (Float4(angular_cutoff) < dotOHN);
+            if(none(within_angular_cutoff)) {
+                dH=dO=drHN=drOC=make_zero<3,Float4>();
+                hb = zero<Float4>();
+            } else {
+                // FIXME I have to load up 4 of these rather pointlessly since they will all be the same
+                // FIXME I don't know if I guarantee alignment on parameters
+                // I expand to 8 to be sure
+                auto p0 = Float4(p[0]);
+                auto p1 = Float4(p[1]);
+                auto p2 = Float4(p[2]);
+                auto p3 = Float4(p[3]);   transpose4(p0,p1,p2,p3);
+                auto p4 = Float4(p[0]+4);
+                auto p5 = Float4(p[1]+4);
+                auto p6 = Float4(p[2]+4);
+                auto p7 = Float4(p[3]+4); transpose4(p4,p5,p6,p7);
+
+                auto radial   = hbond_radial_potential (magHO , p0, p1, p2, p3);  // x has val, y has deriv
+                auto angular1 = hbond_angular_potential(dotHOC, p4, p5);
+                auto angular2 = hbond_angular_potential(dotOHN, p4, p5);
+
+                hb      =  radial.x() * angular1.x() * angular2.x();
+                auto c0 =  radial.y() * angular1.x() * angular2.x();
+                auto c1 =  radial.x() * angular1.y() * angular2.x();
+                auto c2 = -radial.x() * angular1.x() * angular2.y();
+
+                drOC = c1*rHO;
+                drHN = c2*rHO;
+
+                dH = c0*rHO + (c1*invHOmag)*(rOC-dotHOC*rHO) + (c2*invHOmag)*(rHN+dotOHN*rHO);
+                dO = -dH;
+            }
+
             auto hb_log = ternary(one<=hb, Float4(100.f), -logf(one-hb));  // work in multiplicative space
 
             auto deriv_prefactor = min(rcp(one-hb),Float4(1e5f)); // FIXME this is a mess
