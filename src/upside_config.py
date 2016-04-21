@@ -173,17 +173,10 @@ def write_infer_H_O(fasta, excluded_residues):
 def write_environment(fasta, environment_library):
     with tb.open_file(environment_library) as lib:
         energies    = lib.root.energies[:]
-        energies_hb = lib.root.energies_hb[:]
+        energies_x_offset = lib.root.energies._v_attrs.offset
+        energies_x_inv_dx = lib.root.energies._v_attrs.inv_dx
+
         restype_order = dict([(str(x),i) for i,x in enumerate(lib.root.restype_order[:])])
-        # FIXME I should also read hb_order
-
-        coverage_transform = lib.root.coverage_transform_bspline[:]
-        coverage_transform_offset = lib.root.coverage_transform_bspline._v_attrs.offset
-        coverage_transform_inv_dx = lib.root.coverage_transform_bspline._v_attrs.inv_dx
-
-        coverage_transform_hb = lib.root.coverage_transform_bspline_hb[:]
-        coverage_transform_hb_offset = lib.root.coverage_transform_bspline_hb._v_attrs.offset
-        coverage_transform_hb_inv_dx = lib.root.coverage_transform_bspline_hb._v_attrs.inv_dx
 
         interaction_param = np.array([
             lib.root._v_attrs.r0,
@@ -233,54 +226,26 @@ def write_environment(fasta, environment_library):
 
     create_array(cgrp, 'interaction_param', interaction_param)
 
-    # Compute SC coverage of the HBond partners
-    cgrp = t.create_group(potential, 'environment_coverage_hb')
-    cgrp._v_attrs.arguments = np.array(['protein_hbond','weighted_pos'])
+    # # Transform coverage to [0,1] scale (1 indicates the most buried)
+    # tgrp = t.create_group(potential, 'uniform_transform_environment')
+    # tgrp._v_attrs.arguments = np.array(['environment_coverage'])
+    # create_array(tgrp, 'bspline_coeff', coverage_transform)
+    # tgrp.bspline_coeff._v_attrs.spline_offset = coverage_transform_offset
+    # tgrp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_inv_dx
 
-    # group1 is the source HBond partner
-    infer_group = t.get_node('/input/potential/infer_H_O')
-    n_donor    = infer_group.donors   .id.shape[0]
-    n_acceptor = infer_group.acceptors.id.shape[0]
-    n_hb = n_donor+n_acceptor
-    create_array(cgrp, 'index1', np.arange(n_hb))
-    create_array(cgrp, 'type1',  np.zeros (n_hb,dtype='i'))  # only need a single type for this
-    create_array(cgrp, 'id1',    t.root.input.potential.hbond_coverage.id1[:])
+    # # Linearly couple the transform to energies
+    # egrp = t.create_group(potential, 'linear_coupling_uniform_environment')
+    # egrp._v_attrs.arguments = np.array(['uniform_transform_environment'])
+    # create_array(egrp, 'couplings', energies)
+    # create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
 
-    # group 2 is the weighted points to interact with
-    create_array(cgrp, 'index2', np.arange(n_sc))
-    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types
-    create_array(cgrp, 'id2',    g_sc_pl.affine_residue[:])
-
-    create_array(cgrp, 'interaction_param', interaction_param)
-
-    # Transform coverage to [0,1] scale (1 indicates the most buried)
-    tgrp = t.create_group(potential, 'uniform_transform_environment')
-    tgrp._v_attrs.arguments = np.array(['environment_coverage'])
-    create_array(tgrp, 'bspline_coeff', coverage_transform)
-    tgrp.bspline_coeff._v_attrs.spline_offset = coverage_transform_offset
-    tgrp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_inv_dx
-
-    # Transform coverage to [0,1] scale (1 indicates the most buried)
-    t2grp = t.create_group(potential, 'uniform_transform_environment_hb')
-    t2grp._v_attrs.arguments = np.array(['environment_coverage_hb'])
-    create_array(t2grp, 'bspline_coeff', coverage_transform_hb)
-    t2grp.bspline_coeff._v_attrs.spline_offset = coverage_transform_hb_offset
-    t2grp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_hb_inv_dx
-
-    # Linearly couple the transform to energies
-    egrp = t.create_group(potential, 'linear_coupling_uniform_environment')
-    egrp._v_attrs.arguments = np.array(['uniform_transform_environment'])
-    create_array(egrp, 'couplings', energies)
+    # Couple an energy to the coverage coordinates
+    egrp = t.create_group(potential, 'nonlinear_coupling_environment')
+    egrp._v_attrs.arguments = np.array(['environment_coverage'])
+    create_array(egrp, 'coeff', energies)
+    egrp.coeff._v_attrs.spline_offset = energies_x_offset
+    egrp.coeff._v_attrs.spline_inv_dx = energies_x_inv_dx
     create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
-
-    # Linearly couple the transform to energies
-    e2grp = t.create_group(potential, 'linear_coupling_with_inactivation_environment_hb')
-    e2grp._v_attrs.arguments = np.array(['uniform_transform_environment_hb', 'protein_hbond'])
-    create_array(e2grp, 'couplings', energies_hb)
-    create_array(e2grp, 'coupling_types', t.root.input.potential.hbond_coverage.type1[:])
-    e2grp._v_attrs.inactivation_dim = 6
-
-
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):

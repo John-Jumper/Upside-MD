@@ -40,7 +40,7 @@ def read_traj(s, path):
         d['Rg']     = np.sqrt(np.var(d['pos'],axis=1).sum(axis=-1))
         phe = t.root.input.potential.hbond_energy._v_attrs.protein_hbond_energy
         d['hb_energy'] = phe*d['hb'][...,0].sum(axis=-1)
-        d['env']    = o.linear_coupling[s:]
+        d['env']    = o.nonlinear_coupling[s:]
 
     return d
 
@@ -134,6 +134,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--plot', default='', help='filename for plotting')
+    parser.add_argument('--dump-csv', default='', help='filename to dump csv')
     parser.add_argument('--rmsd-cutoff', default=4., type=float, help='RMSD cutoff for good structure (default 4.)')
     parser.add_argument('--de-novo-equil-fraction', default=0.5, type=float, help='fraction of de novo simulation to exclude as equilibration (default 0.5)')
     parser.add_argument('--native-pattern', default='native', help='regex pattern to substitute from to convert native simulation filenames to de novo simulation filenames (default "native")')
@@ -148,12 +149,13 @@ def main():
         recs.append(extract_blame(native, denovo, args.rmsd_cutoff, args.de_novo_equil_fraction))
     recs = [x for x in recs if x is not None]
     df = pd.concat(recs)  #.to_csv(index=False)
+    if args.dump_csv: df.to_csv(args.dump_csv, index=False)
     # dfm = df.groupby('restype').median()
     dfm = df.groupby('restype').mean()
     pd.options.display.float_format=lambda x:"% .3f"%x
-    print dfm
+    print 10*dfm
     print
-    print dfm.sum()
+    print 10*dfm.sum()
     print 
     print 'total', dfm.sum().sum()
     if args.plot: plot_energies(dfm, args.plot)
