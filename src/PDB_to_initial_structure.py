@@ -74,9 +74,10 @@ def read_residues(chain):
         if len(cd_list) not in (0,1):
             raise RuntimeError('CD-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]D1?$",k)],))
 
+        # note that you need to check the residue *before* to see if a proline is cis
         r = Residue(
             res.getResnum(),
-            restype if not (restype=='PRO' and np.abs(omega)<90.*deg) else 'CPR',
+            restype if not (restype=='PRO' and residues and np.abs(residues[-1].omega)<90.*deg) else 'CPR',
             phi,psi,omega,
             adict.get('N',  np.nan*np.ones(3)),
             adict.get('CA', np.nan*np.ones(3)),

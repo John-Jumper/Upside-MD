@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import numpy as np
 import tables as tb
 import cPickle as cp
@@ -27,6 +28,7 @@ def read_traj(s, path):
     with tb.open_file(path) as t:
         o = t.root.output
         d['seq']    = t.root.input.sequence[:]
+        d['seq'][d['seq']=='CPR'] = 'PRO'
         print 'n_res', len(d['seq'])
         d['pos']    = o.pos[s:,0]
         d['pot']    = o.potential[s:,0]
@@ -85,7 +87,7 @@ def extract_blame(native_fname, denovo_fname, rmsd_cutoff, denovo_equil_fraction
     k = 9
     rmsd = ru.traj_rmsd(d['pos'][1:,k:-k], d['pos'][0,k:-k])
     good = rmsd<rmsd_cutoff
-    bad  = np.logical_not(good)
+    bad  = np.logical_not(good) # & (rmsd<8.)
     if not good.sum() or not bad.sum(): return None
 
     s = seq_to_1hot(d['seq'])/len(d['seq'])

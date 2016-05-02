@@ -535,12 +535,13 @@ def mixture_potential(weights, potentials):
     return min_pot - np.log(np.exp(min_pot-potentials).sum(axis=0))
 
 
-def read_rama_maps_and_weights(seq, rama_group, mode='mixture'):
+def read_rama_maps_and_weights(seq, rama_group, mode='mixture', allow_CPR=True):
     assert mode in ['mixture', 'product']
     restype = rama_group._v_attrs.restype
     dirtype = rama_group._v_attrs.dir
-    ridx = dict([(x,i) for i,x in enumerate(restype)])
+    ridx_dict = dict([(x,i) for i,x in enumerate(restype)])
     didx = dict([(x,i) for i,x in enumerate(dirtype)])
+    ridx = lambda resname, keep_cpr=True: (ridx_dict[resname] if resname!='CPR' or keep_cpr else ridx_dict['PRO'])
 
     dimer_pot    = rama_group.dimer_pot[:]
     dimer_weight = rama_group.dimer_weight[:]
@@ -548,8 +549,9 @@ def read_rama_maps_and_weights(seq, rama_group, mode='mixture'):
     assert len(seq) >= 3   # avoid bugs
 
     # cis-proline is only CPR when it is the central residue, otherwise just use PRO
-    V = lambda r,d,n: dimer_pot   [ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
-    W = lambda r,d,n: dimer_weight[ridx[r], didx[d], (ridx[n] if n!='CPR' else ridx['PRO'])]
+
+    V = lambda r,d,n: dimer_pot   [ridx(r,allow_CPR), didx[d], ridx(n,False)]
+    W = lambda r,d,n: dimer_weight[ridx(r,allow_CPR), didx[d], ridx(n,False)]
 
     pots    = np.zeros((len(seq), dimer_pot.shape[-2], dimer_pot.shape[-1]), dtype='f4')
     weights = np.zeros((len(seq),),dtype='f4')
@@ -586,7 +588,7 @@ def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None):
         if sheet_mixing is None:
             return coil_pots
         else:
-            sheet_pots, sheet_weights = read_rama_maps_and_weights(seq, tr.root.sheet)
+            sheet_pots, sheet_weights = read_rama_maps_and_weights(seq, tr.root.sheet, allow_CPR=False)
             return mixture_potential([coil_weights, sheet_weights*np.exp(-sheet_mixing)], 
                                      [coil_pots,    sheet_pots])
 
