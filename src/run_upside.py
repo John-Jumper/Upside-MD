@@ -4,7 +4,6 @@ import numpy as np
 import subprocess as sp
 import os, sys
 import json,uuid
-import IPython.display as disp
 
 params_dir = os.path.expanduser('~/upside-parameters/')
 upside_dir = os.path.expanduser('~/upside/')
@@ -271,6 +270,7 @@ def compute_topology(t):
 
 
 def display_structure(topo_aug, pos, size=(600,600)):
+    import IPython.display as disp
     id_string = uuid.uuid4()
     return disp.Javascript(lib='/files/js/protein-viewer.js', 
                     data='render_structure(element, "%s", %i, %i, %s, %s);'%
