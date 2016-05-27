@@ -276,8 +276,8 @@ try {
     CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (Upside)\n Author: John Jumper", 
             ' ', "0.1");
 
-    ValueArg<double> time_step_arg("", "time-step", "time step for integration (default 0.01)", 
-            false, 0.01, "float", cmd);
+    ValueArg<double> time_step_arg("", "time-step", "time step for integration (default 0.009)", 
+            false, 0.009, "float", cmd);
     ValueArg<double> duration_arg("", "duration", "duration of simulation", 
             true, -1., "float", cmd);
     ValueArg<unsigned long> seed_arg("", "seed", "random seed (default 42)", 
