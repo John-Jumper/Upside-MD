@@ -170,7 +170,7 @@ def write_infer_H_O(fasta, excluded_residues):
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
 
-def write_environment(fasta, environment_library):
+def write_environment(fasta, environment_library, sc_node_name):
     with tb.open_file(environment_library) as lib:
         energies    = lib.root.energies[:]
         energies_x_offset = lib.root.energies._v_attrs.offset
@@ -204,9 +204,9 @@ def write_environment(fasta, environment_library):
 
     # Bring position and probability together for the side chains
     wgrp = t.create_group(potential, 'weighted_pos')
-    wgrp._v_attrs.arguments = np.array(['placement_point_vector', 'placement_scalar'])
-    g_sc_pl = t.root.input.potential.placement_point_vector
-    n_sc = g_sc_pl.affine_residue.shape[0]
+    wgrp._v_attrs.arguments = np.array([sc_node_name, 'placement_scalar'])
+    sc_node = t.get_node(t.root.input.potential, sc_node_name)
+    n_sc = sc_node.affine_residue.shape[0]
     create_array(wgrp, 'index_pos',   np.arange(n_sc))
     create_array(wgrp, 'index_weight', np.arange(n_sc))
 
@@ -222,7 +222,7 @@ def write_environment(fasta, environment_library):
     # group 2 is the weighted points to interact with
     create_array(cgrp, 'index2', np.arange(n_sc))
     create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types
-    create_array(cgrp, 'id2',    g_sc_pl.affine_residue[:])
+    create_array(cgrp, 'id2',    sc_node.affine_residue[:])
 
     create_array(cgrp, 'interaction_param', interaction_param)
 
@@ -248,7 +248,7 @@ def write_environment(fasta, environment_library):
     create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
 
 
-def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
+def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond, sc_node_name):
     n_res = len(fasta)
 
     infer_group = t.get_node('/input/potential/infer_H_O')
@@ -277,7 +277,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
          0.,   0.]]]))
 
     cgrp = t.create_group(potential, 'hbond_coverage')
-    cgrp._v_attrs.arguments = np.array(['protein_hbond','placement_point_vector'])
+    cgrp._v_attrs.arguments = np.array(['protein_hbond',sc_node_name])
 
     with tb.open_file(coverage_library) as data:
          create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
@@ -292,8 +292,9 @@ def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
                                                  infer_group.acceptors.residue[:]]))
 
     # group 2 is the sidechains
-    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
-    sc_resnum = t.root.input.potential.placement_point_vector.affine_residue[:]
+    sc_node = t.get_node(t.root.input.potential, sc_node_name)
+    rseq      = sc_node.beadtype_seq[:]
+    sc_resnum = sc_node.affine_residue[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
     create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
     create_array(cgrp, 'id2',    sc_resnum)
@@ -305,7 +306,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
     create_array(grp, 'placement_data',  hydrophobe_placement)
 
     cgrp = t.create_group(potential, 'hbond_coverage_hydrophobe')
-    cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_scalar','placement_point_vector'])
+    cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_scalar',sc_node_name])
 
     with tb.open_file(coverage_library) as data:
          create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
@@ -320,7 +321,7 @@ def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond):
     create_array(cgrp, 'id1',    np.arange(3*n_res)/3)
 
     # group 2 is the sidechains
-    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
+    rseq = sc_node.beadtype_seq[:]
     create_array(cgrp, 'index2', np.arange(len(rseq)))
     create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
     create_array(cgrp, 'id2',    sc_resnum)
@@ -811,7 +812,7 @@ def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
         create_array(g, 'interaction_param', obj=params.root.interaction_param[:])
 
 
-def write_rotamer_placement(fasta, placement_library, fix_rotamer):
+def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rotamer):
     def compute_chi1_state(angles):
         chi1_state = np.ones(angles.shape, dtype='i')
         chi1_state[(   0.*deg<=angles)&(angles<120.*deg)] = 0
@@ -820,7 +821,12 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
 
     with tb.open_file(placement_library) as data:
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
-        placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
+
+        if dynamic_placement:
+            placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
+        else:
+            placement_pos = data.root.rotamer_center_fixed[:]
+
         placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
         start_stop = data.root.rotamer_start_stop_bead[:]
         find_restype =                       data.root.restype_and_chi_and_state[:,0].astype('i')
@@ -901,8 +907,9 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
         beadtype_seq  .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
         id_seq        .extend(np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer))
 
-    grp = t.create_group(potential, 'placement_point_vector')
-    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
+    sc_node_name = 'placement%s_point_vector_only' % ('' if dynamic_placement else '_fixed')
+    grp = t.create_group(potential, sc_node_name)
+    grp._v_attrs.arguments = np.array(['affine_alignment'] + (['rama_coord'] if dynamic_placement else []))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
@@ -917,10 +924,12 @@ def write_rotamer_placement(fasta, placement_library, fix_rotamer):
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_energy)
 
+    return sc_node_name
 
-def write_rotamer(fasta, interaction_library, damping):
+
+def write_rotamer(fasta, interaction_library, damping, sc_node_name):
     g = t.create_group(t.root.input.potential, 'rotamer')
-    args = ['placement_point_vector','placement_scalar']
+    args = [sc_node_name,'placement_scalar']
     def arg_maybe(nm):
         if nm in t.root.input.potential: args.append(nm)
     arg_maybe('hbond_coverage')
@@ -940,10 +949,11 @@ def write_rotamer(fasta, interaction_library, damping):
          # pg._v_attrs.energy_cap = data.root._v_attrs.energy_cap_1body
          # pg._v_attrs.energy_cap_width = data.root._v_attrs.energy_cap_width_1body
 
-    rseq = t.root.input.potential.placement_point_vector.beadtype_seq[:]
+    sc_node = t.get_node(t.root.input.potential, sc_node_name)
+    rseq = sc_node.beadtype_seq[:]
     create_array(pg, 'index', np.arange(len(rseq)))
     create_array(pg, 'type',  np.array([bead_num[s] for s in rseq]))
-    create_array(pg, 'id',    t.root.input.potential.placement_point_vector.id_seq[:])
+    create_array(pg, 'id',    sc_node.id_seq[:])
 
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
@@ -1083,6 +1093,8 @@ def main():
             help='use backbone-depedent sidechain location library')
     parser.add_argument('--rotamer-placement', default=None, 
             help='rotameric sidechain library')
+    parser.add_argument('--dynamic-rotamer-placement', default=False, action='store_true',
+            help='Use dynamic rotamer placement (not recommended)')
     parser.add_argument('--fix-rotamer', default='', 
             help='Table of fixed rotamers for specific sidechains.  A header line must be present and the first '+
             'three columns of that header must be '+
@@ -1248,16 +1260,16 @@ def main():
             parser.error('--rotamer-placement is required, based on other options.')
         require_rama = True
         require_affine = True
-        write_rotamer_placement(fasta_seq, args.rotamer_placement,args.fix_rotamer)
+        sc_node_name = write_rotamer_placement(fasta_seq, args.rotamer_placement, args.dynamic_rotamer_placement, args.fix_rotamer)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
-        write_count_hbond(fasta_seq, args.hbond_energy, args.rotamer_interaction, args.loose_hbond_criteria)
+        write_count_hbond(fasta_seq, args.hbond_energy, args.rotamer_interaction, args.loose_hbond_criteria, sc_node_name)
 
     if args.environment_potential:
         if args.rotamer_placement is None:
             parser.error('--rotamer-placement is required, based on other options.')
-        write_environment(fasta_seq, args.environment_potential)
+        write_environment(fasta_seq, args.environment_potential, sc_node_name)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
@@ -1302,7 +1314,7 @@ def main():
 
     if args.rotamer_interaction:
         # must be after write_count_hbond if hbond_coverage is used
-        write_rotamer(fasta_seq, args.rotamer_interaction, args.rotamer_solve_damping)
+        write_rotamer(fasta_seq, args.rotamer_interaction, args.rotamer_solve_damping, sc_node_name)
 
     if args.sidechain_radial:
         require_backbone_point = True
