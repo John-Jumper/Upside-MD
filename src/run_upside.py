@@ -16,6 +16,7 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   fix_rotamer = '',
                   environment=None,
                   torus_dbn = None,
+                  placement=params_dir+'rotamer-extended-with-direc.h5',
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5'):
     
@@ -45,7 +46,7 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         args.append('--restraint-spring-constant=%f'%restraint_spring)
         
     if rotamer:
-        args.append('--rotamer-placement=%s'%(params_dir+'rotamer-extended-with-direc.h5'))
+        args.append('--rotamer-placement=%s'%placement)
     if rotamer:
         args.append('--rotamer-interaction=%s'%rotamer_interaction_param)
     if fix_rotamer:

@@ -170,7 +170,7 @@ def write_infer_H_O(fasta, excluded_residues):
     create_array(acceptors, 'id', obj=np.array(( 1,2,3))[None,:] + 3*acceptor_residues[:,None])
 
 
-def write_environment(fasta, environment_library, sc_node_name):
+def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
     with tb.open_file(environment_library) as lib:
         energies    = lib.root.energies[:]
         energies_x_offset = lib.root.energies._v_attrs.offset
@@ -204,7 +204,7 @@ def write_environment(fasta, environment_library, sc_node_name):
 
     # Bring position and probability together for the side chains
     wgrp = t.create_group(potential, 'weighted_pos')
-    wgrp._v_attrs.arguments = np.array([sc_node_name, 'placement_scalar'])
+    wgrp._v_attrs.arguments = np.array([sc_node_name, pl_node_name])
     sc_node = t.get_node(t.root.input.potential, sc_node_name)
     n_sc = sc_node.affine_residue.shape[0]
     create_array(wgrp, 'index_pos',   np.arange(n_sc))
@@ -602,17 +602,17 @@ def write_torus_dbn(seq, torus_dbn_library):
         log_normalization = data.root.TORUS_LOGNORMCONST[:]
         kappa = data.root.TORUS_KAPPA[:]
         mu = data.root.TORUS_MU[:]
-        aa_emission_energy = -np.log(data.root.AA_EMISSION[:])
+        aa_emission_energy  = -np.log(data.root.AA_EMISSION[:].T)
+        cis_emission_energy = -np.log(data.root.CIS_EMISSION[:])
+        transition_energies = -np.log(data.root.HIDDEN_TRANSITION[:])
+        n_state = transition_energies.shape[0]
 
-        transition_matrix = data.root.HIDDEN_TRANSITION[:]
+    # Add type to handle cis-proline
+    CPR_prior = aa_emission_energy[dbn_aa_num['PRO']] + cis_emission_energy[:,1]
+    dbn_aa_num['CPR'] = len(dbn_aa_num)
+    aa_emission_energy = np.concatenate((aa_emission_energy,CPR_prior[None,:]),axis=0)
 
-        n_state = transition_matrix.shape[0]
-
-    rtype = np.array([dbn_aa_num[s] for s in seq])  # FIXME handle cis-proline, aka CPR
-    prior_offset = np.zeros((len(rtype),n_state),'f4')
-    
-    for i,r in enumerate(seq):
-        prior_offset[i,:] = aa_emission_energy[:,dbn_aa_num[r]]
+    restypes = np.array([dbn_aa_num[s] for s in seq])  # FIXME handle cis-proline, aka CPR
 
     basin_param = np.zeros((n_state,6),'f4')
     basin_param[:,0] = log_normalization.ravel()
@@ -627,15 +627,16 @@ def write_torus_dbn(seq, torus_dbn_library):
 
     # since Rama angles are not valid for the first and last angles,
     # don't confuse the HMM by including them
-    create_array(egrp, 'id', np.arange(1,len(seq)-1))
-    create_array(egrp, 'prior_offset', prior_offset[1:-1])
-    create_array(egrp, 'basin_param',  basin_param)
+    create_array(egrp, 'id',                    np.arange(1,len(seq)-1))
+    create_array(egrp, 'restypes',              restypes[1:-1])
+    create_array(egrp, 'prior_offset_energies', aa_emission_energy)
+    create_array(egrp, 'basin_param',           basin_param)
 
     hgrp = t.create_group(potential, 'fixed_hmm')
     hgrp._v_attrs.arguments = np.array(['torus_dbn'])
 
     create_array(hgrp, 'index', np.arange(egrp.id.shape[0]))
-    create_array(hgrp, 'transition_matrix', transition_matrix)
+    create_array(hgrp, 'transition_energies', transition_energies)
 
 
 def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_energy_shift=None):
@@ -824,10 +825,11 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rot
 
         if dynamic_placement:
             placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
+            placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
         else:
             placement_pos = data.root.rotamer_center_fixed[:]
+            placement_energy = data.root.rotamer_prob_fixed[:][...,None]
 
-        placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
         start_stop = data.root.rotamer_start_stop_bead[:]
         find_restype =                       data.root.restype_and_chi_and_state[:,0].astype('i')
         find_chi1 =                          data.root.restype_and_chi_and_state[:,1]
@@ -917,19 +919,20 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rot
     create_array(grp, 'beadtype_seq',    beadtype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
 
-    grp = t.create_group(potential, 'placement_scalar')
-    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
+    pl_node_name = 'placement%s_scalar' % ('' if dynamic_placement else '_fixed')
+    grp = t.create_group(potential, pl_node_name)
+    grp._v_attrs.arguments = np.array(['affine_alignment'])#,'rama_coord'])
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
     create_array(grp, 'placement_data',  placement_energy)
 
-    return sc_node_name
+    return sc_node_name, pl_node_name
 
 
-def write_rotamer(fasta, interaction_library, damping, sc_node_name):
+def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_name):
     g = t.create_group(t.root.input.potential, 'rotamer')
-    args = [sc_node_name,'placement_scalar']
+    args = [sc_node_name,pl_node_name]
     def arg_maybe(nm):
         if nm in t.root.input.potential: args.append(nm)
     arg_maybe('hbond_coverage')
@@ -1255,12 +1258,11 @@ def main():
         write_angle_spring(args)
         write_dihedral_spring(fasta_seq_with_cpr)
 
-    if args.rotamer_interaction:
-        if args.rotamer_placement is None:
-            parser.error('--rotamer-placement is required, based on other options.')
+    if args.rotamer_placement:
         require_rama = True
         require_affine = True
-        sc_node_name = write_rotamer_placement(fasta_seq, args.rotamer_placement, args.dynamic_rotamer_placement, args.fix_rotamer)
+        sc_node_name, pl_node_name = write_rotamer_placement(
+                fasta_seq, args.rotamer_placement, args.dynamic_rotamer_placement, args.fix_rotamer)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
@@ -1269,7 +1271,7 @@ def main():
     if args.environment_potential:
         if args.rotamer_placement is None:
             parser.error('--rotamer-placement is required, based on other options.')
-        write_environment(fasta_seq, args.environment_potential, sc_node_name)
+        write_environment(fasta_seq, args.environment_potential, sc_node_name, pl_node_name)
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
@@ -1314,7 +1316,7 @@ def main():
 
     if args.rotamer_interaction:
         # must be after write_count_hbond if hbond_coverage is used
-        write_rotamer(fasta_seq, args.rotamer_interaction, args.rotamer_solve_damping, sc_node_name)
+        write_rotamer(fasta_seq, args.rotamer_interaction, args.rotamer_solve_damping, sc_node_name, pl_node_name)
 
     if args.sidechain_radial:
         require_backbone_point = True

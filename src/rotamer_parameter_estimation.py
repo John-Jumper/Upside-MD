@@ -12,6 +12,8 @@ import collections
 # theano.config.compute_test_value = 'ignore'
 
 n_fix = 3
+n_rotpos = 86
+
 n_knot_angular = 15
 n_angular = 2*n_knot_angular
 # n_restype = 24
@@ -26,21 +28,24 @@ param_shapes['rotamer']=(n_restype,n_restype,2*n_knot_angular+2*n_knot_sc)
 param_shapes['hbond_coverage']=(2,n_restype,2*n_knot_angular+2*n_knot_hb)
 param_shapes['hbond_coverage_hydrophobe']=(n_fix,n_restype,2*n_knot_angular+2*n_knot_hb)
 param_shapes['placement_fixed_point_vector_scalar']=(n_fix,7)
+param_shapes['placement_fixed_point_vector_only']=(n_rotpos,6)
+param_shapes['placement_fixed_scalar']=(n_rotpos,1)
 
 lparam = T.dvector('lparam')
 lparam.tag.test_value = np.random.randn(n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6)
 
 func = lambda expr: (theano.function([lparam],expr, 
     ),expr)
-i = [0]
-def read_param(shape):
-    size = np.prod(shape)
-    ret = lparam[i[0]:i[0]+size].reshape(shape)
-    i[0] += size
-    return ret
 
 
 def unpack_param_maker():
+    i = [0]
+    def read_param(shape):
+        size = np.prod(shape)
+        ret = lparam[i[0]:i[0]+size].reshape(shape)
+        i[0] += size
+        return ret
+
     def read_symm(n):
         x = read_param((n_restype,n_restype,n))
         return 0.5*(x + x.transpose((1,0,2)))
@@ -87,29 +92,43 @@ def unpack_param_maker():
     hydpl_dir = hydpl_dir_unnorm / T.sqrt((hydpl_dir_unnorm**2).sum(axis=-1,keepdims=True))
     hydpl_param = T.concatenate([hydpl_com, hydpl_dir, T.zeros((n_fix,1))], axis=-1)
 
-    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6
+    rotpos_com = read_param((n_rotpos,3))
+    rotpos_dir_unnorm = read_param((n_rotpos,3))
+    rotpos_dir = rotpos_dir_unnorm / T.sqrt((rotpos_dir_unnorm**2).sum(axis=-1,keepdims=True))
+    rotpos_param = T.concatenate([rotpos_com, rotpos_dir], axis=-1)
 
-    return func(rot_param), func(cov_param), func(hyd_param), func(hydpl_param), n_param
+    rotscalar_param = read_param((n_rotpos,1))
+
+    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6 + n_rotpos*6 + n_rotpos
+
+    return func(rot_param), func(cov_param), func(hyd_param), func(hydpl_param), func(rotpos_param), func(rotscalar_param), n_param
 
 (unpack_rot,unpack_rot_expr), (unpack_cov,unpack_cov_expr), \
         (unpack_hyd,unpack_hyd_expr), (unpack_hydpl, unpack_hydpl_expr), \
+        (unpack_rotpos, unpack_rotpos_expr), \
+        (unpack_rotscalar, unpack_rotscalar_expr), \
         n_param = unpack_param_maker()
-unpack_params_expr = unpack_rot_expr, unpack_cov_expr, unpack_hyd_expr, unpack_hydpl_expr
+unpack_params_expr = unpack_rot_expr, unpack_cov_expr, unpack_hyd_expr, unpack_hydpl_expr, unpack_rotpos_expr, unpack_rotscalar_expr
 
 def unpack_params(state):
-    return unpack_rot(state), unpack_cov(state), unpack_hyd(state), unpack_hydpl(state)
+    return unpack_rot(state), unpack_cov(state), unpack_hyd(state), unpack_hydpl(state), unpack_rotpos(state), unpack_rotscalar(state)
 
 def pack_param_helper_maker():
     loose_cov_var   = T.dtensor3('loose_cov')
     loose_rot_var   = T.dtensor3('loose_rot')
     loose_hyd_var   = T.dtensor3('loose_hyd')
     loose_hydpl_var = T.dmatrix('loose_hydpl')
+    loose_rotpos_var = T.dmatrix('loose_rotpos')
+    loose_rotscalar_var = T.dmatrix('loose_rotscalar')
+
     discrep_expr = (
             T.sum((unpack_rot_expr - loose_rot_var)**2) + 
             T.sum((unpack_cov_expr - loose_cov_var)**2) +
             T.sum((unpack_hyd_expr - loose_hyd_var)**2) +
-            T.sum((unpack_hydpl_expr - loose_hydpl_var)**2))
-    v = [lparam,loose_rot_var,loose_cov_var,loose_hyd_var,loose_hydpl_var]
+            T.sum((unpack_hydpl_expr - loose_hydpl_var)**2) +
+            T.sum((unpack_rotpos_expr - loose_rotpos_var)**2) +
+            T.sum((unpack_rotscalar_expr - loose_rotscalar_var)**2))
+    v = [lparam,loose_rot_var,loose_cov_var,loose_hyd_var,loose_hydpl_var, loose_rotpos_var, loose_rotscalar_var]
     discrep   = theano.function(v, discrep_expr)
     d_discrep = theano.function(v, T.grad(discrep_expr,lparam))
     return discrep, d_discrep
