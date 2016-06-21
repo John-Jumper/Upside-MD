@@ -47,7 +47,7 @@ struct FixedHMM : public PotentialNode
     vector<Params> params;
 
     float    energy_offset;
-    ArrayXXf transition_energies;
+    ArrayXXf transition_energy;
     MatrixXf transition_matrix;
 
     VecArrayStorage emission_prob;
@@ -60,21 +60,21 @@ struct FixedHMM : public PotentialNode
     ArrayXXf edge_transition_counts;  
 #endif
 
-    void update_transition_matrix_from_transition_energies() {
+    void update_transition_matrix_from_transition_energy() {
         // Offset by the expected value of the energy to increase numerical stability
-        float e_min = transition_energies.minCoeff();
-        energy_offset = (transition_energies.array() * (e_min - transition_energies.array()).exp()).sum() / 
-                                                      ((e_min - transition_energies.array()).exp()).sum();
-        transition_matrix = (energy_offset-transition_energies).exp();
+        float e_min = transition_energy.minCoeff();
+        energy_offset = (transition_energy.array() * (e_min - transition_energy.array()).exp()).sum() / 
+                                                      ((e_min - transition_energy.array()).exp()).sum();
+        transition_matrix = (energy_offset-transition_energy).exp();
     }
 
     FixedHMM(hid_t grp, CoordNode& node_1body_):
         PotentialNode(),
         n_residue(get_dset_size(1, grp, "index")[0]), 
-        n_state(get_dset_size(2, grp, "transition_energies")[0]),
+        n_state(get_dset_size(2, grp, "transition_energy")[0]),
         node_1body(node_1body_), 
         params(n_residue),
-        transition_energies(n_state, n_state),
+        transition_energy(n_state, n_state),
         transition_matrix  (n_state, n_state),
         emission_prob    (n_state, n_residue),
         forward_belief   (n_state, n_residue),
@@ -84,12 +84,12 @@ struct FixedHMM : public PotentialNode
 #endif
     {
         check_size(grp, "index", n_residue);
-        check_size(grp, "transition_energies", n_state, n_state);
+        check_size(grp, "transition_energy", n_state, n_state);
 
         traverse_dset<1,int>  (grp, "index",  [&](size_t i, int x) {params[i].index = x;});
-        traverse_dset<2,float>(grp, "transition_energies", [&](size_t ix, size_t iy, float x) {
-                transition_energies(ix,iy) = x;});
-        update_transition_matrix_from_transition_energies();
+        traverse_dset<2,float>(grp, "transition_energy", [&](size_t ix, size_t iy, float x) {
+                transition_energy(ix,iy) = x;});
+        update_transition_matrix_from_transition_energy();
 
         if(logging(LOG_DETAILED)) 
             default_logger->add_logger<float>("hmm_energy", {1}, [&](float* buffer) {
@@ -205,11 +205,11 @@ struct FixedHMM : public PotentialNode
     }
 
 #ifdef PARAM_DERIV
-    virtual vector<float> get_param() const {return copy_eigen_to_stl(transition_energies);}
+    virtual vector<float> get_param() const {return copy_eigen_to_stl(transition_energy);}
     virtual vector<float> get_param_deriv() const {return copy_eigen_to_stl(edge_transition_counts);}
     virtual void set_param(const vector<float>& new_param) {
-        copy_stl_to_eigen(transition_energies,new_param);
-        update_transition_matrix_from_transition_energies();
+        copy_stl_to_eigen(transition_energy,new_param);
+        update_transition_matrix_from_transition_energy();
     }
 #endif
 };

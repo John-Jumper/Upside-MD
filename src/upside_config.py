@@ -598,29 +598,34 @@ def write_torus_dbn(seq, torus_dbn_library):
     # FIXME use omega emission to handle CPR code
     with tb.open_file(torus_dbn_library) as data:
         dbn_aa_num = dict((x,i) for i,x in enumerate(data.root.restype_order[:]))
+        # basin_param order is log_norm,kappa_phi,mu_phi,kappa_psi,mu_psi,kappa_phi_minus_psi
+        basin_param = data.root.basin_param[:]  
+        aa_basin_energy = data.root.aa_basin_energy[:]
+        transition_energy = data.root.transition_energy[:]
+    restypes = np.array([dbn_aa_num[s] for s in seq])
 
-        log_normalization = data.root.TORUS_LOGNORMCONST[:]
-        kappa = data.root.TORUS_KAPPA[:]
-        mu = data.root.TORUS_MU[:]
-        aa_emission_energy  = -np.log(data.root.AA_EMISSION[:].T)
-        cis_emission_energy = -np.log(data.root.CIS_EMISSION[:])
-        transition_energies = -np.log(data.root.HIDDEN_TRANSITION[:])
-        n_state = transition_energies.shape[0]
+    # Old-style parsing, more similar to original TorusDBN format
+    # dbn_aa_num = dict((x,i) for i,x in enumerate(data.root.restype_order[:]))
+    # log_normalization = data.root.TORUS_LOGNORMCONST[:]
+    # kappa = data.root.TORUS_KAPPA[:]
+    # mu = data.root.TORUS_MU[:]
+    # aa_emission_energy  = -np.log(data.root.AA_EMISSION[:].T)
+    # cis_emission_energy = -np.log(data.root.CIS_EMISSION[:])
+    # transition_energies = -np.log(data.root.HIDDEN_TRANSITION[:])
+    # n_state = transition_energies.shape[0]
 
-    # Add type to handle cis-proline
-    CPR_prior = aa_emission_energy[dbn_aa_num['PRO']] + cis_emission_energy[:,1]
-    dbn_aa_num['CPR'] = len(dbn_aa_num)
-    aa_emission_energy = np.concatenate((aa_emission_energy,CPR_prior[None,:]),axis=0)
+    # # Add type to handle cis-proline
+    # CPR_prior = aa_emission_energy[dbn_aa_num['PRO']] + cis_emission_energy[:,1]
+    # dbn_aa_num['CPR'] = len(dbn_aa_num)
+    # aa_emission_energy = np.concatenate((aa_emission_energy,CPR_prior[None,:]),axis=0)
 
-    restypes = np.array([dbn_aa_num[s] for s in seq])  # FIXME handle cis-proline, aka CPR
-
-    basin_param = np.zeros((n_state,6),'f4')
-    basin_param[:,0] = log_normalization.ravel()
-    basin_param[:,1] = kappa[:,0]
-    basin_param[:,2] = mu   [:,0]
-    basin_param[:,3] = kappa[:,1]
-    basin_param[:,4] = mu   [:,1]
-    basin_param[:,5] = kappa[:,2]
+    # basin_param = np.zeros((n_state,6),'f4')
+    # basin_param[:,0] = log_normalization.ravel()
+    # basin_param[:,1] = kappa[:,0]
+    # basin_param[:,2] = mu   [:,0]
+    # basin_param[:,3] = kappa[:,1]
+    # basin_param[:,4] = mu   [:,1]
+    # basin_param[:,5] = kappa[:,2]
 
     egrp = t.create_group(potential, 'torus_dbn')
     egrp._v_attrs.arguments = np.array(['rama_coord'])
@@ -629,14 +634,14 @@ def write_torus_dbn(seq, torus_dbn_library):
     # don't confuse the HMM by including them
     create_array(egrp, 'id',                    np.arange(1,len(seq)-1))
     create_array(egrp, 'restypes',              restypes[1:-1])
-    create_array(egrp, 'prior_offset_energies', aa_emission_energy)
+    create_array(egrp, 'prior_offset_energies', aa_basin_energy)
     create_array(egrp, 'basin_param',           basin_param)
 
     hgrp = t.create_group(potential, 'fixed_hmm')
     hgrp._v_attrs.arguments = np.array(['torus_dbn'])
 
     create_array(hgrp, 'index', np.arange(egrp.id.shape[0]))
-    create_array(hgrp, 'transition_energies', transition_energies)
+    create_array(hgrp, 'transition_energy', transition_energy)
 
 
 def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_energy_shift=None):
