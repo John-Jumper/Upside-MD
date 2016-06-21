@@ -312,10 +312,14 @@ struct PlacementNode: public CoordNode
 #endif
 };
 
+// There is definitely too much template code generation here.  I should
+// simplify this to be nicer to the instruction cache and improve compile
+// times.
 static RegisterNodeType<PlacementNode<RamaPlacement <1>, PlaceT::SCALAR               >,2> pl1("placement_scalar");
 static RegisterNodeType<PlacementNode<FixedPlacement<1>, PlaceT::SCALAR               >,1> pl2("placement_fixed_scalar");
 static RegisterNodeType<PlacementNode<RamaPlacement <3>, PlaceT::POINT                >,2> pl3("placement_point_only");
-static RegisterNodeType<PlacementNode<RamaPlacement <6>, PlaceT::POINT, PlaceT::VECTOR>,2> pl4("placement_point_vector_only");
-static RegisterNodeType<PlacementNode<FixedPlacement<6>, PlaceT::POINT, PlaceT::VECTOR>,1> pl5("placement_fixed_point_vector_only");
-static RegisterNodeType<PlacementNode<FixedPlacement<7>, PlaceT::POINT, PlaceT::VECTOR, PlaceT::SCALAR>,1> pl6("placement_fixed_point_vector_scalar");
+static RegisterNodeType<PlacementNode<FixedPlacement<3>, PlaceT::POINT                >,1> pl4("placement_fixed_point_only");
+static RegisterNodeType<PlacementNode<RamaPlacement <6>, PlaceT::POINT, PlaceT::VECTOR>,2> pl5("placement_point_vector_only");
+static RegisterNodeType<PlacementNode<FixedPlacement<6>, PlaceT::POINT, PlaceT::VECTOR>,1> pl6("placement_fixed_point_vector_only");
+static RegisterNodeType<PlacementNode<FixedPlacement<7>, PlaceT::POINT, PlaceT::VECTOR, PlaceT::SCALAR>,1> pl7("placement_fixed_point_vector_scalar");
 }

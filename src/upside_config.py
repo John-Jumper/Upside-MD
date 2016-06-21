@@ -5,7 +5,6 @@ import tables as tb
 import sys,os
 import cPickle
 
-
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
         F='PHE', G='GLY', H='HIS', I='ILE',
@@ -21,6 +20,11 @@ deg=np.deg2rad(1)
 
 default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 n_bit_rotamer = 4
+
+def highlight_residues(name, fasta, residues_to_highlight):
+    fasta_one_letter = [one_letter_aa[x] for x in fasta]
+    residues_to_highlight = set(residues_to_highlight)
+    print '%s:  %s' % (name, ''.join((f.upper() if i in residues_to_highlight else f.lower()) for i,f in enumerate(fasta_one_letter)))
 
 def vmag(x):
     assert x.shape[-1] == 3
@@ -192,6 +196,10 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
     ref_pos[1] = ( 0.,          0.,          0.)        # CA
     ref_pos[2] = ( 1.25222632, -0.87268266,  0.)        # C
     ref_pos[3] = ( 0.,          0.94375626,  1.2068012) # CB
+    # FIXME this places the CB in a weird location since I should have 
+    #  used ref_pos[:3].mean(axis=0,keepdims=1) instead.  I cannot change
+    #  this without re-running training.  Thankfully, it is a fairly small
+    #  mistake and probably irrelevant with contrastive divergence training.
     ref_pos -= ref_pos.mean(axis=0,keepdims=1)
     
     placement_data = np.zeros((1,6))
@@ -736,20 +744,38 @@ def read_fasta(file_obj):
 
 def write_contact_energies(parser, fasta, contact_table):
     fields = [ln.split() for ln in open(contact_table,'U')]
-    if [x.lower() for x in fields[0]] != 'residue1 residue2 r0 width energy'.split():
-        parser.error('First line of contact energy table must be "residue1 residue2 r0 width energy"')
-    if not all(len(f)==5 for f in fields):
+    header_fields = 'residue1 residue2 energy distance transition_width'.split()
+    if [x.lower() for x in fields[0]] != header_fields:
+        parser.error('First line of contact energy table must be "%s"'%(" ".join(header_fields)))
+    if not all(len(f)==len(header_fields) for f in fields):
         parser.error('Invalid format for contact file')
     fields = fields[1:]
     n_contact = len(fields)
 
-    g = t.create_group(t.root.input.potential, 'contact')
-    g._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
+    # Place CA
+    pgrp = t.create_group(potential, 'placement_fixed_point_only_C_alpha')
+    pgrp._v_attrs.arguments = np.array(['affine_alignment'])
+    ref_pos = np.zeros((4,3))
+    ref_pos[0] = (-1.19280531, -0.83127186,  0.)        # N
+    ref_pos[1] = ( 0.,          0.,          0.)        # CA
+    ref_pos[2] = ( 1.25222632, -0.87268266,  0.)        # C
+    ref_pos[3] = ( 0.,          0.94375626,  1.2068012) # CB
+    ref_pos -= ref_pos[:3].mean(axis=0,keepdims=1)
+    
+    placement_data = np.zeros((1,3))
+    placement_data[0,0:3] = ref_pos[1]
 
-    id         = np.zeros((n_contact,2), dtype='i')
-    r0         = np.zeros((n_contact,))
-    scale      = np.zeros((n_contact,))
-    energy     = np.zeros((n_contact,))
+    create_array(pgrp, 'affine_residue',  np.arange(len(fasta)))
+    create_array(pgrp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
+    create_array(pgrp, 'placement_data',  placement_data)
+
+    g = t.create_group(t.root.input.potential, 'contact')
+    g._v_attrs.arguments = np.array(['placement_fixed_point_only_C_alpha'])
+
+    id     = np.zeros((n_contact,2), dtype='i')
+    energy = np.zeros((n_contact,))
+    dist   = np.zeros((n_contact,))
+    width  = np.zeros((n_contact,))
 
     for i,f in enumerate(fields):
         id[i] = (int(f[0]), int(f[1]))
@@ -757,18 +783,22 @@ def write_contact_energies(parser, fasta, contact_table):
         if not (0 <= id[i,0] < len(fasta)): raise ValueError(msg % (id[i,0], len(fasta)))
         if not (0 <= id[i,1] < len(fasta)): raise ValueError(msg % (id[i,1], len(fasta)))
 
-        r0[i]     =     float(f[2])
-        scale[i]  = 0.5/float(f[3])  # compact_sigmoid cuts off at +/- 1/scale
-        energy[i] =     float(f[4])
+        energy[i] = float(f[2])
+        dist[i]   = float(f[3])
+        width[i]  = float(f[4])  # compact_sigmoid cuts off at distance +/- width
 
+        if width[i] <= 0.: raise ValueError('Cannot have negative contact transition_width')
+
+    # 0-based indexing sometimes trips up users, so give them a quick check
+    highlight_residues('residues that participate in any --contact potential in uppercase', fasta, id.ravel())
     if energy.max() > 0.:
         print ('\nWARNING: Some contact energies are positive (repulsive).\n'+
-                 '         Please ignore this warning if you intendent to have repulsive contacts.')
+                 '         Please ignore this warning if you intentionally have repulsive contacts.')
 
-    create_array(g, 'id',         obj=id)
-    create_array(g, 'r0',         obj=r0)
-    create_array(g, 'scale',      obj=scale)
-    create_array(g, 'energy',     obj=energy)
+    create_array(g, 'id',       obj=id)
+    create_array(g, 'energy',   obj=energy)
+    create_array(g, 'distance', obj=dist)
+    create_array(g, 'width',    obj=width)
 
 def write_rama_coord():
     grp = t.create_group(potential, 'rama_coord')
@@ -996,13 +1026,9 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
 	for res_num in set(UHB_residues_type1_included).intersection(UHB_residues_type2_included):
 	    raise ValueError('Residue number %i is in both UHB_type1 and UHB_type2 lists'%res_num)
 
-    fasta_one_letter = [one_letter_aa[x] for x in sequence]
-    print 
-    print 'membrane_potential_residues_excluded:\n',''.join((f.upper() if i in excluded_residues else f.lower()) for i,f in enumerate(fasta_one_letter))
-    print 
-    print 'UHB_residues_type1_included:\n',''.join((f.upper() if i in UHB_residues_type1_included else f.lower()) for i,f in enumerate(fasta_one_letter))
-    print
-    print 'UHB_residues_type2_included:\n',''.join((f.upper() if i in UHB_residues_type2_included else f.lower()) for i,f in enumerate(fasta_one_letter))
+    highlight_residues('membrane_potential_residues_excluded', sequence, excluded_residues)
+    highlight_residues('         UHB_residues_type1_included', sequence, UHB_residues_type1_included)
+    highlight_residues('         UHB_residues_type2_included', sequence, UHB_residues_type2_included)
 
     sequence = list(sequence) 
     for num in excluded_residues:
@@ -1178,18 +1204,14 @@ def main():
             'with different filenames.')
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
-    parser.add_argument('--dihedral-range', default='',
-            help='Path to text file that defines a dihedral angle energy function.  The first line of the file should ' +
-            'be a header containing "index angletype start end width energy", where angletype is either "phi" or "psi" and the remaining lines should contain '+
-            'space separated values.  The form of the interaction is '+
-            'energy*(1/(1+exp[-(x-x_lowboundary)/width]))*(1/(1+exp[(x-x_upboundary)/width])). '+
-            'x is the dihedral angle, x_lowboundary and x_upboundary are the low and up boundaries.')
     parser.add_argument('--contact-energies', default='', 
             help='Path to text file that defines a contact energy function.  The first line of the file should ' +
-            'be a header containing "residue1 residue2 r0 width energy", and the remaining lines should contain '+
-            'space separated values.  The form of the interaction is '+
-            'energy/(1+exp((|x_residue1-x_residue2|-r0)/width)).  The location x_residue is the centroid of ' +
-            'sidechain, typically a few angstroms above the CB.')
+            'be a header containing "residue1 residue2 energy distance transition_width", and the remaining '+
+            'lines should contain space separated values.  The form of the interaction is approximately '+
+            'sigmoidal but the potential is constant outside (distance-transition_width,distance+transition_width).'+
+            '  This potential is approximately twice as sharp as a standard sigmoid with the same width as the '+
+            'specified transition_width.  The location x_residue is approximately the C_alpha position of the '+
+            'residue.')
     parser.add_argument('--environment-potential', default='',
             help='Path to many-body environment potential')
     parser.add_argument('--reference-state-rama', default='',
@@ -1368,12 +1390,10 @@ def main():
         print 'Restraint groups (uppercase letters are restrained residues)'
         fasta_one_letter = ''.join(one_letter_aa[x] for x in fasta_seq)
 
-        for i,rg in enumerate(args.restraint_group):
-            restrained_residues = set(rg)
+        for i,restrained_residues in enumerate(args.restraint_group):
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
-            print 'group_%i: %s'%(i, ''.join((f.upper() if i in restrained_residues else f.lower()) 
-                                              for i,f in enumerate(fasta_one_letter)))
-            make_restraint_group(i,restrained_residues,target[:,:,0], args.restraint_spring_constant)
+            highlight_residues('group_%i'%i, fasta_seq, restrained_residues)
+            make_restraint_group(i,set(restrained_residues),target[:,:,0], args.restraint_spring_constant)
 	    
 
     # if we have the necessary information, write pivot_sampler
