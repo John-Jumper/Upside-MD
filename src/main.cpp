@@ -318,8 +318,8 @@ try {
             "write an expected deriv to the input for later testing (developer only)", 
             cmd, false);
     ValueArg<string> log_level_arg("", "log-level", 
-            "Use this option to control which arrays are stored in /output.  Availabe levels are basic, detailed, "
-            "or extensive.  Default is basic.",
+            "Use this option to control which arrays are stored in /output.  Available levels are basic, detailed, "
+            "or extensive.  Default is detailed.",
             false, "", "basic, detailed, extensive", cmd);
     SwitchArg potential_deriv_agreement_arg("", "potential-deriv-agreement",
             "(developer use only) check the agreement of the derivative with finite differences "
@@ -410,7 +410,7 @@ try {
             }
 
             LogLevel log_level;
-            if     (log_level_arg.getValue() == "")          log_level = LOG_BASIC;
+            if     (log_level_arg.getValue() == "")          log_level = LOG_DETAILED;
             else if(log_level_arg.getValue() == "basic")     log_level = LOG_BASIC;
             else if(log_level_arg.getValue() == "detailed")  log_level = LOG_DETAILED;
             else if(log_level_arg.getValue() == "extensive") log_level = LOG_EXTENSIVE;
