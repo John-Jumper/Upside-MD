@@ -14,6 +14,7 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, 
                   rama_pot=params_dir+'rama_libraries.h5',
                   fix_rotamer = '',
+                  dynamic_1body = False,
                   environment=None,
                   torus_dbn = None,
                   placement=params_dir+'rotamer-extended-with-direc.h5',
@@ -47,6 +48,8 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         
     if rotamer:
         args.append('--rotamer-placement=%s'%placement)
+    if dynamic_1body:
+        args.append('--dynamic-rotamer-1body')
     if rotamer:
         args.append('--rotamer-interaction=%s'%rotamer_interaction_param)
     if fix_rotamer:

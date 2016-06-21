@@ -818,7 +818,7 @@ def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
         create_array(g, 'interaction_param', obj=params.root.interaction_param[:])
 
 
-def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rotamer):
+def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic_1body, fix_rotamer):
     def compute_chi1_state(angles):
         chi1_state = np.ones(angles.shape, dtype='i')
         chi1_state[(   0.*deg<=angles)&(angles<120.*deg)] = 0
@@ -829,10 +829,13 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rot
         restype_num = dict((aa,i) for i,aa in enumerate(data.root.restype_order[:]))
 
         if dynamic_placement:
-            placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # must put layer index first
-            placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
+            placement_pos = data.root.rotamer_center[:].transpose((2,0,1,3)) # put layer index first
         else:
             placement_pos = data.root.rotamer_center_fixed[:]
+
+        if dynamic_1body:
+            placement_energy = -np.log(data.root.rotamer_prob[:].transpose((2,0,1)))[...,None]
+        else:
             placement_energy = data.root.rotamer_prob_fixed[:][...,None]
 
         start_stop = data.root.rotamer_start_stop_bead[:]
@@ -924,9 +927,9 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, fix_rot
     create_array(grp, 'beadtype_seq',    beadtype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
 
-    pl_node_name = 'placement%s_scalar' % ('' if dynamic_placement else '_fixed')
+    pl_node_name = 'placement%s_scalar' % ('' if dynamic_1body else '_fixed')
     grp = t.create_group(potential, pl_node_name)
-    grp._v_attrs.arguments = np.array(['affine_alignment'])#,'rama_coord'])
+    grp._v_attrs.arguments = np.array(['affine_alignment']+(['rama_coord'] if dynamic_1body else []))
     create_array(grp, 'rama_residue',    rama_residue)
     create_array(grp, 'affine_residue',  affine_residue)
     create_array(grp, 'layer_index',     layer_index)
@@ -1103,6 +1106,8 @@ def main():
             help='rotameric sidechain library')
     parser.add_argument('--dynamic-rotamer-placement', default=False, action='store_true',
             help='Use dynamic rotamer placement (not recommended)')
+    parser.add_argument('--dynamic-rotamer-1body', default=False, action='store_true',
+            help='Use dynamic rotamer 1body (not recommended)')
     parser.add_argument('--fix-rotamer', default='', 
             help='Table of fixed rotamers for specific sidechains.  A header line must be present and the first '+
             'three columns of that header must be '+
@@ -1267,7 +1272,9 @@ def main():
         require_rama = True
         require_affine = True
         sc_node_name, pl_node_name = write_rotamer_placement(
-                fasta_seq, args.rotamer_placement, args.dynamic_rotamer_placement, args.fix_rotamer)
+                fasta_seq, args.rotamer_placement,
+                args.dynamic_rotamer_placement, args.dynamic_rotamer_1body,
+                args.fix_rotamer)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
