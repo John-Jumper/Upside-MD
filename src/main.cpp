@@ -9,6 +9,7 @@
 #include <set>
 #include "random.h"
 #include "state_logger.h"
+#include <csignal>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -16,6 +17,46 @@
 
 using namespace std;
 using namespace h5;
+
+// If any stop signal is received (currently we trap sigterm and sigint)
+// we increment any_stop_signal_received.
+volatile sig_atomic_t stop_signal_received = 0;
+
+// if any stop signal is received, attempt to dump buffered state immediately.
+// Perhaps I should also dump the exactly last position for each replica as
+// well in case of an error, to aid debugging of say segfaults.  I need to be
+// careful to stop each thread before draining the state to avoid race
+// conditions.  This is all somewhat complicated, but worth it to have good
+// stops no matter water.  I should also drain state in response to sigusr1 so
+// that I can dump state before 100 frames if I need to while continuing the
+// simulation.
+
+extern "C" {
+    static void abort_like_handler(int signal) {
+        // NOTE TO THE INEXPERIENCED:
+        //     This is a signal handler called in response to things like
+        //     Ctrl-C.  These functions are very special, and there are very
+        //     few things you are allowed to do in such a function without
+        //     causing problems.  Basically, just set a global variable of type
+        //     volatile sig_atomic_t and then notice the flag is set later in
+        //     the code.  Even most forms of exiting the program are disallowed
+        //     in a signal handler.  Please do not edit this function unless
+        //     you have read extensively about signal handlers, especially for
+        //     multithreaded code.
+
+        // This signal handler is intended for signals that indicate the user
+        // or OS wishes the program to terminate but after possibly writing any
+        // remaining state.  There is some danger that a later SIGKILL could
+        // corrupt the file being written to dump the last small amount of
+        // state.  I think this is a risk worth taking.
+
+        // Note that repeated Ctrl-C will not terminate the program if it is
+        // still writing to the (possibly hanging) filesystem.  This is also
+        // annoying, but the user can terminate with SIGKILL.
+
+        stop_signal_received = 1;
+    }
+}
 
 struct System {
     int n_atom;
@@ -543,15 +584,23 @@ try {
         }
         printf("\n");
 
+        // Install signal handlers to dump state only when the simulation has really started.  This is intended to prevent
+        // loss of buffered data and to present final statistics.  It is especially useful when being killed due to running 
+        // out of time on a cluster.
+
+        signal(SIGINT,  abort_like_handler);
+        signal(SIGTERM, abort_like_handler);
+
         // we need to run everyone until the next synchronization event
         // a little care is needed if we are multiplexing the events
         auto tstart = chrono::high_resolution_clock::now();
-        while(systems[0].round_num < n_round) {
+        while(systems[0].round_num < n_round && !stop_signal_received) {
             int last_start = systems[0].round_num;
             #pragma omp parallel for schedule(static,1)
             for(int ns=0; ns<int(systems.size()); ++ns) {
                 System& sys = systems[ns];
                 for(bool do_break=false; (!do_break) && (sys.round_num<n_round); ++sys.round_num) {
+                    if(stop_signal_received) break;
                     int nr = sys.round_num;
                     // don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
@@ -592,11 +641,14 @@ try {
                     do_break = nr>last_start && replica_interval && !((nr+1)%replica_interval);
                 }
             }
+            // Here we are running in serial again
+            if(stop_signal_received) break;
 
             if(replica_interval && !(systems[0].round_num % replica_interval))
                 replex->attempt_swaps(base_random_seed, systems[0].round_num, systems);
         }
-        for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr
+        if(stop_signal_received) {fprintf(stderr, "Received early termination signal\n");}
+        for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr, which also flushes data during destructor
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
         printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.1e simulation_time_unit/hour)\n",
