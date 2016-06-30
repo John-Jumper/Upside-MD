@@ -600,9 +600,13 @@ try {
             for(int ns=0; ns<int(systems.size()); ++ns) {
                 System& sys = systems[ns];
                 for(bool do_break=false; (!do_break) && (sys.round_num<n_round); ++sys.round_num) {
-                    if(stop_signal_received) break;
                     int nr = sys.round_num;
-                    // don't pivot at t=0 so that a partially strained system may relax before the
+
+                    // Check for stop signal somewhat infrequently to avoid any (possibly theoretical)
+                    // performance cost on a NUMA machine
+                    if((nr%8==ns%8) && stop_signal_received) break;
+
+                    // Don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
                     if(nr && pivot_interval && !(nr%pivot_interval)) 
                         sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
@@ -652,8 +656,9 @@ try {
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
         printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.1e simulation_time_unit/hour)\n",
-                elapsed, elapsed*1e6/systems.size()/n_round/3, 
-                n_round*3*dt/elapsed * 3600.);
+                elapsed,
+                elapsed*1e6/systems.size()/systems[0].round_num/3, 
+                systems[0].round_num*3*dt/elapsed * 3600.);
 
         printf("\navg_kinetic_energy/1.5kT");
         for(auto& sys: systems) {
@@ -683,7 +688,7 @@ try {
 
 #ifdef COLLECT_PROFILE
         printf("\n");
-        global_time_keeper.print_report(3*n_round+1);
+        global_time_keeper.print_report(3*systems[0].round_num+1);
         printf("\n");
 #endif
     } catch(const string &e) {
