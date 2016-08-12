@@ -46,7 +46,7 @@ add_executable (upside
     main.cpp)
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIRS})
-target_link_libraries(upside stdc++ ${HDF5_LIBRARIES})
+target_link_libraries(upside stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -58,7 +58,7 @@ add_library(upside_calculation SHARED EXCLUDE_FROM_ALL
 set_target_properties(upside_calculation PROPERTIES
     COMPILE_FLAGS "-DPARAM_DERIV")
 
-target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES})
+target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 
 add_custom_target(support ALL COMMENT "Creating supporting executables")
 
@@ -81,9 +81,9 @@ python_executable(support ugly_hack_break_chain.py)
 python_executable(support estimate_rama_distributions.py)
 
 add_executable(compute_rotamer_centers generate_from_rotamer.cpp compute_rotamer_centers.cpp h5_support.cpp)
-target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES})
+target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 set_target_properties(compute_rotamer_centers PROPERTIES EXCLUDE_FROM_ALL 1)
 
 add_executable(compute_rotamer_pos generate_from_rotamer.cpp compute_rotamer_pos.cpp h5_support.cpp)
-target_link_libraries(compute_rotamer_pos stdc++ m ${HDF5_LIBRARIES})
+target_link_libraries(compute_rotamer_pos stdc++ m ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 set_target_properties(compute_rotamer_pos PROPERTIES EXCLUDE_FROM_ALL 1)
