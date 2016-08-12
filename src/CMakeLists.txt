@@ -39,7 +39,8 @@ set (ENGINE_SRC
     timing.cpp 
     thermostat.cpp
     h5_support.cpp 
-    state_logger.cpp)
+    state_logger.cpp
+    monte_carlo_sampler.cpp)
 
 add_executable (upside
     ${ENGINE_SRC}

@@ -1,4 +1,4 @@
-#include "pivot_sampler.h"
+#include "monte_carlo_sampler.h"
 #include "h5_support.h"
 #include <tclap/CmdLine.h>
 #include "deriv_engine.h"
@@ -66,7 +66,7 @@ struct System {
     H5Obj config;
     shared_ptr<H5Logger> logger;
     DerivEngine engine;
-    PivotSampler pivot_sampler;
+    MultipleMonteCarloSampler mc_samplers;
     VecArrayStorage mom; // momentum
     OrnsteinUhlenbeckThermostat thermostat;
     uint64_t round_num;
@@ -518,13 +518,8 @@ try {
                     *time_buffer=3*dt*sys->round_num;});
 
             if(pivot_interval) {
-                sys->pivot_sampler = PivotSampler{open_group(sys->config.get(), "/input/pivot_moves").get()};
-
-                sys->logger->add_logger<int>("pivot_stats", {2}, [ns,sys](int* stats_buffer) {
-                        stats_buffer[0] = sys->pivot_sampler.pivot_stats.n_success;
-                        stats_buffer[1] = sys->pivot_sampler.pivot_stats.n_attempt;
-                        sys->pivot_sampler.pivot_stats.reset();
-                        });
+                // sys->mc_samplers = MultipleMonteCarloSampler{open_group(sys->config.get(), "/input/sampler_group").get(), *sys->logger};
+                sys->mc_samplers = MultipleMonteCarloSampler{open_group(sys->config.get(), "/input").get(), *sys->logger};
             }
 
             // quick hack of a check for z-centering and membrane potential
@@ -609,7 +604,7 @@ try {
                     // Don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
                     if(nr && pivot_interval && !(nr%pivot_interval)) 
-                        sys.pivot_sampler.pivot_monte_carlo_step(sys.random_seed, nr, sys.temperature, sys.engine);
+                        sys.mc_samplers.execute(sys.random_seed, nr, sys.temperature, sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
                         if(do_recenter) recenter(sys.engine.pos->output, xy_recenter_only, sys.n_atom);
