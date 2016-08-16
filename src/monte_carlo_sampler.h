@@ -10,7 +10,25 @@
 #include "state_logger.h"
 
 struct MonteCarloSampler {
-	virtual void monte_carlo_step(uint32_t seed, uint64_t round, const float temperature, DerivEngine& engine) = 0;
+	struct MoveStats {
+	    uint64_t n_success;
+	    uint64_t n_attempt;
+	    MoveStats() {reset();}
+	    void reset() {n_attempt = n_success = 0u;}
+	};
+
+	MoveStats move_stats;
+
+	void reset_stats() {
+        move_stats.reset();
+    };
+
+	protected:
+	    virtual void propose_random_move(float* delta_lprob, uint32_t seed, uint64_t n_round, 
+	    	VecArray pos) const = 0;
+	public:
+		void monte_carlo_step(uint32_t seed, uint64_t round, const float temperature,
+			DerivEngine& engine);
 };
 
 struct MultipleMonteCarloSampler {
@@ -22,15 +40,5 @@ struct MultipleMonteCarloSampler {
 	
 	void execute(uint32_t seed, uint64_t round, const float temperature, DerivEngine& engine);
 };
-
-// ===[Derived Class Definitions]===
-
-struct MoveStats {
-    uint64_t n_success;
-    uint64_t n_attempt;
-    MoveStats() {reset();}
-    void reset() {n_attempt = n_success = 0u;}
-};
-
 
 #endif /* MONTE_CARLO_SAMPLER_H */

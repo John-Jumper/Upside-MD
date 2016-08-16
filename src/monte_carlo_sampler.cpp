@@ -1,11 +1,5 @@
+
 #include "monte_carlo_sampler.h"
-
-// ===[Multiple Monte Carlo Sampler Definitions]===
-
-
-void MultipleMonteCarloSampler::execute(uint32_t seed, uint64_t round, const float temperature, DerivEngine& engine) {
-	for (auto& s: samplers) s->monte_carlo_step(seed, round, temperature, engine);
-}
 
 // ===[Pivot Sampler Definitions]===
 struct PivotLocation {
@@ -20,7 +14,6 @@ struct PivotSampler : public MonteCarloSampler {
     int n_bin;
     int n_pivot_loc;
 
-    MoveStats    pivot_stats;
     std::vector<PivotLocation> pivot_loc;
     std::vector<float>         proposal_pot;
     std::vector<float>         proposal_prob_cdf;
@@ -29,12 +22,8 @@ struct PivotSampler : public MonteCarloSampler {
 
     PivotSampler(hid_t grp, H5Logger& logger); // Constructor declaration
 
-    void reset_stats() {
-        pivot_stats.reset();
-    };
-
-    void execute_random_pivot(float* delta_lprob, 
-            uint32_t seed, uint64_t n_round, VecArray pos) const;
+    void propose_random_move(float* delta_lprob, 
+        uint32_t seed, uint64_t n_round, VecArray pos) const;
 
     void monte_carlo_step(
             uint32_t seed, 
@@ -54,9 +43,9 @@ PivotSampler::PivotSampler(hid_t grp, H5Logger& logger): // Constructor definiti
     using namespace h5;
 
     logger.add_logger<int>("pivot_stats", {2}, [&](int* stats_buffer) {
-        stats_buffer[0] = pivot_stats.n_success;
-        stats_buffer[1] = pivot_stats.n_attempt;
-        pivot_stats.reset();
+        stats_buffer[0] = move_stats.n_success;
+        stats_buffer[1] = move_stats.n_attempt;
+        move_stats.reset();
         });
 
     check_size(grp, "proposal_pot", n_layer,     n_bin, n_bin);
@@ -99,7 +88,7 @@ PivotSampler::PivotSampler(hid_t grp, H5Logger& logger): // Constructor definiti
     }
 }
 
-void PivotSampler::execute_random_pivot(float* delta_lprob, 
+void PivotSampler::propose_random_move(float* delta_lprob, 
     	uint32_t seed, uint64_t n_round, VecArray pos) const {
     Timer timer(std::string("random_pivot"));
     RandomGenerator random(seed, PIVOT_MOVE_RANDOM_STREAM, 0, n_round);
@@ -177,7 +166,9 @@ void PivotSampler::execute_random_pivot(float* delta_lprob,
     *delta_lprob = new_lprob - old_lprob;
 }
 
-void PivotSampler::monte_carlo_step(
+// ===[Monte Carlo Sampler Definitions]===
+
+void MonteCarloSampler::monte_carlo_step(
         uint32_t seed, 
         uint64_t round,
         const float temperature,
@@ -190,21 +181,27 @@ void PivotSampler::monte_carlo_step(
     engine.compute(PotentialAndDerivMode);
     float old_potential = engine.potential;
 
-    execute_random_pivot(&delta_lprob, seed, round, pos);
+    propose_random_move(&delta_lprob, seed, round, pos);
 
     engine.compute(PotentialAndDerivMode);
     float new_potential = engine.potential;
 
     float lboltz_diff = delta_lprob - (1.f/temperature) * (new_potential-old_potential);
     RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, 0, round);
-    pivot_stats.n_attempt++;
+    move_stats.n_attempt++;
 
     if(lboltz_diff >= 0.f || expf(lboltz_diff) >= random.uniform_open_closed().x()) {
-        pivot_stats.n_success++;
+        move_stats.n_success++;
     } else {
-        // If we reject the pivot, we must reverse it
+        // If we reject the move, we must reverse it
         copy(pos_copy, pos);
     }
+}
+
+// ===[Multiple Monte Carlo Sampler Definitions]===
+
+void MultipleMonteCarloSampler::execute(uint32_t seed, uint64_t round, const float temperature, DerivEngine& engine) {
+    for (auto& s: samplers) s->monte_carlo_step(seed, round, temperature, engine);
 }
 
 MultipleMonteCarloSampler::MultipleMonteCarloSampler(hid_t sampler_group, H5Logger& logger) {
@@ -216,3 +213,5 @@ MultipleMonteCarloSampler::MultipleMonteCarloSampler(hid_t sampler_group, H5Logg
 	// if(h5_exists(sampler_group, "jump_sampler")) 
 	//     samplers.emplace_back(new JumpSampler(open_group(sampler_group, "jump_sampler").get(), logger));
 }
+
+
