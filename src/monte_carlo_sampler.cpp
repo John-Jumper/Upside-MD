@@ -18,21 +18,16 @@ struct PivotSampler : public MonteCarloSampler {
     std::vector<float>         proposal_pot;
     std::vector<float>         proposal_prob_cdf;
 
-    PivotSampler(): n_layer(0), n_bin(0), n_pivot_loc(0) {} // Default constructor definition
+    PivotSampler(): MonteCarloSampler(), n_layer(0), n_bin(0), n_pivot_loc(0) {} // Default constructor definition
 
-    PivotSampler(hid_t grp, H5Logger& logger); // Constructor declaration
+    PivotSampler(const std::string& grp_name, hid_t grp, H5Logger& logger); // Constructor declaration
 
     void propose_random_move(float* delta_lprob, 
-        uint32_t seed, uint64_t n_round, VecArray pos) const;
-
-    void monte_carlo_step(
-            uint32_t seed, 
-            uint64_t round,
-            const float temperature,
-            DerivEngine& engine);
+        RandomGenerator& random, VecArray pos) const;
 };
 
-PivotSampler::PivotSampler(hid_t grp, H5Logger& logger): // Constructor definition
+PivotSampler::PivotSampler(const std::string& name, hid_t grp, H5Logger& logger): // Constructor definition
+    MonteCarloSampler(name, PIVOT_MOVE_RANDOM_STREAM, logger),
     n_layer(h5::get_dset_size(3, grp, "proposal_pot")[0]), 
     n_bin  (h5::get_dset_size(3, grp, "proposal_pot")[1]),
     n_pivot_loc(h5::get_dset_size(2, grp, "pivot_atom")[0]),
@@ -41,12 +36,6 @@ PivotSampler::PivotSampler(hid_t grp, H5Logger& logger): // Constructor definiti
     proposal_prob_cdf(n_layer*n_bin*n_bin)
 {
     using namespace h5;
-
-    logger.add_logger<int>("pivot_stats", {2}, [&](int* stats_buffer) {
-        stats_buffer[0] = move_stats.n_success;
-        stats_buffer[1] = move_stats.n_attempt;
-        move_stats.reset();
-        });
 
     check_size(grp, "proposal_pot", n_layer,     n_bin, n_bin);
     check_size(grp, "pivot_atom",    n_pivot_loc, 5);
@@ -89,9 +78,8 @@ PivotSampler::PivotSampler(hid_t grp, H5Logger& logger): // Constructor definiti
 }
 
 void PivotSampler::propose_random_move(float* delta_lprob, 
-    	uint32_t seed, uint64_t n_round, VecArray pos) const {
+    	RandomGenerator& random, VecArray pos) const {
     Timer timer(std::string("random_pivot"));
-    RandomGenerator random(seed, PIVOT_MOVE_RANDOM_STREAM, 0, n_round);
     float4 random_values = random.uniform_open_closed();
 
     // pick a random pivot location
@@ -166,6 +154,69 @@ void PivotSampler::propose_random_move(float* delta_lprob,
     *delta_lprob = new_lprob - old_lprob;
 }
 
+// ===[Jump Sampler Definitions]===
+
+struct JumpSampler : public MonteCarloSampler {
+    struct JumpChain {
+        int first_atom, last_atom;
+        float sigma_trans, sigma_rot;
+    };
+
+    int n_jump_chains;
+
+    std::vector<JumpChain> jump_chains;
+
+    JumpSampler(const std::string& grp_name, hid_t grp, H5Logger& logger); // Constructor declaration
+
+    void propose_random_move(float* delta_lprob, 
+        RandomGenerator& random, VecArray pos) const;
+};
+
+JumpSampler::JumpSampler(const std::string& name, hid_t grp, H5Logger& logger): // Constructor definition
+    MonteCarloSampler(name, JUMP_MOVE_RANDOM_STREAM, logger),
+    n_jump_chains(h5::get_dset_size(2, grp, "atom_range")[0]),
+
+    jump_chains(n_jump_chains)
+{
+    using namespace h5;
+    check_size(grp, "atom_range",  n_jump_chains, 2);
+    check_size(grp, "sigma_trans", n_jump_chains);
+    check_size(grp, "sigma_rot",   n_jump_chains);
+
+    traverse_dset<2,int>(grp, "atom_range", [&](size_t ns, size_t begin_end, int x) { 
+        if(!begin_end)
+            jump_chains[ns].first_atom = x;
+        else
+            jump_chains[ns].last_atom = x;});
+    traverse_dset<1,int>(grp, "sigma_trans", [&](size_t ns, int x) { jump_chains[ns].sigma_trans = x; });
+    traverse_dset<1,int>(grp, "sigma_rot",   [&](size_t ns, int x) { jump_chains[ns].sigma_rot = x; });
+}
+
+void JumpSampler::propose_random_move(float* delta_lprob, 
+        RandomGenerator& random, VecArray pos) const {
+    Timer timer(std::string("random_jump"));
+
+    // pick a random jump chain
+    float4 rand_chain_val = random.uniform_open_closed();
+    int chain = int(n_jump_chains * rand_chain_val.w());
+    if(chain == n_jump_chains) chain--;  // this may occur due to rounding
+    const auto& j = jump_chains[chain];
+
+    // pick a random jump translation displacement
+    float3 rand_disp_val = j.sigma_trans/sqrtf(3.f) * random.normal3();
+
+    // get CoM
+    float3 com = make_vec3(0.f, 0.f, 0.f);
+    for (int na = j.first_atom; na < j.last_atom; na++)
+        com += load_vec<3>(pos, na);
+    com *= 1.f/(j.last_atom-j.first_atom);
+
+    for (int na = j.first_atom; na < j.last_atom; na++)
+        update_vec(pos, na, rand_disp_val);
+    
+    *delta_lprob = 0.f;
+}
+
 // ===[Monte Carlo Sampler Definitions]===
 
 void MonteCarloSampler::monte_carlo_step(
@@ -174,6 +225,8 @@ void MonteCarloSampler::monte_carlo_step(
         const float temperature,
         DerivEngine& engine) 
 {
+    RandomGenerator random(seed, stream_id, 0, round);
+
     auto &pos = engine.pos->output;
     VecArrayStorage pos_copy(pos);
     float delta_lprob;
@@ -181,13 +234,12 @@ void MonteCarloSampler::monte_carlo_step(
     engine.compute(PotentialAndDerivMode);
     float old_potential = engine.potential;
 
-    propose_random_move(&delta_lprob, seed, round, pos);
+    propose_random_move(&delta_lprob, random, pos);
 
     engine.compute(PotentialAndDerivMode);
     float new_potential = engine.potential;
 
     float lboltz_diff = delta_lprob - (1.f/temperature) * (new_potential-old_potential);
-    RandomGenerator random(seed, PIVOT_MONTE_CARLO_RANDOM_STREAM, 0, round);
     move_stats.n_attempt++;
 
     if(lboltz_diff >= 0.f || expf(lboltz_diff) >= random.uniform_open_closed().x()) {
@@ -207,11 +259,17 @@ void MultipleMonteCarloSampler::execute(uint32_t seed, uint64_t round, const flo
 MultipleMonteCarloSampler::MultipleMonteCarloSampler(hid_t sampler_group, H5Logger& logger) {
 	using namespace h5;
 	
-	if(h5_exists(sampler_group, "pivot_moves"))
-		samplers.emplace_back(new PivotSampler(open_group(sampler_group, "pivot_moves").get(), logger));
+        std::string name;
+
+        name = "pivot";
+	if(h5_exists(sampler_group, (name + "_moves").c_str()))
+		samplers.emplace_back(
+                        new PivotSampler(name.c_str(), open_group(sampler_group, (name + "_moves").c_str()).get(), logger));
 		
-	// if(h5_exists(sampler_group, "jump_sampler")) 
-	//     samplers.emplace_back(new JumpSampler(open_group(sampler_group, "jump_sampler").get(), logger));
+        name = "jump";
+	if(h5_exists(sampler_group, (name + "_moves").c_str()))
+		samplers.emplace_back(
+                        new JumpSampler(name.c_str(), open_group(sampler_group, (name + "_moves").c_str()).get(), logger));
 }
 
 
