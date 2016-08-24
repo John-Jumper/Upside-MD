@@ -1174,8 +1174,6 @@ def main():
             help='Use far more permissive angles and distances to judge HBonding.  Do not use for simulation. '+
             'This is only useful for static backbone training when crystal or NMR structures have poor '+
             'hbond geometry.') 
-    parser.add_argument('--helix-energy-perturbation', default=None,
-            help='hbond energy perturbation file for helices')
     parser.add_argument('--z-flat-bottom', default='', 
             help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line '+
             'must contain "residue z0 radius spring_constant".  The restraint is applied to the CA atom '+
@@ -1191,17 +1189,14 @@ def main():
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with good bond lengths and angles but bad dihedrals will be used ' +
             'instead.')
-    parser.add_argument('--target-structures', default='', 
-            help='Pickle file for target structures for the simulation.  ' +
-            'This option controls the structure used for restraint group and '+
-            'other structure-specific potentials.  If not provided, the initial '
-            'structure is used as a default.')
     parser.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
-            help='Path to file containing whitespace-separated residue numbers (first residue is number 0).  '+
+            help='List of residues in the protein.  The residue list should be of a form like ' +
+            '--restraint-group 10-13,17,19-21 and that list would specify all the atoms in '+
+            'residues 10,11,12,13,17,19,20,21. '+
             'Each atom in the specified residues will be randomly connected to atoms in other residues by ' +
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
-            'with different filenames.')
+            'with different residue lists.  The strength of the restraint is given by --restraint-spring-constant')
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
     parser.add_argument('--contact-energies', default='', 
@@ -1245,8 +1240,8 @@ def main():
 
 
     args = parser.parse_args()
-    if args.restraint_group and not (args.initial_structures or args.target_structures):
-        parser.error('must specify --initial-structures or --target-structures to use --restraint-group')
+    if args.restraint_group and not args.initial_structures:
+        parser.error('must specify --initial-structures to use --restraint-group')
 
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
@@ -1274,14 +1269,7 @@ def main():
     for i in range(n_system):
         pos[:,:,i] = init_pos[...,i%init_pos.shape[-1]] if args.initial_structures else random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)
-
-    if args.target_structures:
-        target = cPickle.load(open(args.target_structures))
-        assert target.shape == (n_atom, 3, target.shape[-1])
-        if target.shape[-1] != 1: 
-            parser.error('Only a single target structure is supported, but your file contains multiple')
-    else:
-        target = pos.copy()
+    target = pos.copy()
     
     potential = t.create_group(input,  'potential')
 
