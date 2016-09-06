@@ -158,7 +158,7 @@ void PivotSampler::propose_random_move(float* delta_lprob,
 
 struct JumpSampler : public MonteCarloSampler {
     struct JumpChain {
-        int first_atom, last_atom;
+        int first_atom, next_first;
         float sigma_trans, sigma_rot;
     };
 
@@ -183,13 +183,21 @@ JumpSampler::JumpSampler(const std::string& name, hid_t grp, H5Logger& logger): 
     check_size(grp, "sigma_trans", n_jump_chains);
     check_size(grp, "sigma_rot",   n_jump_chains);
 
+    printf("---[Adding JumpSampler]---\n");
+
     traverse_dset<2,int>(grp, "atom_range", [&](size_t ns, size_t begin_end, int x) { 
-        if(!begin_end)
-            jump_chains[ns].first_atom = x;
-        else
-            jump_chains[ns].last_atom = x;});
-    traverse_dset<1,int>(grp, "sigma_trans", [&](size_t ns, int x) { jump_chains[ns].sigma_trans = x; });
-    traverse_dset<1,int>(grp, "sigma_rot",   [&](size_t ns, int x) { jump_chains[ns].sigma_rot = x; });
+        if(!begin_end) {
+            printf("[%d,", x);
+            jump_chains[ns].first_atom = x; }
+        else {
+            printf("%d]\n", x);
+            jump_chains[ns].next_first = x; } });
+    traverse_dset<1,float>(grp, "sigma_trans", [&](size_t ns, float x) { 
+        printf("%.3f\n", x);
+        jump_chains[ns].sigma_trans = x; });
+    traverse_dset<1,float>(grp, "sigma_rot",   [&](size_t ns, float x) {
+        printf("%.3f\n", x); 
+        jump_chains[ns].sigma_rot = x; });
 }
 
 void JumpSampler::propose_random_move(float* delta_lprob, 
@@ -202,17 +210,30 @@ void JumpSampler::propose_random_move(float* delta_lprob,
     if(chain == n_jump_chains) chain--;  // this may occur due to rounding
     const auto& j = jump_chains[chain];
 
-    // pick a random jump translation displacement
+    // pick a random jump translation
     float3 rand_disp_val = j.sigma_trans/sqrtf(3.f) * random.normal3();
+
+    // pick a random jump rotation angle and axis unit vector. Create rotation matrix 
+    float4 rand_rot_variates = random.normal();
+    float  rand_rot_angle    = j.sigma_rot * rand_rot_variates[0];
+    float3 rand_rot_axis     = extract<1,4>(rand_rot_variates);
+    rand_rot_axis /= mag(rand_rot_axis)+1e-16f;  // 1e-16 is paranoia against division by zero
+    
+    float U[9]; axis_angle_to_rot(U, rand_rot_angle, rand_rot_axis);
 
     // get CoM
     float3 com = make_vec3(0.f, 0.f, 0.f);
-    for (int na = j.first_atom; na < j.last_atom; na++)
+    for (int na = j.first_atom; na < j.next_first; na++)
         com += load_vec<3>(pos, na);
-    com *= 1.f/(j.last_atom-j.first_atom);
+    com *= 1.f/(j.next_first-j.first_atom);
 
-    for (int na = j.first_atom; na < j.last_atom; na++)
-        update_vec(pos, na, rand_disp_val);
+    // apply displacement
+    for (int na = j.first_atom; na < j.next_first; na++) {
+        float3 pos_na = load_vec<3>(pos, na);
+        // rotate about center of mass to avoid "orbiting" the origin
+        float3 new_pos_na = rand_disp_val + com + apply_rotation(U, pos_na-com);
+        store_vec(pos, na, new_pos_na);
+    }
     
     *delta_lprob = 0.f;
 }

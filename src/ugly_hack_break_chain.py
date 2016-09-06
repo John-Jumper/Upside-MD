@@ -47,9 +47,12 @@ def main():
     parser.add_argument('--chain-first-residue', default=[0], type=int, action='append', help=
             'First residue index of a new chain.  May be specified multiple times.  --chain-first-residue=0 is assumed '+
             'and need not be specified.')
+    parser.add_argument('--jump-length-scale', type=float, default=5., help='Translational gaussian width in angstroms for Monte Carlo JumpSampler')
+    parser.add_argument('--jump-rotation-scale', type=float, default=30., help='Rotational gaussian width in degrees for Monte Carlo JumpSampler')
+    parser.add_argument('--remove-pivot', action='store_true', help='Whether to remove the MC PivotSampler param group to isolate JumpSampler for testing')
     args = parser.parse_args()
 
-    print 'This program is an ugly hack, and you simulation may give very bad results.'
+    print 'This program is an ugly hack, and your simulation may give very bad results.'
     print 'If you are lucky, the results will be only a little bad.'
     print
     print 'Breaking chain at residues %s' % args.chain_first_residue
@@ -58,7 +61,29 @@ def main():
     t = tb.open_file(args.config, 'a')
     pot = t.root.input.potential
     chain_starts = np.array(args.chain_first_residue)*3
+    n_chains = len(chain_starts)
 
+    # Setting Jump Sampler params
+    if args.remove_pivot:
+        t.remove_node("/input", "pivot_moves", recursive=True)
+
+    # Need to add one atom past the last atom so that the last chain is processed
+    chain_starts_plus = np.append(chain_starts, len(t.root.input.sequence)*3)
+
+    jump_atom_range = np.array([[chain_starts_plus[i], chain_starts_plus[i+1]] for i in xrange(n_chains)], dtype='int32')
+    jump_sigma_trans = np.array([args.jump_length_scale]*n_chains, dtype='float32')
+    jump_sigma_rot = np.array([args.jump_rotation_scale*np.pi/180.]*n_chains, dtype='float32') # Converts to radians
+
+    print "jump atom_range:\n{}\nsigma_trans:\n{}\nsigma_rot:\n{}\n".format(jump_atom_range, jump_sigma_trans, jump_sigma_rot)
+
+    jump_grp = t.create_group("/input","jump_moves","JumpSampler Params")
+    t.create_array(jump_grp, "atom_range", jump_atom_range, "First, last atom num demarking each chain")
+    t.create_array(jump_grp, "sigma_trans", jump_sigma_trans, "Translational gaussian width")
+    t.create_array(jump_grp, "sigma_rot", jump_sigma_rot, "Rotational gaussian width")
+
+    # FIXME don't attempt pivots across chain breaks
+
+    # Breaking interactions
     multicut(chain_starts, pot, 'angle_spring', 'id', 'equil_dist spring_const'.split())
     multicut(chain_starts, pot, 'dihedral_spring', 'id', 'equil_dist spring_const'.split())
     multicut(chain_starts, pot, 'dist_spring', 'id', 'equil_dist spring_const bonded_atoms'.split(), pot.dist_spring.bonded_atoms[:].astype('bool'))

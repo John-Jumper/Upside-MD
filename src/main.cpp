@@ -681,6 +681,19 @@ try {
             }
         } catch(...) {}  // stats reporting is optional
 
+        try {
+            if(pivot_interval) {
+                printf("jump_success:");
+                for(auto& sys: systems) {
+                    std::vector<int64_t> ps(2,0);
+                    traverse_dset<2,int>(sys.config.get(), "/output/jump_stats", [&](size_t nf, int d, int x) {
+                            ps[d] += x;});
+                    printf(" % .4f", double(ps[0])/double(ps[1]));
+                }
+                printf("\n");
+            }
+        } catch(...) {}  // stats reporting is optional
+
 #ifdef COLLECT_PROFILE
         printf("\n");
         global_time_keeper.print_report(3*systems[0].round_num+1);
