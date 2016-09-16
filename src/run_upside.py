@@ -77,7 +77,7 @@ UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
 
 
 def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
-               replica_interval=None, anneal_factor=1., anneal_duration=-1., pivot_interval=None, 
+               replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
                log_level='detailed', account=None):
     if isinstance(config,str): config = [config]
@@ -93,8 +93,8 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
         upside_args.extend(['--replica-interval', '%f'%replica_interval])
         for s in swap_sets:
             upside_args.extend(['--swap-set', s])
-    if pivot_interval is not None:
-        upside_args.extend(['--pivot-interval', '%f'%pivot_interval])
+    if mc_interval is not None:
+        upside_args.extend(['--monte-carlo-interval', '%f'%mc_interval])
     if anneal_factor != 1.:
         upside_args.extend(['--anneal-factor', '%f'%anneal_factor])
     if anneal_duration != -1.:
