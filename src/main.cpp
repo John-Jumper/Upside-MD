@@ -341,8 +341,8 @@ try {
     ValueArg<double> replica_interval_arg("", "replica-interval", 
             "simulation time between applications of replica exchange (0 means no replica exchange, default 0.)", 
             false, 0., "float", cmd);
-    ValueArg<double> pivot_interval_arg("", "pivot-interval", 
-            "simulation time between attempts to pivot move (0 means no pivot moves, default 0.)", 
+    ValueArg<double> mc_interval_arg("", "monte-carlo-interval", 
+            "simulation time between attempts to do Monte Carlo moves (0. means no MC moves, default 0.)", 
             false, 0., "float", cmd);
     ValueArg<double> thermostat_interval_arg("", "thermostat-interval", 
             "simulation time between applications of the thermostat", 
@@ -390,8 +390,8 @@ try {
         // initialize thermostat and thermalize momentum
         printf("random seed: %lu\n", (unsigned long)(base_random_seed));
 
-        int pivot_interval = pivot_interval_arg.getValue() > 0. 
-            ? max(1,int(pivot_interval_arg.getValue()/(3*dt)))
+        int mc_interval = mc_interval_arg.getValue() > 0. 
+            ? max(1,int(mc_interval_arg.getValue()/(3*dt)))
             : 0;
 
         int duration_print_width = ceil(log(1+duration)/log(10));
@@ -517,7 +517,7 @@ try {
             sys->logger->add_logger<double>("time", {}, [sys,dt](double* time_buffer) {
                     *time_buffer=3*dt*sys->round_num;});
 
-            if(pivot_interval) {
+            if(mc_interval) {
                 // sys->mc_samplers = MultipleMonteCarloSampler{open_group(sys->config.get(), "/input/sampler_group").get(), *sys->logger};
                 sys->mc_samplers = MultipleMonteCarloSampler{open_group(sys->config.get(), "/input").get(), *sys->logger};
             }
@@ -603,7 +603,7 @@ try {
 
                     // Don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
-                    if(nr && pivot_interval && !(nr%pivot_interval)) 
+                    if(nr && mc_interval && !(nr%mc_interval)) 
                         sys.mc_samplers.execute(sys.random_seed, nr, sys.temperature, sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
@@ -668,8 +668,9 @@ try {
         }
         printf("\n");
 
+        // FIXME this code should be moved into MC sampler code
         try {
-            if(pivot_interval) {
+            if(mc_interval) {
                 printf("pivot_success:");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
@@ -682,7 +683,7 @@ try {
         } catch(...) {}  // stats reporting is optional
 
         try {
-            if(pivot_interval) {
+            if(mc_interval) {
                 printf("jump_success:");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
