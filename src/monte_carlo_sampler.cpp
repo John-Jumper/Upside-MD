@@ -204,35 +204,47 @@ void JumpSampler::propose_random_move(float* delta_lprob,
         RandomGenerator& random, VecArray pos) const {
     Timer timer(std::string("random_jump"));
 
+    // pick jump move type: translation or rotation
+    float4 rand_type_val = random.uniform_open_closed();
+    int jump_move_type = int(2 * rand_type_val.x());
+
     // pick a random jump chain
-    float4 rand_chain_val = random.uniform_open_closed();
-    int chain = int(n_jump_chains * rand_chain_val.w());
+    int chain = int(n_jump_chains * rand_type_val.w());
     if(chain == n_jump_chains) chain--;  // this may occur due to rounding
     const auto& j = jump_chains[chain];
 
-    // pick a random jump translation
-    float3 rand_disp_val = j.sigma_trans/sqrtf(3.f) * random.normal3();
+    if (jump_move_type == 0) { // translation
+        // pick a random jump translation
+        float3 rand_disp_val = j.sigma_trans/sqrtf(3.f) * random.normal3();
 
-    // pick a random jump rotation angle and axis unit vector. Create rotation matrix 
-    float4 rand_rot_variates = random.normal();
-    float  rand_rot_angle    = j.sigma_rot * rand_rot_variates[0];
-    float3 rand_rot_axis     = extract<1,4>(rand_rot_variates);
-    rand_rot_axis /= mag(rand_rot_axis)+1e-16f;  // 1e-16 is paranoia against division by zero
-    
-    float U[9]; axis_angle_to_rot(U, rand_rot_angle, rand_rot_axis);
+        // apply displacement
+        for (int na = j.first_atom; na < j.next_first; na++) {
+            float3 pos_na = load_vec<3>(pos, na);
+            float3 new_pos_na = rand_disp_val + pos_na;
+            store_vec(pos, na, new_pos_na);
+        }
+    }
+    else { // rotation
+        // pick a random jump rotation angle and axis unit vector. Create rotation matrix 
+        float4 rand_rot_variates = random.normal();
+        float  rand_rot_angle    = j.sigma_rot * rand_rot_variates[0];
+        float3 rand_rot_axis     = extract<1,4>(rand_rot_variates);
+        rand_rot_axis /= mag(rand_rot_axis)+1e-16f;  // 1e-16 is paranoia against division by zero
+        
+        float U[9]; axis_angle_to_rot(U, rand_rot_angle, rand_rot_axis);
 
-    // get CoM
-    float3 com = make_vec3(0.f, 0.f, 0.f);
-    for (int na = j.first_atom; na < j.next_first; na++)
-        com += load_vec<3>(pos, na);
-    com *= 1.f/(j.next_first-j.first_atom);
+        // get CoM
+        float3 com = make_vec3(0.f, 0.f, 0.f);
+        for (int na = j.first_atom; na < j.next_first; na++)
+            com += load_vec<3>(pos, na);
+        com *= 1.f/(j.next_first-j.first_atom);
 
-    // apply displacement
-    for (int na = j.first_atom; na < j.next_first; na++) {
-        float3 pos_na = load_vec<3>(pos, na);
-        // rotate about center of mass to avoid "orbiting" the origin
-        float3 new_pos_na = rand_disp_val + com + apply_rotation(U, pos_na-com);
-        store_vec(pos, na, new_pos_na);
+        // apply rotation about com
+        for (int na = j.first_atom; na < j.next_first; na++) {
+            float3 pos_na = load_vec<3>(pos, na);
+            float3 new_pos_na = com + apply_rotation(U, pos_na-com);
+            store_vec(pos, na, new_pos_na);
+        }       
     }
     
     *delta_lprob = 0.f;

@@ -671,7 +671,7 @@ try {
         // FIXME this code should be moved into MC sampler code
         try {
             if(mc_interval) {
-                printf("pivot_success:");
+                printf("pivot_success:\n");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
                     traverse_dset<2,int>(sys.config.get(), "/output/pivot_stats", [&](size_t nf, int d, int x) {
@@ -684,7 +684,7 @@ try {
 
         try {
             if(mc_interval) {
-                printf("jump_success:");
+                printf("jump_success:\n");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
                     traverse_dset<2,int>(sys.config.get(), "/output/jump_stats", [&](size_t nf, int d, int x) {
