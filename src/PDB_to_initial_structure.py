@@ -102,6 +102,7 @@ def main():
             help='Comma-separated list of chains to parse (e.g. --chains=A,C,E). Default is all chains.')
     parser.add_argument('--allow-unexpected-chain-breaks', default=False, action='store_true', 
             help='Do not fail on unexpected chain breaks (dangerous)')
+    parser.add_argument('--record-chain-breaks', action='store_true', help='Record index of chain first residues to help automate generation of system files for multiple chains')
     args = parser.parse_args()
     
     structure = prody.parsePDB(args.pdb, model=args.model)
@@ -121,6 +122,7 @@ def main():
     chi = []
     unexpected_chain_breaks = False
     chain_resnum = []
+    chain_first_residue = []
 
     for chain_id, (res,ignored_restype) in chains:
         print "chain %s:" % chain_id
@@ -142,6 +144,7 @@ def main():
                     print '    %s chain break at residue %i (%4.1f A)' % (('UNEXPECTED' if i else 'expected  '),
                          len(coords)/3, dist)
                     if i: unexpected_chain_breaks = True
+                    if not i and args.record_chain_breaks: chain_first_residue.append(len(coords)/3)
 
             coords.extend([r.N,r.CA,r.C])
             sequence.append(r.restype)
@@ -149,6 +152,7 @@ def main():
             chain_resnum.append((str(chain_id),r.resnum))
         print
     coords = np.array(coords)
+    coords -= coords.mean(axis=0) # move com to origin
     chi = np.array(chi)
 
     if unexpected_chain_breaks and not args.allow_unexpected_chain_breaks:
@@ -182,6 +186,10 @@ def main():
             print >>f, '% 7i %7s %5s   %6s  % 8.3f % 8.3f' % (
                     nr, restype, chain_resnum[nr][0], chain_resnum[nr][1], chi[nr,0]/deg, chi[nr,1]/deg)
 
+    if chain_first_residue:
+        with open(args.basename+'.breaks','w') as f:
+            for i in chain_first_residue:
+                print >>f, i
 
 if __name__ == '__main__':
     main()

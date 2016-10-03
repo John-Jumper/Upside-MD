@@ -44,13 +44,19 @@ def unsupported(pot, grp_name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True, help='Config to modify')
-    parser.add_argument('--chain-first-residue', default=[0], type=int, action='append', help=
+    parser_grp0 = parser.add_mutually_exclusive_group()
+    parser_grp0.add_argument('--chain-first-residue', default=[0], type=int, action='append', help=
             'First residue index of a new chain.  May be specified multiple times.  --chain-first-residue=0 is assumed '+
             'and need not be specified.')
+    parser_grp0.add_argument('--chain-break-from-file', action='store_true', help='Use indices of chain first residues stored in config file.')
     parser.add_argument('--jump-length-scale', type=float, default=5., help='Translational gaussian width in angstroms for Monte Carlo JumpSampler. Default: 5 angstroms')
     parser.add_argument('--jump-rotation-scale', type=float, default=30., help='Rotational gaussian width in degrees for Monte Carlo JumpSampler. Default: 30 degrees')
     parser.add_argument('--remove-pivot', action='store_true', help='Whether to remove the MC PivotSampler param group to isolate JumpSampler for testing')
     args = parser.parse_args()
+
+    t = tb.open_file(args.config, 'a')
+    if args.chain_break_from_file:
+        args.chain_first_residue = np.append([0], t.root.input.chain_break.chain_first_residue)
 
     print 'This program is an ugly hack, and your simulation may give very bad results.'
     print 'If you are lucky, the results will be only a little bad.'
@@ -58,9 +64,9 @@ def main():
     print 'Breaking chain at residues %s' % args.chain_first_residue
     print
 
-    t = tb.open_file(args.config, 'a')
     pot = t.root.input.potential
     chain_starts = np.array(args.chain_first_residue)*3
+    print chain_starts
     n_chains = len(chain_starts)
 
     # Setting Jump Sampler params

@@ -1128,6 +1128,20 @@ def parse_float_pair(s):
 
     return (float(args[0]), float(args[1]))
 
+def chain_endpts(n_res, chain_first_residue, i):
+    n_chains = chain_first_residue.size+1
+    if i == 0:
+        first_res = 0
+        next_first_res = chain_first_residue[i]
+    elif i == n_chains-1:
+        first_res = chain_first_residue[i-1]
+        next_first_res = n_res
+    else:
+        first_res = chain_first_residue[i-1]
+        next_first_res = chain_first_residue[i]
+
+    return first_res, next_first_res
+
 
 def main():
     import argparse
@@ -1185,8 +1199,11 @@ def main():
             'sheet content in the final structure.  Default is no sheet mixing.')
     parser.add_argument('--hbond-energy', default=0., type=float,
             help='energy for forming a protein-protein hydrogen bond.  Default is no HBond energy.')
+
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
-            help='Residues to have neither hydrogen bond donors or acceptors') 
+            help='Residues to have neither hydrogen bond donors or acceptors')
+    parser.add_argument('--chain-break-from-file', default='', help='File with indices of chain first residues recorded during initial structure generation to automate --hbond-exclude-residues.')
+
     parser.add_argument('--loose-hbond-criteria', default=False, action='store_true',
             help='Use far more permissive angles and distances to judge HBonding.  Do not use for simulation. '+
             'This is only useful for static backbone training when crystal or NMR structures have poor '+
@@ -1206,7 +1223,9 @@ def main():
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with good bond lengths and angles but bad dihedrals will be used ' +
             'instead.')
-    parser.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
+
+    parser_grp0 = parser.add_mutually_exclusive_group()
+    parser_grp0.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
             help='List of residues in the protein.  The residue list should be of a form like ' +
             '--restraint-group 10-13,17,19-21 and that list would specify all the atoms in '+
             'residues 10,11,12,13,17,19,20,21. '+
@@ -1214,6 +1233,8 @@ def main():
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
             'with different residue lists.  The strength of the restraint is given by --restraint-spring-constant')
+    parser_grp0.add_argument('--chain-restraints-from-file', action='store_true', help='Use indices of chain first residues recorded during initial structure generation to automate --restraint-group for chains. Requires --chain-break-from-file.')
+
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
     parser.add_argument('--contact-energies', default='', 
@@ -1249,12 +1270,15 @@ def main():
     parser.add_argument('--membrane-potential-unsatisfied-hbond-residues-type2',default=[], type=parse_segments,
             help='Residues that have 2 unsatisfied hydrogen bonds, which will be marked as XXXUHB2 in --membrane-potential. ' +
                  'NOTE: the indices here should not have overlap with those in --membrane-potential-unsatisfied-hbond-residues-type1.')
-    parser.add_argument('--cavity-radius', default=0., type=float,
+
+    parser_grp1 = parser.add_mutually_exclusive_group()
+    parser_grp1.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
+    parser_grp1.add_argument('--auto-cavity-radius', action='store_true', help='Set the cavity radius to 2x the max com distance between chains.')
+
     parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
-
 
     args = parser.parse_args()
     if args.restraint_group and not args.initial_structures:
@@ -1262,6 +1286,9 @@ def main():
 
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
+
+    if args.chain_restraints_from_file and not args.chain_break_from_file:
+        parser.error('--chain-restraints-from-file requires --chain-break-from-file')
 
     fasta_seq_with_cpr = read_fasta(open(args.fasta,'U'))
     fasta_seq = np.array([(x if x != 'CPR' else 'PRO') for x in fasta_seq_with_cpr])  # most potentials don't care about CPR
@@ -1271,7 +1298,8 @@ def main():
 
     global n_system, n_atom, t, potential
     n_system = args.n_system
-    n_atom = 3*len(fasta_seq)
+    n_res = len(fasta_seq)
+    n_atom = 3*n_res
     
     t = tb.open_file(args.output,'w')
     
@@ -1302,6 +1330,33 @@ def main():
                 fasta_seq, args.rotamer_placement,
                 args.dynamic_rotamer_placement, args.dynamic_rotamer_1body,
                 args.fix_rotamer)
+
+    if args.chain_break_from_file:
+        try:
+            chain_first_residue = np.loadtxt(args.chain_break_from_file, ndmin=1, dtype='int32')
+        except IOError:
+            chain_first_residue = []
+            n_chains = 1
+        else:
+            n_chains = chain_first_residue.size+1
+
+        print
+        print "n_chains"
+        print n_chains
+
+        if chain_first_residue:
+            break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
+            t.create_array(break_grp, "chain_first_residue", chain_first_residue, "Contains array of chain first residues, apart from residue 0") 
+
+            required_hbond_exclude_res = [i+j for i in chain_first_residue for j in [-1,0]]
+            if args.hbond_exclude_residues:
+                args.hbond_exclude_residues = np.unique(np.append(args.hbond_exclude_residues, args.hbond_exclude_residues))
+            else:
+                args.hbond_exclude_residues = np.array(required_hbond_exclude_res)
+
+            print
+            print "hbond_exclude_residues"
+            print args.hbond_exclude_residues
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)
@@ -1339,6 +1394,29 @@ def main():
         create_array(grp, 'residue_id',   obj=np.arange(len(fasta_seq)))
         create_array(grp, 'rama_map_id',  obj=np.zeros(len(fasta_seq), dtype='i4'))
         create_array(grp, 'rama_pot',     obj=ref_state_cor[None])
+
+    if args.auto_cavity_radius:
+        if n_chains < 2:
+            parser.error('--auto-cavity-radius requires at least 2 chains')
+        com_list = []
+        com_dist_list = []
+
+        for i in xrange(n_chains):
+            first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
+            com_list.append(pos[first_res*3:next_first_res*3,:,0].mean(axis=0))
+
+        for i in xrange(n_chains):
+            print
+            print "com_list"
+            print com_list[i]
+            for j in xrange(n_chains):
+                if j > i:
+                    com_dist_list.append(vmag(com_list[i]-com_list[j]))
+
+        args.cavity_radius = 2.*max(com_dist_list)
+        print
+        print "cavity_radius"
+        print args.cavity_radius
 
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)
@@ -1389,6 +1467,16 @@ def main():
 
     if require_affine:
         write_affine_alignment(len(fasta_seq))
+
+    if args.chain_restraints_from_file:
+        args.restraint_group = []
+        for i in xrange(n_chains):
+            first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
+            args.restraint_group.append(np.arange(first_res, next_first_res))
+
+        print
+        print "restraint_group"
+        print args.restraint_group
 
     if args.restraint_group:
         print
