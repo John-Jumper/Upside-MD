@@ -15,8 +15,8 @@ Dependences for generating config files
   * Python 2.6+
   * Numpy python library
   * Scipy python library
-  * cvxopt python library
   * PyTables python library
+  * Prody library for converting PDB files
 
 
 dependences.  Note that the `module` command must be re-executed every time you
@@ -24,13 +24,14 @@ login or put in your `.bashrc`.  The `easy_install` commands only need to be
 executed once.
 
     module add git cmake gcc hdf5 python eigen
-    easy_install --user numexpr cython cvxopt
+    easy_install --user numexpr cython cvxopt prody
     easy_install --user tables
 
 #### Obtaining the source code and parameter files
 
-    git clone git@psd-repo.uchicago.edu:freed-and-sosnick-lab/upside.git
-    git clone git@psd-repo.uchicago.edu:freed-and-sosnick-lab/upside-parameters.git
+The source code is obtained from this repository.  The parameter files must
+be obtained separately.  We will shortly add a separate upside-parameters repository
+to contain them.
 
 #### Compiling the code
 If you are running on midway, godzilla, Ubuntu, Debian, or OS X, try
@@ -45,6 +46,8 @@ directory.  The configuration generator `upside_config.py` will still be in the 
 directory because python files do not require compilation.
 
 ## Using Upside
+
+TODO: update this section.
 
 #### Generating a configuration file
 
