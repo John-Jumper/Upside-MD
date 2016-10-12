@@ -203,7 +203,7 @@ def rmsd_transform(target, model):
     R = np.dot(target.T, model)
     U,S,Vt = np.linalg.svd(R)
     if np.linalg.det(np.dot(U,Vt))<0.:
-        Vt[:,-1] *= -1.  # fix improper rotation
+        Vt[-1] *= -1.  # fix improper rotation
     rot = np.dot(U,Vt)
     shift = base_shift_target - np.dot(rot, base_shift_model)
     return rot, shift
