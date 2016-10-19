@@ -36,7 +36,7 @@ def print_traj_vtf(fname, sequence, traj, bond_id):
     vtf.close()
 
 
-def print_augmented_vtf(fname, sequence, traj, stride=1):
+def print_augmented_vtf(fname, sequence, traj, chain_first_residue):
     n_timestep, n_atom, three, n_system = traj.shape
     assert three == 3
     assert n_atom%3 ==0
@@ -61,8 +61,12 @@ def print_augmented_vtf(fname, sequence, traj, stride=1):
             vtf.write('atom %i name CA %s\n' % (atom_id+1, res))
             vtf.write('atom %i name C  %s\n' % (atom_id+2, res))
 
-            if prev_C is not None: 
-                vtf.write('bond %i:%i\n' % (prev_C,atom_id+0)) # prevC->N  bond
+            if prev_C is not None:
+                if chain_first_residue is not None:
+                    if nr not in chain_first_residue:
+                        vtf.write('bond %i:%i\n' % (prev_C,atom_id+0)) # prevC->N  bond
+                else:                     
+                    vtf.write('bond %i:%i\n' % (prev_C,atom_id+0)) # prevC->N  bond
             vtf.write('bond %i:%i\n' % (atom_id+0,atom_id+1))  # N->CA bond
             vtf.write('bond %i:%i\n' % (atom_id+1,atom_id+2))  # CA->C bond
 
@@ -103,37 +107,36 @@ def main():
     parser.add_argument('--stride', type=int, default=1, help='Stride for reading file')
     args = parser.parse_args()
 
-    t=tables.open_file(args.input_h5); 
-    
-    n_res = t.root.input.sequence.shape[0]
-    # print_traj_vtf(args.output_vtf, t.root.input.sequence[:], t.root.output.pos[:], 
-    #         np.column_stack((np.arange(3*n_res)[:-1], np.arange(3*n_res)[1:])))
+    with tables.open_file(args.input_h5) as t:
+        if 'chain_break' in t.root.input:
+            chain_first_residue = t.root.input.chain_break.chain_first_residue[:]
+        else:
+            chain_first_residue = None
 
+        output_paths = []
+        i = 0
+        while 'output_previous_%i'%i in t.root:
+            output_paths.append('/output_previous_%i'%i)
+            i+=1
+        if 'output' in t.root:  # 'output' is the *last* produced output
+            output_paths.append('/output')
 
-    output_paths = []
-    i = 0
-    while 'output_previous_%i'%i in t.root:
-        output_paths.append('/output_previous_%i'%i)
-        i+=1
-    if 'output' in t.root:  # 'output' is the *last* produced output
-        output_paths.append('/output')
+        start_frame = 0
+        total_frames_produced = 0
+        pos = []
+        stride = args.stride
+        for opath in output_paths:
+            g = t.get_node(t.get_node(opath))
+            pos.append(g.pos[start_frame::stride].transpose((0,2,3,1)))
+            # take into account that the first frame of each pos is the same as the last frame before restart
+            # attempt to land on the stride
+            total_frames_produced += g.pos.shape[0]-1  # correct for first frame
+            start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
+            print opath, total_frames_produced, 'cumulative frames found'
 
-    start_frame = 0
-    total_frames_produced = 0
-    pos = []
-    stride = args.stride
-    for opath in output_paths:
-        g = t.get_node(t.get_node(opath))
-        pos.append(g.pos[start_frame::stride].transpose((0,2,3,1)))
-        # take into account that the first frame of each pos is the same as the last frame before restart
-        # attempt to land on the stride
-        total_frames_produced += g.pos.shape[0]-1  # correct for first frame
-        start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
-        print opath, total_frames_produced, 'cumulative frames found'
     pos = np.concatenate(pos, axis=0)
     print pos.shape[0], 'frames for output', pos.shape[0]/30., 'seconds at 30 frames/second video'
-    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], pos)
-    t.close()
+    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], pos, chain_first_residue)
 
 if __name__ == '__main__':
     main()

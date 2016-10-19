@@ -20,7 +20,9 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   placement=params_dir+'rotamer-extended-with-direc.h5',
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5',
-                  contacts='', secstr_bias=''):
+                  contacts='', secstr_bias='',
+                  chain_break_from_file='',
+                  debugging_only_heuristic_cavity_radius=False):
     
     args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output]
 
@@ -65,6 +67,16 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         args.append('--secstr-bias=%s'%secstr_bias)
     if contacts:
         args.append('--contact-energies=%s'%contacts)
+    if sidechain_scale is not None: 
+        args.append('--sidechain-radial-scale-energy=%f'%sidechain_scale)
+    if inverse_scale: 
+        args.append('--sidechain-radial-scale-inverse-energy=%f'%inverse_scale)
+        args.append('--sidechain-radial-scale-inverse-radius=%f'%inverse_radius_scale)
+
+    if chain_break_from_file:
+        args.append('--chain-break-from-file=%s'%chain_break_from_file)
+    if debugging_only_heuristic_cavity_radius:
+        args.append('--debugging-only-heuristic-cavity-radius')
         
     return ' '.join(args) + '\n' + sp.check_output(args)
 
@@ -79,7 +91,7 @@ UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
 def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
                replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
-               log_level='detailed', account=None):
+               log_level='detailed', account=None, disable_recentering=False):
     if isinstance(config,str): config = [config]
     
     upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
@@ -103,6 +115,8 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
     
     if time_step is not None:
         upside_args.extend(['--time-step', str(time_step)])
+    if disable_recentering:
+        upside_args.extend(['--disable-recentering'])
 
     upside_args.extend(['--seed','%li'%(seed if seed is not None else np.random.randint(1<<31))])
     

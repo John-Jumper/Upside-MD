@@ -1224,8 +1224,7 @@ def main():
             'freely-jointed chain with good bond lengths and angles but bad dihedrals will be used ' +
             'instead.')
 
-    parser_grp0 = parser.add_mutually_exclusive_group()
-    parser_grp0.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
+    parser.add_argument('--restraint-group', default=[], action='append', type=parse_segments,
             help='List of residues in the protein.  The residue list should be of a form like ' +
             '--restraint-group 10-13,17,19-21 and that list would specify all the atoms in '+
             'residues 10,11,12,13,17,19,20,21. '+
@@ -1233,7 +1232,9 @@ def main():
             'springs with equilibrium distance given by the distance of the atoms in the initial structure.  ' +
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
             'with different residue lists.  The strength of the restraint is given by --restraint-spring-constant')
-    parser_grp0.add_argument('--chain-restraints-from-file', action='store_true', help='Use indices of chain first residues recorded during initial structure generation to automate --restraint-group for chains. Requires --chain-break-from-file.')
+    parser.add_argument('--apply-restraint-group-to-each-chain', action='store_true',
+        help='Use indices of chain first residues recorded during PDB_to_initial_structure to automate'+
+        ' --restraint-group for chains. Requires --chain-break-from-file.')
 
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
@@ -1275,7 +1276,8 @@ def main():
     parser_grp1.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
-    parser_grp1.add_argument('--auto-cavity-radius', action='store_true', help='Set the cavity radius to 2x the max com distance between chains.')
+    parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true', 
+        help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
 
     parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
@@ -1287,8 +1289,8 @@ def main():
     if args.sidechain_radial and not args.backbone_dependent_point:
         parser.error('--sidechain-radial requires --backbone-dependent-point')
 
-    if args.chain_restraints_from_file and not args.chain_break_from_file:
-        parser.error('--chain-restraints-from-file requires --chain-break-from-file')
+    if args.apply_restraint_group_to_each_chain and not args.chain_break_from_file:
+        parser.error('--apply-restraint-group-to-each-chain requires --chain-break-from-file')
 
     fasta_seq_with_cpr = read_fasta(open(args.fasta,'U'))
     fasta_seq = np.array([(x if x != 'CPR' else 'PRO') for x in fasta_seq_with_cpr])  # most potentials don't care about CPR
@@ -1335,7 +1337,7 @@ def main():
         try:
             chain_first_residue = np.loadtxt(args.chain_break_from_file, ndmin=1, dtype='int32')
         except IOError:
-            chain_first_residue = []
+            chain_first_residue = np.array([], dtype='int32')
             n_chains = 1
         else:
             n_chains = chain_first_residue.size+1
@@ -1344,13 +1346,13 @@ def main():
         print "n_chains"
         print n_chains
 
-        if chain_first_residue:
+        if chain_first_residue.size:
             break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
             t.create_array(break_grp, "chain_first_residue", chain_first_residue, "Contains array of chain first residues, apart from residue 0") 
 
             required_hbond_exclude_res = [i+j for i in chain_first_residue for j in [-1,0]]
             if args.hbond_exclude_residues:
-                args.hbond_exclude_residues = np.unique(np.append(args.hbond_exclude_residues, args.hbond_exclude_residues))
+                args.hbond_exclude_residues = np.unique(np.append(args.hbond_exclude_residues, required_hbond_exclude_res))
             else:
                 args.hbond_exclude_residues = np.array(required_hbond_exclude_res)
 
@@ -1395,28 +1397,41 @@ def main():
         create_array(grp, 'rama_map_id',  obj=np.zeros(len(fasta_seq), dtype='i4'))
         create_array(grp, 'rama_pot',     obj=ref_state_cor[None])
 
-    if args.auto_cavity_radius:
+    if args.debugging_only_heuristic_cavity_radius:
         if n_chains < 2:
-            parser.error('--auto-cavity-radius requires at least 2 chains')
-        com_list = []
-        com_dist_list = []
+            print>>sys.stderr, 'WARNING: --debugging-only-heuristic-cavity-radius requires at least 2 chains. Skipping setting up cavity'
+        else:
+            com_list = []
+            com_dist_list = []
 
-        for i in xrange(n_chains):
-            first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
-            com_list.append(pos[first_res*3:next_first_res*3,:,0].mean(axis=0))
+            for i in xrange(n_chains):
+                first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
+                com_list.append(pos[first_res*3:next_first_res*3,:,0].mean(axis=0))
 
-        for i in xrange(n_chains):
+            # Distance between chain com
+            # for i in xrange(n_chains):
+            #     print
+            #     print "com_list"
+            #     print com_list[i]
+            #     for j in xrange(n_chains):
+            #         if j > i:
+            #             com_dist_list.append(vmag(com_list[i]-com_list[j]))
+
+            # args.cavity_radius = 2.*max(com_dist_list)
+            # print
+            # print "old cavity_radius"
+            # print args.cavity_radius
+            # com_dist_list = []
+
+            # Distance between chain com and all atoms
+            for i in xrange(n_chains):
+                for j in xrange(n_atom):
+                        com_dist_list.append(vmag(com_list[i]-pos[j,:,0]))
+
+            args.cavity_radius = 1.2*max(com_dist_list)
             print
-            print "com_list"
-            print com_list[i]
-            for j in xrange(n_chains):
-                if j > i:
-                    com_dist_list.append(vmag(com_list[i]-com_list[j]))
-
-        args.cavity_radius = 2.*max(com_dist_list)
-        print
-        print "cavity_radius"
-        print args.cavity_radius
+            print "cavity_radius"
+            print args.cavity_radius
 
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)
@@ -1468,8 +1483,7 @@ def main():
     if require_affine:
         write_affine_alignment(len(fasta_seq))
 
-    if args.chain_restraints_from_file:
-        args.restraint_group = []
+    if args.apply_restraint_group_to_each_chain and n_chains > 1:
         for i in xrange(n_chains):
             first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
             args.restraint_group.append(np.arange(first_res, next_first_res))

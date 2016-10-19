@@ -56,7 +56,12 @@ def main():
 
     t = tb.open_file(args.config, 'a')
     if args.chain_break_from_file:
-        args.chain_first_residue = np.append([0], t.root.input.chain_break.chain_first_residue)
+        try:
+            args.chain_first_residue = np.append([0], t.root.input.chain_break.chain_first_residue)
+        except tb.exceptions.NoSuchNodeError:
+            print >>sys.stderr, 'WARNING: --chain-break-from-file requires chain first residues stored in config file. Halting'
+            t.close()
+            raise SystemExit(0)
 
     print 'This program is an ugly hack, and your simulation may give very bad results.'
     print 'If you are lucky, the results will be only a little bad.'

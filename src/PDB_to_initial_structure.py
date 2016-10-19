@@ -187,7 +187,7 @@ def main():
                     nr, restype, chain_resnum[nr][0], chain_resnum[nr][1], chi[nr,0]/deg, chi[nr,1]/deg)
 
     if chain_first_residue:
-        with open(args.basename+'.breaks','w') as f:
+        with open(args.basename+'.chain_breaks','w') as f:
             for i in chain_first_residue:
                 print >>f, i
 
