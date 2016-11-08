@@ -101,23 +101,38 @@ def main():
     parser.add_argument('input_h5', help='Input simulation file')
     parser.add_argument('output_vtf', help='Output trajectory file')
     parser.add_argument('--stride', type=int, default=1, help='Stride for reading file')
-    parser.add_argument('--system', type=int, default=None, help='Only output a single system')
     args = parser.parse_args()
 
-    
     t=tables.open_file(args.input_h5); 
-    print t.root.output.pos.shape[0], 'frames found,', t.root.output.time[-1], 'time units'
-    if args.system is None:
-        sl = slice(0,t.root.output.pos.shape[1])
-    else:
-        sl = slice(args.system,args.system+1)
-
     
     n_res = t.root.input.sequence.shape[0]
     # print_traj_vtf(args.output_vtf, t.root.input.sequence[:], t.root.output.pos[:], 
     #         np.column_stack((np.arange(3*n_res)[:-1], np.arange(3*n_res)[1:])))
-    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], 
-            t.root.output.pos[::args.stride,sl].transpose((0,2,3,1)))
+
+
+    output_paths = []
+    i = 0
+    while 'output_previous_%i'%i in t.root:
+        output_paths.append('/output_previous_%i'%i)
+        i+=1
+    if 'output' in t.root:  # 'output' is the *last* produced output
+        output_paths.append('/output')
+
+    start_frame = 0
+    total_frames_produced = 0
+    pos = []
+    stride = args.stride
+    for opath in output_paths:
+        g = t.get_node(t.get_node(opath))
+        pos.append(g.pos[start_frame::stride].transpose((0,2,3,1)))
+        # take into account that the first frame of each pos is the same as the last frame before restart
+        # attempt to land on the stride
+        total_frames_produced += g.pos.shape[0]-1  # correct for first frame
+        start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
+        print opath, total_frames_produced, 'cumulative frames found'
+    pos = np.concatenate(pos, axis=0)
+    print pos.shape[0], 'frames for output', pos.shape[0]/30., 'seconds at 30 frames/second video'
+    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], pos)
     t.close()
 
 if __name__ == '__main__':
