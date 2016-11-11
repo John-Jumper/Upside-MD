@@ -753,7 +753,7 @@ def write_contact_energies(parser, fasta, contact_table):
     n_contact = len(fields)
 
     # Place CA
-    pgrp = t.create_group(potential, 'placement_fixed_point_only_C_alpha')
+    pgrp = t.create_group(potential, 'placement_fixed_point_only_for_contact')
     pgrp._v_attrs.arguments = np.array(['affine_alignment'])
     ref_pos = np.zeros((4,3))
     ref_pos[0] = (-1.19280531, -0.83127186,  0.)        # N
@@ -763,14 +763,14 @@ def write_contact_energies(parser, fasta, contact_table):
     ref_pos -= ref_pos[:3].mean(axis=0,keepdims=1)
     
     placement_data = np.zeros((1,3))
-    placement_data[0,0:3] = ref_pos[1]
+    placement_data[0,0:3] = ref_pos[3]
 
     create_array(pgrp, 'affine_residue',  np.arange(len(fasta)))
     create_array(pgrp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
     create_array(pgrp, 'placement_data',  placement_data)
 
     g = t.create_group(t.root.input.potential, 'contact')
-    g._v_attrs.arguments = np.array(['placement_fixed_point_only_C_alpha'])
+    g._v_attrs.arguments = np.array(['placement_fixed_point_only_for_contact'])
 
     id     = np.zeros((n_contact,2), dtype='i')
     energy = np.zeros((n_contact,))
