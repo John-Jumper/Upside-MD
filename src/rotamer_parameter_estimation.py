@@ -29,7 +29,7 @@ param_shapes['hbond_coverage']=(2,n_restype,2*n_knot_angular+2*n_knot_hb)
 param_shapes['hbond_coverage_hydrophobe']=(n_fix,n_restype,2*n_knot_angular+2*n_knot_hb)
 param_shapes['placement_fixed_point_vector_scalar']=(n_fix,7)
 param_shapes['placement_fixed_point_vector_only']=(n_rotpos,6)
-param_shapes['placement_fixed_scalar']=(n_rotpos,1)
+# param_shapes['placement_fixed_scalar']=(n_rotpos,1)
 
 lparam = T.dvector('lparam')
 lparam.tag.test_value = np.random.randn(n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6)
@@ -193,6 +193,8 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
 
         energy[0] += fix .energy(pos)
         energy[1] += free.energy(pos)
+
+        # print fix,free,'ENERGY', energy
 
         if np.isnan(energy[0]): raise RuntimeError('NaN energy for %s %s'%(fix,
             [np.any(np.isnan(x)) for x in param_matrices]))

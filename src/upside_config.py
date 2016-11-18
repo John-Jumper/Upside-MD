@@ -652,7 +652,7 @@ def write_torus_dbn(seq, torus_dbn_library):
     create_array(hgrp, 'transition_energy', transition_energy)
 
 
-def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_energy_shift=None):
+def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, secstr_bias=''):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
 
@@ -665,13 +665,27 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, helical_e
         create_array(grp, 'more_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy+eps))
         create_array(grp, 'less_sheet_rama_pot', read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy-eps))
 
-    if helical_energy_shift is not None:
+    if secstr_bias:
         assert len(rama_pot.shape) == 3
         phi = np.linspace(-np.pi,np.pi,rama_pot.shape[1],endpoint=False)[:,None]
         psi = np.linspace(-np.pi,np.pi,rama_pot.shape[2],endpoint=False)[None,:]
         sigmoid_lessthan = lambda a,b: 1./(1.+np.exp(-(b-a)/(10.*deg)))
+
         helical_basin = sigmoid_lessthan(phi,0.*deg) * sigmoid_lessthan(-100.*deg,psi) * sigmoid_lessthan(psi,50.*deg)
-        rama_pot += (helical_energy_shift * helical_basin)[None,:,:]
+        sheet_basin   = sigmoid_lessthan(phi,0.*deg) * (sigmoid_lessthan(psi,-100.*deg) + sigmoid_lessthan(50.*deg,psi))
+        
+        f = (ln.split() for ln in open(secstr_bias))
+        assert f.next() == 'residue secstr energy'.split()
+        for residue,secstr,energy in f:
+            residue = int(residue)
+            energy = float(energy)
+
+            if secstr == 'helix':
+                rama_pot[residue] += energy * helical_basin
+            elif secstr == 'sheet':
+                rama_pot[residue] += energy *   sheet_basin
+            else:
+                raise ValueError('secstr in secstr-bias file must be helix or sheet')
 
     # let's remove the average energy from each Rama map 
     # so that the Rama potential emphasizes its variation
@@ -920,6 +934,7 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
     layer_index = []
     beadtype_seq = []
     id_seq = []
+    ref_chi1_state = []
 
     count_by_n_rot = dict()
 
@@ -956,6 +971,9 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
     create_array(grp, 'placement_data',  placement_pos[...,:6])
     create_array(grp, 'beadtype_seq',    beadtype_seq)
     create_array(grp, 'id_seq',          np.array(id_seq))
+    create_array(grp, 'fix_rotamer',     np.array(sorted(fix.items())))
+    # create_array(grp, 'ref_chi1_state',  np.array(ref_chi1_state))
+    # create_array(grp, 'find_chi1',       find_chi1)
 
     pl_node_name = 'placement%s_scalar' % ('' if dynamic_1body else '_fixed')
     grp = t.create_group(potential, pl_node_name)
@@ -1160,9 +1178,10 @@ def main():
             help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
-    parser.add_argument('--helical-energy-shift', default=None, type=float,
-            help='Energy shift to add to the helical basin (defined as -180.<phi<0 and -100.<psi<50, '+
-            'slightly smoothed at edges).')
+    parser.add_argument('--secstr-bias', default='', 
+            help='Bias file for secondary structure.  First line of the file must be "residue secstr energy".  '+
+            'secstr must be one of "helix" or "sheet".  Bias is implemented by a simple Rama bias, hence coil bias '+
+            'is not implemented.')
     parser.add_argument('--rama-sheet-mixing-energy', default=None, type=float,
             help='reference energy for sheets when mixing with coil library.  More negative numbers mean more '+
             'sheet content in the final structure.  Default is no sheet mixing.')
@@ -1302,7 +1321,7 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy, args.helical_energy_shift)
+        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy, args.secstr_bias)
     elif args.torus_dbn_library:
         require_rama = True
         write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)

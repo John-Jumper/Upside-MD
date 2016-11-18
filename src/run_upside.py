@@ -20,7 +20,7 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   placement=params_dir+'rotamer-extended-with-direc.h5',
                   reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5',
-                  contacts=''):
+                  contacts='', secstr_bias=''):
     
     args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output]
 
@@ -61,6 +61,8 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
     
     if sidechain:
         args.append('--sidechain-radial=%s'%(params_dir+'radial-MJ-1996.h5'))
+    if secstr_bias:
+        args.append('--secstr-bias=%s'%secstr_bias)
     if contacts:
         args.append('--contact-energies=%s'%contacts)
         
