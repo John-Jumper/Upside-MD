@@ -39,7 +39,7 @@ def dihedral(x1,x2,x3,x4):
             b2mag * (b1*b2b3).sum(axis=-1),
             (np.cross(b1,b2) * b2b3).sum(axis=-1))
 
-Residue = collections.namedtuple('Residue', 'resnum restype phi psi omega N CA C CB CG CD chi1 chi2')
+Residue = collections.namedtuple('Residue', 'resnum chain restype phi psi omega N CA C CB CG CD chi1 chi2')
 
 def read_residues(chain):
     ignored_restypes = dict()
@@ -77,6 +77,7 @@ def read_residues(chain):
         # note that you need to check the residue *before* to see if a proline is cis
         r = Residue(
             res.getResnum(),
+            res.getChain(),
             restype if not (restype=='PRO' and residues and np.abs(residues[-1].omega)<90.*deg) else 'CPR',
             phi,psi,omega,
             adict.get('N',  np.nan*np.ones(3)),
@@ -119,6 +120,7 @@ def main():
     sequence = []
     chi = []
     unexpected_chain_breaks = False
+    chain_resnum = []
 
     for chain_id, (res,ignored_restype) in chains:
         print "chain %s:" % chain_id
@@ -144,6 +146,7 @@ def main():
             coords.extend([r.N,r.CA,r.C])
             sequence.append(r.restype)
             chi.append((r.chi1,r.chi2))
+            chain_resnum.append((str(chain_id),r.resnum))
         print
     coords = np.array(coords)
     chi = np.array(chi)
@@ -166,7 +169,7 @@ def main():
             print >>f,  fasta_seq[80*nl:80*(nl+1)]
     
     with open(args.basename+'.chi','w') as f:
-        print >>f, 'residue restype      chi1     chi2'
+        print >>f, 'residue restype  chain  resnum      chi1     chi2'
         for nr,restype in enumerate(sequence):
             # if np.isnan(chi[nr]): continue  # no chi1 data to write
 
@@ -176,7 +179,8 @@ def main():
             # if    0.*deg <= chi[nr] < 120.*deg: chi1_state = 0
             # if -120.*deg <= chi[nr] <   0.*deg and restype not in ('PRO','CPR'): chi1_state = 2
 
-            print >>f, '% 7i %7s  % 8.3f % 8.3f' % (nr, restype, chi[nr,0]/deg, chi[nr,1]/deg)
+            print >>f, '% 7i %7s %5s   %6s  % 8.3f % 8.3f' % (
+                    nr, restype, chain_resnum[nr][0], chain_resnum[nr][1], chi[nr,0]/deg, chi[nr,1]/deg)
 
 
 if __name__ == '__main__':

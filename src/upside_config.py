@@ -891,15 +891,15 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
 
     fix = dict()
     if fix_rotamer:
-        fields = [x.split()[:4] for x in list(open(fix_rotamer))]  # only consider first 4 column
+        fields = [x.split() for x in list(open(fix_rotamer))]
 
-        header = 'residue restype chi1 chi2'
+        header = 'residue restype chain resnum chi1 chi2'
         actual_header = [x.lower() for x in fields[0]]
         if actual_header != header.split():
-            parser.error('First line of fix-rotamer table must be "%s" but is "%s"'
-                    %(header," ".join(actual_header)))
+            raise RuntimeError('First line of fix-rotamer table must be "%s" but is "%s" for file %s'
+                    %(header," ".join(actual_header),fix_rotamer))
 
-        for residue, restype, chi1, chi2 in fields[1:]:
+        for residue, restype, chain, resnum, chi1, chi2 in fields[1:]:
             if fasta[int(residue)] != (restype if restype != 'CPR' else 'PRO'): 
                 raise RuntimeError("fix-rotamer file does not match FASTA"
                     + ", residue %i should be %s but fix-rotamer file has %s"%(

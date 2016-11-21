@@ -16,7 +16,7 @@ import upside_engine as ue
 
 
 def main():
-    sidechain_file, pdb_file, output_file = sys.argv[1:]
+    sidechain_file, pdb_file, chain, output_file = sys.argv[1:]
     direc = tempfile.mkdtemp()
 
     deg = np.pi/180.
@@ -39,7 +39,7 @@ def main():
         base_initial = os.path.join(direc, 'initial_test')
         sp.check_call([
             os.path.join(src, 'PDB_to_initial_structure.py'),
-            # '--chains', chain,
+            '--chains', chain,
             '--allow-unexpected-chain-breaks',
             pdb_file, base_initial])
 
@@ -90,11 +90,13 @@ def main():
 
     assert len(chi1_true) == len(seq)
     with open(output_file,'wt') as f:
-        print >>f, 'resnum restype chi1_prob0 chi1_prob1 chi1_prob2 chi1_from_input_file'
+        print >>f, 'residue restype chain resnum chi1_prob0 chi1_prob1 chi1_prob2 chi1_from_input_file'
         for resnum in range(len(seq)):
-            print >>f, '%i %s %.4f %.4f %.4f %.1f' % (
+            print >>f, '%i %s %s %s %.4f %.4f %.4f %.1f' % (
                     resnum,
                     (seq[resnum] if seq[resnum]!='CPR' else 'PRO'),
+                    chi1_true.chain[resnum],
+                    chi1_true.resnum[resnum],
                     chi1_prob_array[resnum,0],
                     chi1_prob_array[resnum,1],
                     chi1_prob_array[resnum,2],
