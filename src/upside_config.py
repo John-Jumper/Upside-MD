@@ -1014,7 +1014,7 @@ def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_nam
 
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
-		             excluded_residues, UHB_residues_type1, UHB_residues_type2):
+                     excluded_residues, UHB_residues_type1, UHB_residues_type2):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
     grp._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
 
@@ -1034,13 +1034,13 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     for res_num in list(UHB_residues_type2):
         if not (0<=res_num<len(sequence)):
             raise ValueError('Residue number %i is invalid in UHB_residues_type2'%res_num)
-					     
+                         
     UHB_residues_type1_included = sorted(set(UHB_residues_type1).difference(excluded_residues))
     UHB_residues_type2_included = sorted(set(UHB_residues_type2).difference(excluded_residues))
 
     if set(UHB_residues_type1_included).intersection(UHB_residues_type2_included) != None:
-	for res_num in set(UHB_residues_type1_included).intersection(UHB_residues_type2_included):
-	    raise ValueError('Residue number %i is in both UHB_type1 and UHB_type2 lists'%res_num)
+        for res_num in set(UHB_residues_type1_included).intersection(UHB_residues_type2_included):
+            raise ValueError('Residue number %i is in both UHB_type1 and UHB_type2 lists'%res_num)
 
     highlight_residues('membrane_potential_residues_excluded', sequence, excluded_residues)
     highlight_residues('         UHB_residues_type1_included', sequence, UHB_residues_type1_included)
@@ -1278,6 +1278,7 @@ def main():
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
     parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true', 
         help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
+    parser.add_argument('--cavity-radius-from-config', default='', help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
 
     parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
@@ -1433,6 +1434,20 @@ def main():
             print "cavity_radius"
             print args.cavity_radius
 
+    if args.cavity_radius_from_config:
+        if n_chains < 2:
+            print>>sys.stderr, 'WARNING: --cavity-radius-from-config requires at least 2 chains. Skipping setting up cavity'
+        elif args.debugging_only_heuristic_cavity_radius:
+            print>>sys.stderr, 'WARNING: Overwriting heuristic cavity with the one from --cavity-radius-from-config'
+        else:
+            t_cavity = tb.open_file(args.cavity_radius_from_config,'r')
+            args.cavity_radius = t_cavity.root.input.potential.cavity_radial.radius[0]
+            t_cavity.close()
+            print
+            print "cavity_radius"
+            print args.cavity_radius
+
+
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)
 
@@ -1460,11 +1475,11 @@ def main():
         require_backbone_point = True
         write_membrane_potential(fasta_seq, 
                                  args.membrane_potential, 
-	                         args.membrane_potential_scale, 
-	                         args.membrane_thickness,
-	                         args.membrane_potential_exclude_residues, 
-	                         args.membrane_potential_unsatisfied_hbond_residues_type1,
-	                         args.membrane_potential_unsatisfied_hbond_residues_type2)
+                             args.membrane_potential_scale, 
+                             args.membrane_thickness,
+                             args.membrane_potential_exclude_residues, 
+                             args.membrane_potential_unsatisfied_hbond_residues_type1,
+                             args.membrane_potential_unsatisfied_hbond_residues_type2)
 
     if require_backbone_point:
         if args.backbone_dependent_point is None:
@@ -1501,7 +1516,7 @@ def main():
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
             highlight_residues('group_%i'%i, fasta_seq, restrained_residues)
             make_restraint_group(i,set(restrained_residues),target[:,:,0], args.restraint_spring_constant)
-	    
+        
 
     # if we have the necessary information, write pivot_sampler
     if require_rama and 'rama_map_pot' in potential:
