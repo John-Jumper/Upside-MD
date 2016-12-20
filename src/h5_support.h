@@ -11,6 +11,7 @@
 #include <hdf5_hl.h>
 
 namespace h5 {
+// NB this library is not threadsafe.  It is up to the user to deal with this fact
 
 //! \cond
 template <typename T> // DO NOT ADD BOOL TO THIS TYPE -- unwitting users might hit vector<bool>
@@ -24,6 +25,11 @@ template<> inline hid_t select_predtype<unsigned>(){ return H5T_NATIVE_UINT;    
 
 int h5_noerr(int i); //!< if i<0 (signalling failed H5 function), throw an error
 int h5_noerr(const char* nm, int i); //!< if i<0 (signalling failed H5 function), throw an error
+
+inline bool h5_bool_return(htri_t value) {
+    if(value<0) throw std::string("hdf5 error");
+    return value>0;  // true condition for htri_t
+}
 
 //! Wrapper to make hid_t compatible with smart pointers
 struct Hid_t {   // special type for saner hid_t
@@ -82,29 +88,30 @@ bool h5_exists(hid_t base, const char* nm, bool check_valid=true);
 // Read the dimension sizes of a dataset
 std::vector<hsize_t> get_dset_size(int ndims, hid_t group, const char* name);
 
-//! Read a scalar attribute
+// Attempt to read a scalar attribute.  Returns true if the attribute is present, false otherwise.
+// See below for more typesafe overloads.  attr_value_output is overwritten with the value of the 
+// attribute if it is present, otherwise it is unmodified.  If the underlying path does not exist,
+// an exception is thrown.
+bool read_attribute(void* attr_value_output, hid_t h5, const char* path, const char* attr_name, hid_t predtype);
+
+
+//! Read a scalar attribute with exception if not present
 template<class T>
-T read_attribute(hid_t h5, const char* path, const char* attr_name) 
-try {
-    T retval;
-    h5_noerr(H5LTget_attribute(h5, path, attr_name, select_predtype<T>(), &retval));
-    return retval;
-} catch(const std::string &e) {
-    throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
+T read_attribute(hid_t h5, const char* path, const char* attr_name) {
+    T value;
+    if(!read_attribute(&value, h5, path, attr_name, select_predtype<T>()))
+        throw "attribute "+ std::string(attr_name) + " not present";
+    return value;
 }
 
 //! Read a scalar attribute with default value
 template<class T>
-T read_attribute(hid_t h5, const char* path, const char* attr_name, const T& default_value) 
-try {
-    T retval;
-    h5_noerr(H5LTget_attribute(h5, path, attr_name, select_predtype<T>(), &retval));
-    return retval;
-} catch(const std::string &e) {  // FIXME this should really check existence rather than use exceptions
-    return default_value;
+T read_attribute(hid_t h5, const char* path, const char* attr_name, const T& default_value) {
+    T value;
+    if(!read_attribute(&value, h5, path, attr_name, select_predtype<T>()))
+        value = default_value;
+    return value;
 }
-
-
 
 //! Read an attribute containing a list of strings
 template<>

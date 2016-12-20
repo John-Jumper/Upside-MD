@@ -45,9 +45,29 @@ bool h5_exists(hid_t base, const char* nm, bool check_valid) {
     return h5_noerr(H5LTpath_valid(base, nm, check_valid));
 }
 
+bool read_attribute(void* attr_value_output, hid_t h5, const char* path, const char* attr_name, hid_t predtype)
+try {
+    if(!h5_exists(h5, path))
+        throw std::string("path does not exist in h5 file");
+
+    if(!h5_bool_return(H5Aexists_by_name(h5, path, attr_name, H5P_DEFAULT)))
+        return false;
+
+    // From here, everything should exist
+    auto attr  = h5_obj(H5Aclose, H5Aopen_by_name(h5, path, attr_name, H5P_DEFAULT, H5P_DEFAULT));
+    h5_noerr(H5Aread(attr.get(), predtype, attr_value_output));
+    return true;
+}
+catch(const std::string &e) {
+    throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
+}
+
 template <>
 std::vector<std::string> read_attribute<std::vector<std::string>>(hid_t h5, const char* path, const char* attr_name) 
 try {
+    if(!h5_exists(h5, path))
+        throw std::string("path does not exist in h5 file");
+
     auto attr  = h5_obj(H5Aclose, H5Aopen_by_name(h5, path, attr_name, H5P_DEFAULT, H5P_DEFAULT));
     auto space = h5_obj(H5Sclose, H5Aget_space(attr.get()));
     auto dtype = h5_obj(H5Tclose, H5Aget_type (attr.get()));
@@ -73,7 +93,7 @@ try {
     };
     traverse_dataset_iteraction_helper<1,char,decltype(g)>()(tmp.get(), dims, g, maxchars);
     return ret;
-} 
+}
 catch(const std::string &e) {
     throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
 }
