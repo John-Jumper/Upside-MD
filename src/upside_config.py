@@ -182,11 +182,9 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
 
         restype_order = dict([(str(x),i) for i,x in enumerate(lib.root.restype_order[:])])
 
-        interaction_param = np.array([
-            lib.root._v_attrs.r0,
-            lib.root._v_attrs.r_sharpness,
-            lib.root._v_attrs.dot0,
-            lib.root._v_attrs.dot_sharpness])[None,None,:]
+        coverage_param = lib.root.coverage_param[:]
+        assert coverage_param.shape == (len(restype_order),1,4)
+        # params are r0,r_sharpness, dot0, dot_sharpness
 
     # Place CB
     pgrp = t.create_group(potential, 'placement_fixed_point_vector_only_CB')
@@ -224,15 +222,15 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
 
     # group1 is the source CB
     create_array(cgrp, 'index1', np.arange(len(fasta)))
-    create_array(cgrp, 'type1',  np.zeros (len(fasta),dtype='i'))  # only a single type of CB
++    create_array(cgrp, 'type1', np.array([restype_order[s] for s in fasta]))  # one type per CB type
     create_array(cgrp, 'id1',    np.arange(len(fasta)))
 
     # group 2 is the weighted points to interact with
     create_array(cgrp, 'index2', np.arange(n_sc))
-    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types
+    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types on SC
     create_array(cgrp, 'id2',    sc_node.affine_residue[:])
 
-    create_array(cgrp, 'interaction_param', interaction_param)
+    create_array(cgrp, 'interaction_param', coverage_param)
 
     # # Transform coverage to [0,1] scale (1 indicates the most buried)
     # tgrp = t.create_group(potential, 'uniform_transform_environment')
