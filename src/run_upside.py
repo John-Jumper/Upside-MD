@@ -22,7 +22,9 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
                   rotamer_interaction_param='/home/jumper/optimized_param4_env.h5',
                   contacts='', secstr_bias='',
                   chain_break_from_file='',
-                  debugging_only_heuristic_cavity_radius=False):
+                  debugging_only_heuristic_cavity_radius=False,
+                  cavity_radius_from_config='',
+                  make_unbound=False):
     
     args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output]
 
@@ -77,6 +79,10 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         args.append('--chain-break-from-file=%s'%chain_break_from_file)
     if debugging_only_heuristic_cavity_radius:
         args.append('--debugging-only-heuristic-cavity-radius')
+    if cavity_radius_from_config:
+        args.append('--cavity-radius-from-config=%s'%cavity_radius_from_config)
+    if make_unbound:
+        args.append('--make-unbound')
         
     return ' '.join(args) + '\n' + sp.check_output(args)
 

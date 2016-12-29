@@ -188,8 +188,7 @@ def main():
 
     if chain_first_residue:
         with open(args.basename+'.chain_breaks','w') as f:
-            for i in chain_first_residue:
-                print >>f, i
+            print >>f, ' '.join([str(i) for i in chain_first_residue])
 
 if __name__ == '__main__':
     main()

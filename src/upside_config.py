@@ -1278,7 +1278,10 @@ def main():
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
     parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true', 
         help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
-    parser.add_argument('--cavity-radius-from-config', default='', help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
+    parser_grp1.add_argument('--cavity-radius-from-config', default='', help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
+
+    parser.add_argument('--make-unbound', action='store_true', 
+        help='Separate chains into different corners of a cavity that you set with one of the cavity options.')
 
     parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
@@ -1336,12 +1339,25 @@ def main():
 
     if args.chain_break_from_file:
         try:
-            chain_first_residue = np.loadtxt(args.chain_break_from_file, ndmin=1, dtype='int32')
+            with open(args.chain_break_from_file) as infile:
+                chain_dat = list(infile)
+            # chain_first_residue = np.loadtxt(args.chain_break_from_file, ndmin=1, dtype='int32')
         except IOError:
             chain_first_residue = np.array([], dtype='int32')
             n_chains = 1
         else:
+            if len(chain_dat) > 1:
+                has_rl_info = True
+            else:
+                has_rl_info = False
+            chain_first_residue = chain_dat[0].split()
+            chain_first_residue = np.array(chain_first_residue, dtype='int32')
+            print "chain_first_residue:", chain_first_residue
             n_chains = chain_first_residue.size+1
+            if has_rl_info:
+                rl_chains = chain_dat[-1].split()
+                rl_chains = [int(i) for i in rl_chains]
+                print "rl_chains:", rl_chains
 
         print
         print "n_chains"
@@ -1450,6 +1466,37 @@ def main():
 
     if args.cavity_radius:
         write_cavity_radial(args.cavity_radius)
+
+    if args.make_unbound:
+        if n_chains < 2 or n_chains > 8:
+            print>>sys.stderr, 'WARNING: --make-unbound requires at least 2 and no more than 8 chains. Skipping separating chains'
+        elif not args.cavity_radius:
+            print>>sys.stderr, 'WARNING: --make-unbound requires setting a cavity radius. Skipping separating chains'
+        else:
+            print
+            print "making unbound"
+
+            displacement = np.array([[-1.,0.,0.], [1.,0.,0.],
+                                     [0.,-1.,0.], [0.,1.,0.],
+                                     [0.,0.,-1.], [0.,0.,1.],])
+            if not has_rl_info: # separate all chains
+                for i in xrange(n_system):
+                    for j in xrange(n_chains):
+                        first_res, next_first_res = chain_endpts(n_res, chain_first_residue, j)
+                        #com = pos[first_res*3:next_first_res*3,:,0].mean(axis=0)
+                        pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[j]*0.5*args.cavity_radius #- displacement[j]*com
+            else: # keep receptor and ligand chains together
+                for i in xrange(n_system):
+                    # move receptor chains
+                    first_res = chain_endpts(n_res, chain_first_residue, 0)[0]
+                    next_first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0]-1)[1]
+                    pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[0]*0.5*args.cavity_radius
+                    # move ligand chains
+                    first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0])[0]
+                    next_first_res = chain_endpts(n_res, chain_first_residue, n_chains-1)[1]
+                    pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[1]*0.5*args.cavity_radius
+            t.root.input.pos[:] = pos
+            target = pos.copy()
 
     if args.backbone:
         require_affine = True
