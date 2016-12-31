@@ -56,7 +56,7 @@ struct Infer_H_O : public CoordNode
     }
 
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("infer_H_O"));
 
         VecArray posc  = pos.output;
@@ -90,7 +90,7 @@ struct Infer_H_O : public CoordNode
         }
     }
 
-    virtual void propagate_deriv() {
+    virtual void propagate_deriv() override {
         Timer timer(string("infer_H_O_deriv"));
         VecArray pos_sens = pos.sens;
 
@@ -307,7 +307,7 @@ struct ProteinHBond : public CoordNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("protein_hbond"));
 
         int n_virtual = n_donor + n_acceptor;
@@ -332,7 +332,7 @@ struct ProteinHBond : public CoordNode
         for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
     }
 
-    virtual void propagate_deriv() {
+    virtual void propagate_deriv() override {
         Timer timer(string("protein_hbond_deriv"));
 
         // we accumulated derivatives for z = 1-exp(-log(no_hb))
@@ -374,7 +374,7 @@ struct HBondCoverage : public CoordNode {
         igraph(grp, &infer_, &sidechains_),
         n_sc(igraph.n_elem2) {}
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("hbond_coverage"));
 
         // Compute coverage and its derivative
@@ -386,7 +386,7 @@ struct HBondCoverage : public CoordNode {
         }
     }
 
-    virtual void propagate_deriv() {
+    virtual void propagate_deriv() override {
         Timer timer(string("hbond_coverage_deriv"));
 
         for(int ne: range(igraph.n_edge))
