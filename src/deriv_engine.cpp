@@ -28,11 +28,6 @@ integration_stage(
             d *= scale_factor;
         }
 
-#ifdef CHECK_FOR_NAN
-        if(isnan(sum(load_vec<3>(mom, na)))) throw string("NaN found in momentum");
-        if(isnan(sum(d))) throw string("NaN found in derivative");
-#endif
-
         auto p = load_vec<3>(mom, na) - vel_factor*d;
         store_vec (mom, na, p);
         update_vec(pos, na, pos_factor*p);
@@ -128,10 +123,6 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
 
 void DerivEngine::compute(ComputeMode mode) {
     // FIXME depth-first traversal would be simpler and more cache-friendly
-    #ifdef CHECK_FOR_NAN
-    mode = PotentialAndDerivMode; // catch NaN early
-    #endif
-
     for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
 
     if(mode == PotentialAndDerivMode) potential = 0.f;
@@ -152,33 +143,11 @@ void DerivEngine::compute(ComputeMode mode) {
                     if(mode == PotentialAndDerivMode && n.computation->potential_term) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
                         potential += pot_node->potential;
-
-                        #ifdef CHECK_FOR_NAN
-                        if(isnan(pot_node->potential)) throw std::string("Node " + n.name + " produced a NaN potential");
-                        #endif
                     }
                     if(!n.computation->potential_term) {
                         // ensure zero sensitivity for later derivative writing
                         CoordNode* coord_node = static_cast<CoordNode*>(n.computation.get());
                         fill(coord_node->sens, 0.f);
-
-                        #ifdef CHECK_FOR_NAN
-                        for(int ne: range(coord_node->n_elem)) {
-                            for(int d: range(coord_node->elem_width)) {
-                                if(isnan(coord_node->output(d,ne))) {
-                                    printf("\n%s output\n", n.name.c_str());
-                                    for(int ne: range(coord_node->n_elem)) {
-                                        printf("%4i", ne);
-                                        for(int d: range(coord_node->elem_width))
-                                            printf(" % 6.2f", coord_node->output(d,ne));
-                                        printf("\n");
-                                    }
-                                    throw "Node " + n.name + " produced NaN in location (" + 
-                                        to_string(d) + ","+to_string(ne)+")";
-                                }
-                            }
-                        }
-                        #endif
                     }
                 }
             }
