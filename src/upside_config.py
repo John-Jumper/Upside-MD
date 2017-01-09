@@ -754,17 +754,7 @@ def read_fasta(file_obj):
             seq.append(three_letter_aa[a])
     return np.array(seq)
 
-
-def write_contact_energies(parser, fasta, contact_table):
-    fields = [ln.split() for ln in open(contact_table,'U')]
-    header_fields = 'residue1 residue2 energy distance transition_width'.split()
-    if [x.lower() for x in fields[0]] != header_fields:
-        parser.error('First line of contact energy table must be "%s"'%(" ".join(header_fields)))
-    if not all(len(f)==len(header_fields) for f in fields):
-        parser.error('Invalid format for contact file')
-    fields = fields[1:]
-    n_contact = len(fields)
-
+def write_CB(fasta):
     # Place CB
     pgrp = t.create_group(potential, 'placement_fixed_point_only_for_contact')
     pgrp._v_attrs.arguments = np.array(['affine_alignment'])
@@ -781,6 +771,17 @@ def write_contact_energies(parser, fasta, contact_table):
     create_array(pgrp, 'affine_residue',  np.arange(len(fasta)))
     create_array(pgrp, 'layer_index',     np.zeros(len(fasta),dtype='i'))
     create_array(pgrp, 'placement_data',  placement_data)
+
+
+def write_contact_energies(parser, fasta, contact_table):
+    fields = [ln.split() for ln in open(contact_table,'U')]
+    header_fields = 'residue1 residue2 energy distance transition_width'.split()
+    if [x.lower() for x in fields[0]] != header_fields:
+        parser.error('First line of contact energy table must be "%s"'%(" ".join(header_fields)))
+    if not all(len(f)==len(header_fields) for f in fields):
+        parser.error('Invalid format for contact file')
+    fields = fields[1:]
+    n_contact = len(fields)
 
     g = t.create_group(t.root.input.potential, 'contact')
     g._v_attrs.arguments = np.array(['placement_fixed_point_only_for_contact'])
@@ -824,27 +825,9 @@ def write_rama_coord():
     create_array(grp, 'id', id)
 
 
-def write_backbone_dependent_point(fasta, library):
-    grp = t.create_group(potential, 'placement_fixed_point_only_CB')
-    grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
-
-    with tb.open_file(library) as data:
-        n_restype = len(aa_num)
-        n_bin = data.get_node('/ALA/center').shape[0]-1  # ignore periodic repeat of last bin
-        point_map = np.zeros((n_restype,n_bin,n_bin, 3),dtype='f4')  
-
-        for rname,idx in sorted(aa_num.items()):
-            point_map[idx] = data.get_node('/%s/center'%rname)[:-1,:-1]
-
-    create_array(grp, 'rama_residue',    np.arange(len(fasta)))
-    create_array(grp, 'affine_residue',  np.arange(len(fasta)))
-    create_array(grp, 'layer_index',     np.array([aa_num[s] for s in fasta]))
-    create_array(grp, 'placement_data',  point_map)
-
-
 def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
-    g._v_attrs.arguments = np.array(['placement_fixed_point_only_CB'])
+    g._v_attrs.arguments = np.array(['placement_point_only_CB'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -1017,7 +1000,7 @@ def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_nam
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
                      excluded_residues, UHB_residues_type1, UHB_residues_type2):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
-    grp._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
+    grp._v_attrs.arguments = np.array(['placement_point_only_CB'])
 
     potential_library = tb.open_file(potential_library_path)
     resnames  = potential_library.root.names[:]
@@ -1157,8 +1140,6 @@ def main():
             help='path to output the created .h5 file (default system.h5)')
     parser.add_argument('--no-backbone', dest='backbone', default=True, action='store_false',
             help='do not use rigid nonbonded for backbone N, CA, C, and CB')
-    parser.add_argument('--backbone-dependent-point', default=None,
-            help='use backbone-depedent sidechain location library')
     parser.add_argument('--rotamer-placement', default=None, 
             help='rotameric sidechain library')
     parser.add_argument('--dynamic-rotamer-placement', default=False, action='store_true',
@@ -1536,11 +1517,8 @@ def main():
                              args.membrane_potential_unsatisfied_hbond_residues_type2)
 
     if require_backbone_point:
-        if args.backbone_dependent_point is None:
-            parser.error('--backbone-dependent-point is required, based on other options.')
         require_affine = True
-        require_rama = True
-        write_backbone_dependent_point(fasta_seq, args.backbone_dependent_point)
+        write_CB(fasta)
 
     if require_rama:
         write_rama_coord()
