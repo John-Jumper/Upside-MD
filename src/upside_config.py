@@ -282,55 +282,56 @@ def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond, sc_nod
          (0.182 if loose_hbond else 0.682), 1./0.05,
          0.,   0.]]]))
 
-    cgrp = t.create_group(potential, 'hbond_coverage')
-    cgrp._v_attrs.arguments = np.array(['protein_hbond',sc_node_name])
+    if sc_node_name:  # only create hbond_coverage if there are rotamer side chains
+        cgrp = t.create_group(potential, 'hbond_coverage')
+        cgrp._v_attrs.arguments = np.array(['protein_hbond',sc_node_name])
 
-    with tb.open_file(coverage_library) as data:
-         create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
-         bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
-         hydrophobe_placement = data.root.hydrophobe_placement[:]
-         hydrophobe_interaction = data.root.hydrophobe_interaction[:]
+        with tb.open_file(coverage_library) as data:
+             create_array(cgrp, 'interaction_param', data.root.coverage_interaction[:])
+             bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+             hydrophobe_placement = data.root.hydrophobe_placement[:]
+             hydrophobe_interaction = data.root.hydrophobe_interaction[:]
 
-    # group1 is the HBond partners
-    create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
-    create_array(cgrp, 'type1',  1*(np.arange(n_donor+n_acceptor) >= n_donor))  # donor is 0, acceptor is 1
-    create_array(cgrp, 'id1',    np.concatenate([infer_group.donors   .residue[:],
-                                                 infer_group.acceptors.residue[:]]))
+        # group1 is the HBond partners
+        create_array(cgrp, 'index1', np.arange(n_donor+n_acceptor))
+        create_array(cgrp, 'type1',  1*(np.arange(n_donor+n_acceptor) >= n_donor))  # donor is 0, acceptor is 1
+        create_array(cgrp, 'id1',    np.concatenate([infer_group.donors   .residue[:],
+                                                     infer_group.acceptors.residue[:]]))
 
-    # group 2 is the sidechains
-    sc_node = t.get_node(t.root.input.potential, sc_node_name)
-    rseq      = sc_node.beadtype_seq[:]
-    sc_resnum = sc_node.affine_residue[:]
-    create_array(cgrp, 'index2', np.arange(len(rseq)))
-    create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
-    create_array(cgrp, 'id2',    sc_resnum)
+        # group 2 is the sidechains
+        sc_node = t.get_node(t.root.input.potential, sc_node_name)
+        rseq      = sc_node.beadtype_seq[:]
+        sc_resnum = sc_node.affine_residue[:]
+        create_array(cgrp, 'index2', np.arange(len(rseq)))
+        create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
+        create_array(cgrp, 'id2',    sc_resnum)
 
-    grp = t.create_group(potential, 'placement_fixed_point_vector_scalar')
-    grp._v_attrs.arguments = np.array(['affine_alignment'])
-    create_array(grp, 'affine_residue',  np.arange(3*n_res)/3)
-    create_array(grp, 'layer_index',     np.arange(3*n_res)%3)
-    create_array(grp, 'placement_data',  hydrophobe_placement)
+        grp = t.create_group(potential, 'placement_fixed_point_vector_scalar')
+        grp._v_attrs.arguments = np.array(['affine_alignment'])
+        create_array(grp, 'affine_residue',  np.arange(3*n_res)/3)
+        create_array(grp, 'layer_index',     np.arange(3*n_res)%3)
+        create_array(grp, 'placement_data',  hydrophobe_placement)
 
-    cgrp = t.create_group(potential, 'hbond_coverage_hydrophobe')
-    cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_scalar',sc_node_name])
+        cgrp = t.create_group(potential, 'hbond_coverage_hydrophobe')
+        cgrp._v_attrs.arguments = np.array(['placement_fixed_point_vector_scalar',sc_node_name])
 
-    with tb.open_file(coverage_library) as data:
-         create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
-         bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
+        with tb.open_file(coverage_library) as data:
+             create_array(cgrp, 'interaction_param', data.root.hydrophobe_interaction[:])
+             bead_num = dict((k,i) for i,k in enumerate(data.root.bead_order[:]))
 
-    # group1 is the hydrophobes
-    # create_array(cgrp, 'index1', np.arange(n_res))
-    # create_array(cgrp, 'type1',  0*np.arange(n_res))
-    # create_array(cgrp, 'id1',    np.arange(n_res))
-    create_array(cgrp, 'index1', np.arange(3*n_res))
-    create_array(cgrp, 'type1',  np.arange(3*n_res)%3)
-    create_array(cgrp, 'id1',    np.arange(3*n_res)/3)
+        # group1 is the hydrophobes
+        # create_array(cgrp, 'index1', np.arange(n_res))
+        # create_array(cgrp, 'type1',  0*np.arange(n_res))
+        # create_array(cgrp, 'id1',    np.arange(n_res))
+        create_array(cgrp, 'index1', np.arange(3*n_res))
+        create_array(cgrp, 'type1',  np.arange(3*n_res)%3)
+        create_array(cgrp, 'id1',    np.arange(3*n_res)/3)
 
-    # group 2 is the sidechains
-    rseq = sc_node.beadtype_seq[:]
-    create_array(cgrp, 'index2', np.arange(len(rseq)))
-    create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
-    create_array(cgrp, 'id2',    sc_resnum)
+        # group 2 is the sidechains
+        rseq = sc_node.beadtype_seq[:]
+        create_array(cgrp, 'index2', np.arange(len(rseq)))
+        create_array(cgrp, 'type2',  np.array([bead_num[s] for s in rseq]))
+        create_array(cgrp, 'id2',    sc_resnum)
 
     if hbond_energy > 0.:
         print '\n**** WARNING ****  hydrogen bond formation energy set to repulsive value\n'
@@ -588,9 +589,9 @@ def read_rama_maps_and_weights(seq, rama_group, mode='mixture', allow_CPR=True):
     return pots, weights
 
 
-def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None):
+def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None, mode='mixture'):
     with tb.open_file(rama_library_h5) as tr:
-        coil_pots, coil_weights = read_rama_maps_and_weights(seq, tr.root.coil, mode='mixture')
+        coil_pots, coil_weights = read_rama_maps_and_weights(seq, tr.root.coil, mode=mode)
 
         if sheet_mixing is None:
             return coil_pots
@@ -650,11 +651,11 @@ def write_torus_dbn(seq, torus_dbn_library):
     create_array(hgrp, 'transition_energy', transition_energy)
 
 
-def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, secstr_bias=''):
+def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, secstr_bias='', mode='mixture'):
     grp = t.create_group(potential, 'rama_map_pot')
     grp._v_attrs.arguments = np.array(['rama_coord'])
 
-    rama_pot = read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy)
+    rama_pot = read_weighted_maps(seq, rama_library_h5, sheet_mixing_energy, mode)
 
     if sheet_mixing_energy is not None:
         # support finite differencing for potential derivative
@@ -824,7 +825,7 @@ def write_rama_coord():
 
 
 def write_backbone_dependent_point(fasta, library):
-    grp = t.create_group(potential, 'placement_point_only_backbone_dependent_point')
+    grp = t.create_group(potential, 'placement_fixed_point_only_CB')
     grp._v_attrs.arguments = np.array(['affine_alignment','rama_coord'])
 
     with tb.open_file(library) as data:
@@ -843,7 +844,7 @@ def write_backbone_dependent_point(fasta, library):
 
 def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
-    g._v_attrs.arguments = np.array(['placement_point_only_backbone_dependent_point'])
+    g._v_attrs.arguments = np.array(['placement_fixed_point_only_CB'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -1186,6 +1187,9 @@ def main():
             help='Angle spring constant in units of 1/dot_product (default 175)')
     parser.add_argument('--rama-library', default='',
             help='smooth Rama probability library')
+    parser.add_argument('--rama-library-combining-rule', default='mixture',
+            help='How to combine left and right coil distributions in Rama library
+            (mixture or product).  Default is mixture.')
     parser.add_argument('--torus-dbn-library', default='',
             help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
@@ -1329,6 +1333,7 @@ def main():
         write_angle_spring(args)
         write_dihedral_spring(fasta_seq_with_cpr)
 
+    sc_node_name = ''
     if args.rotamer_placement:
         require_rama = True
         require_affine = True
@@ -1393,7 +1398,9 @@ def main():
 
     if args.rama_library:
         require_rama = True
-        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy, args.secstr_bias)
+        write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy,
+                args.secstr_bias, args.rama_library_combining_rule)
+
     elif args.torus_dbn_library:
         require_rama = True
         write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)

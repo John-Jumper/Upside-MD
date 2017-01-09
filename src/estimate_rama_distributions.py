@@ -47,7 +47,7 @@ def main():
     args = parser.parse_args(sys.argv[1:])
 
     with tb.open_file(args.input_h5) as t:
-        rama = t.root.output.rama[:,args.system]
+        rama = t.root.output.rama[:]
 
     n_frame,n_res,two = rama.shape;  assert two == 2
     densities = np.zeros((n_res,72,72))

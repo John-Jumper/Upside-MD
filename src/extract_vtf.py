@@ -105,6 +105,7 @@ def main():
     parser.add_argument('input_h5', help='Input simulation file')
     parser.add_argument('output_vtf', help='Output trajectory file')
     parser.add_argument('--stride', type=int, default=1, help='Stride for reading file')
+    parser.add_argument('--start', type=int, default=0, help='Initial frame to extract VTF')
     args = parser.parse_args()
 
     with tables.open_file(args.input_h5) as t:
@@ -121,7 +122,7 @@ def main():
         if 'output' in t.root:  # 'output' is the *last* produced output
             output_paths.append('/output')
 
-        start_frame = 0
+        start_frame = args.start
         total_frames_produced = 0
         pos = []
         stride = args.stride
