@@ -222,7 +222,7 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
 
     # group1 is the source CB
     create_array(cgrp, 'index1', np.arange(len(fasta)))
-+    create_array(cgrp, 'type1', np.array([restype_order[s] for s in fasta]))  # one type per CB type
+    create_array(cgrp, 'type1', np.array([restype_order[s] for s in fasta]))  # one type per CB type
     create_array(cgrp, 'id1',    np.arange(len(fasta)))
 
     # group 2 is the weighted points to interact with
@@ -756,7 +756,7 @@ def read_fasta(file_obj):
 
 def write_CB(fasta):
     # Place CB
-    pgrp = t.create_group(potential, 'placement_fixed_point_only_for_contact')
+    pgrp = t.create_group(potential, 'placement_fixed_point_only_CB')
     pgrp._v_attrs.arguments = np.array(['affine_alignment'])
     ref_pos = np.zeros((4,3))
     ref_pos[0] = (-1.19280531, -0.83127186,  0.)        # N
@@ -784,7 +784,7 @@ def write_contact_energies(parser, fasta, contact_table):
     n_contact = len(fields)
 
     g = t.create_group(t.root.input.potential, 'contact')
-    g._v_attrs.arguments = np.array(['placement_fixed_point_only_for_contact'])
+    g._v_attrs.arguments = np.array(['placement_fixed_point_only_CB'])
 
     id     = np.zeros((n_contact,2), dtype='i')
     energy = np.zeros((n_contact,))
@@ -827,7 +827,7 @@ def write_rama_coord():
 
 def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
     g = t.create_group(t.root.input.potential, 'radial'+suffix)
-    g._v_attrs.arguments = np.array(['placement_point_only_CB'])
+    g._v_attrs.arguments = np.array(['placement_fixed_point_only_CB'])
     for res_num in excluded_residues:
         if not (0<=res_num<len(fasta)):
             raise ValueError('Residue number %i is invalid'%res_num)
@@ -1169,8 +1169,8 @@ def main():
     parser.add_argument('--rama-library', default='',
             help='smooth Rama probability library')
     parser.add_argument('--rama-library-combining-rule', default='mixture',
-            help='How to combine left and right coil distributions in Rama library
-            (mixture or product).  Default is mixture.')
+            help='How to combine left and right coil distributions in Rama library '+
+            '(mixture or product).  Default is mixture.')
     parser.add_argument('--torus-dbn-library', default='',
             help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
@@ -1274,9 +1274,6 @@ def main():
     args = parser.parse_args()
     if args.restraint_group and not args.initial_structures:
         parser.error('must specify --initial-structures to use --restraint-group')
-
-    if args.sidechain_radial and not args.backbone_dependent_point:
-        parser.error('--sidechain-radial requires --backbone-dependent-point')
 
     if args.apply_restraint_group_to_each_chain and not args.chain_break_from_file:
         parser.error('--apply-restraint-group-to-each-chain requires --chain-break-from-file')
@@ -1518,7 +1515,7 @@ def main():
 
     if require_backbone_point:
         require_affine = True
-        write_CB(fasta)
+        write_CB(fasta_seq)
 
     if require_rama:
         write_rama_coord()
