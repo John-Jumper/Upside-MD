@@ -55,6 +55,10 @@ def main():
     args = parser.parse_args()
 
     t = tb.open_file(args.config, 'a')
+    if len(agrs.chain_first_residue) > 1:
+        break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
+        t.create_array(break_grp, "chain_first_residue", chain_first_residue[1:], "Contains array of chain first residues, apart from residue 0")
+
     if args.chain_break_from_file:
         try:
             args.chain_first_residue = np.append([0], t.root.input.chain_break.chain_first_residue)
