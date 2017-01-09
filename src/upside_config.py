@@ -764,7 +764,7 @@ def write_contact_energies(parser, fasta, contact_table):
     fields = fields[1:]
     n_contact = len(fields)
 
-    # Place CA
+    # Place CB
     pgrp = t.create_group(potential, 'placement_fixed_point_only_for_contact')
     pgrp._v_attrs.arguments = np.array(['affine_alignment'])
     ref_pos = np.zeros((4,3))
