@@ -103,7 +103,7 @@ struct FixedHMM : public PotentialNode
                     });
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("hmm"));
         VecArray n1b = node_1body.output;
 
@@ -205,9 +205,9 @@ struct FixedHMM : public PotentialNode
     }
 
 #ifdef PARAM_DERIV
-    virtual vector<float> get_param() const {return copy_eigen_to_stl(transition_energy);}
-    virtual vector<float> get_param_deriv() const {return copy_eigen_to_stl(edge_transition_counts);}
-    virtual void set_param(const vector<float>& new_param) {
+    virtual vector<float> get_param() const override {return copy_eigen_to_stl(transition_energy);}
+    virtual vector<float> get_param_deriv() const override {return copy_eigen_to_stl(edge_transition_counts);}
+    virtual void set_param(const vector<float>& new_param) override {
         copy_stl_to_eigen(transition_energy,new_param);
         update_transition_matrix_from_transition_energy();
     }

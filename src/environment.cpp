@@ -19,6 +19,7 @@ namespace {
             return p[0] + compact_sigmoid_cutoff(p[1]);
         }
 
+        constexpr static bool  filter_for_acceptable_id = true;
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             auto sequence_exclude = Int4(2);  // exclude i,i, i,i+1, and i,i+2
             return (sequence_exclude < id1-id2) | (sequence_exclude < id2-id1);
@@ -101,9 +102,9 @@ struct EnvironmentCoverage : public CoordNode {
     }
 
 #ifdef PARAM_DERIV
-    virtual std::vector<float> get_param() const {return igraph.get_param();}
-    virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
+    virtual std::vector<float> get_param() const override {return igraph.get_param();}
+    virtual std::vector<float> get_param_deriv() const override {return igraph.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
 };
 static RegisterNodeType<EnvironmentCoverage,2> environment_coverage_node("environment_coverage");

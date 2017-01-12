@@ -159,6 +159,7 @@ namespace {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
         }
 
+        constexpr static bool  filter_for_acceptable_id = false;
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             return Int4() == Int4();  // No exclusions (all true)
         }
@@ -251,6 +252,7 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
+        constexpr static bool  filter_for_acceptable_id = true;
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             // return Int4() == Int4();  // No exclusions (all true)
             // return id1 != id2; // exclude interactions on the same residue
@@ -262,6 +264,9 @@ namespace {
                 const Vec<n_dim1,Float4> &hb_pos, const Vec<n_dim2,Float4> &sc_pos) {
             Float4 one(1.f);
 
+            // print_vector("hb_pos[0]", hb_pos[0]);
+            // print_vector("sc_pos[0]", sc_pos[0]);
+            // print_vector("hbond_dist", mag(extract<0,3>(hb_pos)-extract<0,3>(sc_pos)));
             auto coverage = quadspline<n_knot_angular, n_knot>(d1,d2, inv_dtheta,inv_dx,p, hb_pos,sc_pos);
 
             auto prefactor = sqr(one-hb_pos[6]);
@@ -395,9 +400,9 @@ struct HBondCoverage : public CoordNode {
     }
 
 #ifdef PARAM_DERIV
-    virtual std::vector<float> get_param() const {return igraph.get_param();}
-    virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
+    virtual std::vector<float> get_param() const override {return igraph.get_param();}
+    virtual std::vector<float> get_param_deriv() const override {return igraph.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
 
     virtual vector<float> get_value_by_name(const char* log_name) override {
@@ -424,7 +429,7 @@ struct HBondEnergy : public HBondCounter
         E_protein(read_attribute<float>(grp, ".", "protein_hbond_energy"))
     {}
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("hbond_energy"));
         float tot_hb = 0.f;
         VecArray pp      = protein_hbond.output;
@@ -441,9 +446,9 @@ struct HBondEnergy : public HBondCounter
     }
 
 #ifdef PARAM_DERIV
-    virtual std::vector<float> get_param() const {return vector<float>(1,E_protein);}
-    virtual std::vector<float> get_param_deriv() const {return vector<float>(1,float(n_hbond));}
-    virtual void set_param(const std::vector<float>& new_param) {
+    virtual std::vector<float> get_param() const override {return vector<float>(1,E_protein);}
+    virtual std::vector<float> get_param_deriv() const override {return vector<float>(1,float(n_hbond));}
+    virtual void set_param(const std::vector<float>& new_param) override {
         if(new_param.size() != 1u) throw string("expected 1 param to hbond_energy but got "+to_string(new_param.size()));
         E_protein = new_param[0];
     }

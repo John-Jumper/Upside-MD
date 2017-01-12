@@ -229,7 +229,7 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool 
 
     // using topo_order here ensures that a node is only parsed after all its arguments
     for(auto &nm : topo_order) {
-        if(!quiet)  printf("initializing %-27s%s", nm.c_str(), nm=="pos" ? "\n" : ""); 
+        // if(!quiet)  printf("initializing %-27s%s", nm.c_str(), nm=="pos" ? "\n" : ""); 
         if(nm=="pos") continue;  // pos node is added specially
         // some name in the node_creation_map must be a prefix of this name
         string node_type_name = "";
@@ -248,14 +248,14 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool 
             if(!arguments.back()) 
                 throw arg_name + " is not an intermediate value, but it is an argument of " + nm;
         }
-        if(!quiet) {
-            printf(" with %sargument%s ", 
-                    argument_names.size() == 0 ? "no " : "",
-                    argument_names.size() == 1 ? " "   : "s");
-            for(size_t na=0; na<argument_names.size(); ++na) 
-                printf("%s%s", na ? " and " : "", argument_names[na].c_str());
-            printf("\n");
-        }
+        // if(!quiet) {
+        //     printf(" with %sargument%s ", 
+        //             argument_names.size() == 0 ? "no " : "",
+        //             argument_names.size() == 1 ? " "   : "s");
+        //     for(size_t na=0; na<argument_names.size(); ++na) 
+        //         printf("%s%s", na ? " and " : "", argument_names[na].c_str());
+        //     printf("\n");
+        // }
 
         try {
             auto grp = open_group(potential_group,nm.c_str());

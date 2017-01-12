@@ -54,7 +54,7 @@ struct RamaMapPot : public PotentialNode
                     });
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("rama_map_pot"));
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
@@ -82,7 +82,7 @@ struct RamaMapPot : public PotentialNode
     }
 
 #ifdef PARAM_DERIV
-    virtual void set_param(const std::vector<float>& new_param) {
+    virtual void set_param(const std::vector<float>& new_param) override {
         auto& r = rama_map_data;
         vector<double> raw_data(r.n_layer * r.nx * r.ny);
         if(raw_data.size() != new_param.size()) throw string("wrong number of parameters");

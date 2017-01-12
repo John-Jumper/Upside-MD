@@ -1073,9 +1073,9 @@ struct RotamerSidechain: public PotentialNode {
     }
 
 #ifdef PARAM_DERIV
-    virtual std::vector<float> get_param() const {return igraph.get_param();}
-    virtual std::vector<float> get_param_deriv() const {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) {igraph.set_param(new_param);}
+    virtual std::vector<float> get_param() const override {return igraph.get_param();}
+    virtual std::vector<float> get_param_deriv() const override {return igraph.get_param_deriv();}
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
 };
 

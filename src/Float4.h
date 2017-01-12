@@ -284,6 +284,15 @@ struct alignas(16) Float4
             return this->blend<m0,m1,m2,m3>(Float4());
         }
 
+        Float4 horizontal_max() const {
+            // FIXME improve this implementation
+            return max(max(broadcast<0>(), broadcast<1>()), max(broadcast<2>(),broadcast<3>()));
+        }
+        Float4 horizontal_min() const {
+            // FIXME improve this implementation
+            return min(min(broadcast<0>(), broadcast<1>()), min(broadcast<2>(),broadcast<3>()));
+        }
+
         float x() const { float val; _MM_EXTRACT_FLOAT(val, vec, 0); return val;}
         float y() const { float val; _MM_EXTRACT_FLOAT(val, vec, 1); return val;}
         float z() const { float val; _MM_EXTRACT_FLOAT(val, vec, 2); return val;}
