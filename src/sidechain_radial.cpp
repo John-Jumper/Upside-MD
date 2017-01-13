@@ -39,7 +39,6 @@ struct RadialHelper {
         return true;
     }
 
-    constexpr static bool  filter_for_acceptable_id = true;
     static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
         auto sequence_exclude = Int4(2);
         return (sequence_exclude < id1-id2) | (sequence_exclude < id2-id1);

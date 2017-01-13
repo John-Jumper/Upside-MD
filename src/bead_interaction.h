@@ -128,7 +128,6 @@ namespace {
             return true;
         }
 
-        constexpr static bool  filter_for_acceptable_id = true;
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
         }
@@ -171,7 +170,6 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
-        constexpr static bool  filter_for_acceptable_id = true;
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
             return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
         }

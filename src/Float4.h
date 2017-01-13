@@ -89,6 +89,8 @@ struct alignas(16) Int4
             return Int4(_mm_xor_si128(all_one, _mm_cmpeq_epi32(vec,o.vec)));
         }
 
+        Int4 operator|=(const Int4 &o) {return vec = _mm_or_si128(vec,o.vec);}
+
         bool any () const {return !_mm_testz_si128(vec,vec);}
         bool none() const {return  _mm_testz_si128(vec,vec);}
 
@@ -223,6 +225,7 @@ struct alignas(16) Float4
         Float4 operator+=(const Float4 &o) {return vec = _mm_add_ps(vec, o.vec);}
         Float4 operator-=(const Float4 &o) {return vec = _mm_sub_ps(vec, o.vec);}
         Float4 operator*=(const Float4 &o) {return vec = _mm_mul_ps(vec, o.vec);}
+        Float4 operator|=(const Float4 &o) {return vec = _mm_or_ps(vec,o.vec);}
 
         int movemask() const {return _mm_movemask_ps(vec);}
         bool none() const {__m128i v = _mm_castps_si128(vec); return  _mm_testz_si128(v,v);}

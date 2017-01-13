@@ -27,77 +27,115 @@ static T&& message(const std::string& s, T&& x) {
     return std::forward<T>(x);
 }
 
+
 template <bool symmetric>
 struct PairlistComputation {
+    typedef Int4(*acceptable_id_pair_t)(const Int4&,const Int4&);
     public:
-        struct alignas(16) CoarsePacket4 {
-            alignas(16) float x[4][4];
-            alignas(16) float y[4][4];
-            alignas(16) float z[4][4];
-            alignas(16) float coarse_x[4];
-            alignas(16) float coarse_y[4];
-            alignas(16) float coarse_z[4];
-            alignas(16) float coarse_r[4];
-
-            Vec<3,Float4> read_fine(int i) const {
-                return make_vec3(Float4(x[i]), Float4(y[i]), Float4(z[i]));
-            }
-            Vec<3,Float4> read_constant_fine(int i, int j) const {
-                return make_vec3(Float4(x[i][j]), Float4(y[i][j]), Float4(z[i][j]));
-            }
-            Vec<4,Float4> read_coarse() const {
-                return make_vec4(Float4(coarse_x), Float4(coarse_y), Float4(coarse_z), Float4(coarse_r));
-            }
-            Vec<4,Float4> read_constant_coarse(int i) const {
-                return make_vec4(Float4(coarse_x[i]), Float4(coarse_y[i]), Float4(coarse_z[i]), Float4(coarse_r[i]));
-            }
-        };
-
         const int n_elem1, n_elem2;
-
-
         std::unique_ptr<int32_t[]>  edge_indices1, edge_indices2;
         std::unique_ptr<int32_t[]>  edge_id1,      edge_id2;
         int n_edge;
 
-    public:
-        PairlistComputation(int n_elem1_, int n_elem2_, int max_n_edge):
-            n_elem1(n_elem1_), n_elem2(n_elem2_),
+    protected:
+        bool cache_valid;
+        float cache_buffer;
+        float cache_cutoff;
+        std::unique_ptr<float[]>    cache_pos1, cache_pos2;
+        std::unique_ptr<int32_t[]>  cache_id1,  cache_id2;
+        std::unique_ptr<int32_t[]>  cache_edge_indices1, cache_edge_indices2;
+        std::unique_ptr<int32_t[]>  cache_edge_id1,      cache_edge_id2;
+        int cache_n_edge;
 
-            edge_indices1(new_aligned<int32_t>(max_n_edge, 16)),
-            edge_indices2(new_aligned<int32_t>(max_n_edge, 16)),
-            edge_id1     (new_aligned<int32_t>(max_n_edge, 16)),
-            edge_id2     (new_aligned<int32_t>(max_n_edge, 16)),
+        void ensure_cache_valid(
+                float cutoff,
+                const float* aligned_pos1, const int pos1_stride, int* id1, 
+                const float* aligned_pos2, const int pos2_stride, int* id2)
+        {
+            Timer t1("pairlist_cache_check");
+            // Find maximum deviation from cached positions to determine if cache must be rebuilt
+            auto max_dist_exceeded = Float4();
+            auto id_changed = Int4();
+            auto max_cache_dist2 = Float4(sqr(0.5f*(cache_cutoff - cutoff)));
 
-            n_edge(0)
+            for(int i=0; i<n_elem1; i+=4) {
+                auto x = Float4(aligned_pos1+pos1_stride*(i+0)) - Float4(cache_pos1+4*(i+0));
+                auto y = Float4(aligned_pos1+pos1_stride*(i+1)) - Float4(cache_pos1+4*(i+1));
+                auto z = Float4(aligned_pos1+pos1_stride*(i+2)) - Float4(cache_pos1+4*(i+2));
+                auto w = Float4(aligned_pos1+pos1_stride*(i+3)) - Float4(cache_pos1+4*(i+3));
 
-        {}
+                transpose4(x,y,z,w);
+                max_dist_exceeded |= max_cache_dist2 < x*x+y*y+z*z;
 
-        void find_edges(float cutoff,
-                        const float* aligned_pos1, const int pos1_stride, int* id1, 
-                        const float* aligned_pos2, const int pos2_stride, int* id2) {
-            int32_t offset[4] = {0,1,2,3};
-            auto cutoff2 = Float4(sqr(cutoff));
+                // To ensure the caching is completely transparent, we must also ensure that the id's have not 
+                // changed.  Hopefully, this check is quite quick.
+                id_changed |= Int4(id1+i)!=Int4(cache_id1+i);
+            }
+            if(!symmetric) {
+                for(int i=0; i<n_elem2; i+=4) {
+                    auto x = Float4(aligned_pos2+pos2_stride*(i+0)) - Float4(cache_pos2+4*(i+0));
+                    auto y = Float4(aligned_pos2+pos2_stride*(i+1)) - Float4(cache_pos2+4*(i+1));
+                    auto z = Float4(aligned_pos2+pos2_stride*(i+2)) - Float4(cache_pos2+4*(i+2));
+                    auto w = Float4(aligned_pos2+pos2_stride*(i+3)) - Float4(cache_pos2+4*(i+3));
+
+                    transpose4(x,y,z,w);
+                    max_dist_exceeded |= max_cache_dist2 < x*x+y*y+z*z;
+                    id_changed |= Int4(id2+i)!=Int4(cache_id2+i);
+                }
+            }
+            t1.stop();
+
+            // We don't do early bailout since the cache should be valid most of the time
+            if(cache_valid && max_dist_exceeded.none() && id_changed.none()) return;
+            // printf("cache rebuild\n");
+
+            // If we reach here, we must rebuild the cache
+
+            Timer t2("pairlist_cache_rebuild");
+            // Store the new cache positions
+            cache_cutoff = cutoff + cache_buffer;
+
+            for(int i=0; i<n_elem1; i+=4) {
+                Float4(aligned_pos1+pos1_stride*(i+0)).store(cache_pos1+4*(i+0));
+                Float4(aligned_pos1+pos1_stride*(i+1)).store(cache_pos1+4*(i+1));
+                Float4(aligned_pos1+pos1_stride*(i+2)).store(cache_pos1+4*(i+2));
+                Float4(aligned_pos1+pos1_stride*(i+3)).store(cache_pos1+4*(i+3));
+                Int4(id1+i).store(cache_id1+i);
+            }
+            if(!symmetric) {
+                for(int i=0; i<n_elem2; i+=4) {
+                    Float4(aligned_pos2+pos2_stride*(i+0)).store(cache_pos2+4*(i+0));
+                    Float4(aligned_pos2+pos2_stride*(i+1)).store(cache_pos2+4*(i+1));
+                    Float4(aligned_pos2+pos2_stride*(i+2)).store(cache_pos2+4*(i+2));
+                    Float4(aligned_pos2+pos2_stride*(i+3)).store(cache_pos2+4*(i+3));
+                    Int4(id2+i).store(cache_id2+i);
+                }
+            }
+
+            // Find all cache pairs
+            alignas(16) int32_t offset_v[4] = {0,1,2,3};
+            Int4 offset(offset_v);
+            auto cutoff2 = Float4(sqr(cache_cutoff));
 
             int ne = 0;
             for(int32_t i1=0; i1<n_elem1; i1+=4) {
-                Float4 v0(aligned_pos1+(i1+0)*pos1_stride), // aligned_pos1 size was rounded up so that this never runs past the end
-                       v1(aligned_pos1+(i1+1)*pos1_stride), 
-                       v2(aligned_pos1+(i1+2)*pos1_stride), 
-                       v3(aligned_pos1+(i1+3)*pos1_stride);
+                Float4 v0(cache_pos1+(i1+0)*4), // aligned_pos1 size was rounded up
+                       v1(cache_pos1+(i1+1)*4), 
+                       v2(cache_pos1+(i1+2)*4), 
+                       v3(cache_pos1+(i1+3)*4);
                 transpose4(v0,v1,v2,v3); // v3 will be unused at the end
                 auto  x1 = make_vec3(v0,v1,v2);
 
-                auto  my_id1 = Int4(id1+i1);
-                auto  i1_vec = Int4(i1) + Int4(offset,Alignment::unaligned);
+                auto  my_id1 = Int4(cache_id1+i1);
+                auto  i1_vec = Int4(i1) + offset;
 
                 for(int32_t i2=symmetric?i1+1:0; i2<n_elem2; ++i2) {
-                    const float* p = (symmetric?aligned_pos1:aligned_pos2)+i2*pos2_stride;
+                    const float* p = (symmetric?cache_pos1:cache_pos2)+i2*4;
                     auto  x2 = make_vec3(Float4(p[0]), Float4(p[1]),  Float4(p[2]));
                     auto near = mag2(x1-x2)<cutoff2;
                     if(near.none()) continue;
 
-                    auto my_id2 = Int4((symmetric?id1:id2)[i2]);  // might as well start the load
+                    auto my_id2 = Int4((symmetric?cache_id1:cache_id2)[i2]);
                     auto i2_vec = Int4(i2);
 
                     Int4 is_hit = symmetric 
@@ -106,47 +144,101 @@ struct PairlistComputation {
                     int is_hit_bits = is_hit.movemask();
 
                     // i2_vec and my_id2 is constant, so we don't have to left pack
-                    i2_vec                       .store(edge_indices2+ne, Alignment::unaligned);
-                    my_id2                       .store(edge_id2     +ne, Alignment::unaligned);
-                    i1_vec.left_pack(is_hit_bits).store(edge_indices1+ne, Alignment::unaligned);
-                    my_id1.left_pack(is_hit_bits).store(edge_id1     +ne, Alignment::unaligned);
+                    i2_vec                       .store(cache_edge_indices2+ne, Alignment::unaligned);
+                    my_id2                       .store(cache_edge_id2     +ne, Alignment::unaligned);
+                    i1_vec.left_pack(is_hit_bits).store(cache_edge_indices1+ne, Alignment::unaligned);
+                    my_id1.left_pack(is_hit_bits).store(cache_edge_id1     +ne, Alignment::unaligned);
                     ne += popcnt_nibble(is_hit_bits);
                 }
             }
-            n_edge = ne;
+            cache_n_edge = ne;
             for(int i=ne; i<round_up(ne,4); ++i) {
                 // we need something sane to fill out the last group of 4 so just duplicate the interactions
                 // with sensitivity 0.
-                edge_indices1[i] = edge_indices1[i-i%4];
-                edge_indices2[i] = edge_indices2[i-i%4]; // just put something sane here
+                cache_edge_indices1[i] = cache_edge_indices1[i-i%4];
+                cache_edge_indices2[i] = cache_edge_indices2[i-i%4]; // just put something sane here
             }
+            cache_valid = true;
+            // printf("found %i cache edges\n", cache_n_edge);
         }
 
-        typedef Int4(*acceptable_id_pair_t)(const Int4&,const Int4&);
+    public:
+        PairlistComputation(int n_elem1_, int n_elem2_, float cache_buffer_, int max_n_edge):
+            n_elem1(n_elem1_), n_elem2(n_elem2_),
+
+            edge_indices1(new_aligned<int32_t>(max_n_edge, 16)),
+            edge_indices2(new_aligned<int32_t>(max_n_edge, 16)),
+            edge_id1     (new_aligned<int32_t>(max_n_edge, 16)),
+            edge_id2     (new_aligned<int32_t>(max_n_edge, 16)),
+
+            n_edge(0),
+
+            cache_valid(false),
+            cache_buffer(cache_buffer_),
+            cache_pos1(new_aligned<float>(round_up(n_elem1,16)*4,             4)),
+            cache_pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*4,4)),
+            cache_id1(new_aligned<int32_t>(round_up(n_elem1,16),4)),
+            cache_id2(new_aligned<int32_t>(round_up(n_elem2,16),4)),
+            cache_edge_indices1(new_aligned<int32_t>(max_n_edge, 4)),
+            cache_edge_indices2(new_aligned<int32_t>(max_n_edge, 4)),
+            cache_edge_id1     (new_aligned<int32_t>(max_n_edge, 4)),
+            cache_edge_id2     (new_aligned<int32_t>(max_n_edge, 4)),
+            cache_n_edge(0)
+        {}
+
         template<acceptable_id_pair_t acceptable_id_pair>
-        void filter_for_acceptable_id() {
+        void find_edges(float cutoff,
+                        const float* aligned_pos1, const int pos1_stride, int* id1, 
+                        const float* aligned_pos2, const int pos2_stride, int* id2) {
+            Timer timer_total("find_edges");
+            ensure_cache_valid(cutoff,
+                    aligned_pos1, pos1_stride, id1,
+                    aligned_pos2, pos2_stride, id2);
+            Timer timer("pairlist_refine");
+
             int ne=0;
             alignas(16) int32_t offset_v[4] = {0,1,2,3};
             Int4 offset(offset_v);
-            Int4 n_edge4(n_edge);
+            Int4 cache_n_edge4(cache_n_edge);
+            Float4 cutoff2(sqr(cutoff));
 
-            for(int i_edge=0; i_edge<n_edge; i_edge+=4) {
-                auto i1 = Int4(edge_indices1+i_edge);
-                auto i2 = Int4(edge_indices2+i_edge);
-                auto eid1 = Int4(edge_id1+i_edge);
-                auto eid2 = Int4(edge_id2+i_edge);
+            for(int i_edge=0; i_edge<cache_n_edge; i_edge+=4) {
+                auto i1 = Int4(cache_edge_indices1+i_edge);
+                auto i2 = Int4(cache_edge_indices2+i_edge);
+                auto eid1 = Int4(cache_edge_id1+i_edge);
+                auto eid2 = Int4(cache_edge_id2+i_edge);
 
-                auto pair_acceptable = (acceptable_id_pair(eid1,eid2)&(Int4(i_edge)+offset<n_edge4)).movemask();
-                // Now pack and write.  Since ne <= i_edge always
-                // we may write without worrying about collisions
+                // auto x1 = aligned_gather_vec<3>(aligned_pos1,                         i1*Int4(pos1_stride));
+                // auto x2 = aligned_gather_vec<3>((symmetric?aligned_pos1:aligned_pos2),i2*Int4(pos2_stride));
+                // auto dist2 = mag2(x1-x2);
                 
-                i1  .left_pack(pair_acceptable).store(edge_indices1+ne, Alignment::unaligned);
-                i2  .left_pack(pair_acceptable).store(edge_indices2+ne, Alignment::unaligned);
-                eid1.left_pack(pair_acceptable).store(edge_id1     +ne, Alignment::unaligned);
-                eid2.left_pack(pair_acceptable).store(edge_id2     +ne, Alignment::unaligned);
-                ne += popcnt_nibble(pair_acceptable);
+                Float4 x_diff[4];
+                #pragma unroll
+                for(int j=0; j<4; ++j)
+                    x_diff[j] = 
+                        Float4(aligned_pos1                         +pos1_stride*cache_edge_indices1[i_edge+j]) -
+                        Float4((symmetric?aligned_pos1:aligned_pos2)+pos2_stride*cache_edge_indices2[i_edge+j]);
+                transpose4(x_diff[0],x_diff[1],x_diff[2],x_diff[3]);
+                auto dist2 = sqr(x_diff[0])+sqr(x_diff[1])+sqr(x_diff[2]);
+                    
+                auto dist_acceptable = dist2<cutoff2;
+                auto i_edge_acceptable = Int4(i_edge)+offset<cache_n_edge4;
+                auto id_acceptable   = acceptable_id_pair(eid1,eid2);
+                auto acceptable = (dist_acceptable.cast_int() & i_edge_acceptable & id_acceptable).movemask();
+
+                i1  .left_pack(acceptable).store(edge_indices1+ne, Alignment::unaligned);
+                i2  .left_pack(acceptable).store(edge_indices2+ne, Alignment::unaligned);
+                eid1.left_pack(acceptable).store(edge_id1     +ne, Alignment::unaligned);
+                eid2.left_pack(acceptable).store(edge_id2     +ne, Alignment::unaligned);
+                ne += popcnt_nibble(acceptable);
+
+                // FIXME it would nice to store the transposed positions for later
             }
             n_edge = ne;
+            for(int i=ne; i<round_up(ne,4); ++i) {
+                edge_indices1[i] = edge_indices1[i-i%4];
+                edge_indices2[i] = edge_indices2[i-i%4]; // just put something sane here
+            }
         }
 };
 
@@ -217,7 +309,7 @@ struct InteractionGraph{
         pos1(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             align_bytes)),
         pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, align_bytes)),
 
-        pairlist(n_elem1,n_elem2,max_n_edge),
+        pairlist(n_elem1,n_elem2,1.5f,max_n_edge),
         edge_indices1(pairlist.edge_indices1.get()),
         edge_indices2(pairlist.edge_indices2.get()),
         edge_id1      (pairlist.edge_id1.get()),
@@ -342,17 +434,9 @@ struct InteractionGraph{
 
         // First find all the edges
         {
-            Timer timer1("find_edges");
-            pairlist.find_edges(cutoff,
+            pairlist.template find_edges<IType::acceptable_id_pair>(cutoff,
                                 pos1.get(), n_dim1a, id1.get(),
-                                pos2.get(), n_dim2a, id2.get());
-            timer1.stop();
-
-            Timer timer2("filter_edges");
-            if(IType::filter_for_acceptable_id)
-                pairlist.template filter_for_acceptable_id<IType::acceptable_id_pair>();
-            timer2.stop();
-
+                                (symmetric?pos1:pos2).get(), n_dim2a, (symmetric?id1:id2).get());
             n_edge = pairlist.n_edge;
         }
         // printf("n_edge for n_dim1 %i n_dim2 %i n_elem1 %i n_elem2 %i is %i\n", n_dim1, n_dim2, n_elem1, n_elem2, n_edge);
