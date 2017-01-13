@@ -47,6 +47,7 @@ struct PairlistComputation {
         std::unique_ptr<int32_t[]>  cache_edge_id1,      cache_edge_id2;
         int cache_n_edge;
 
+        template<acceptable_id_pair_t acceptable_id_pair>
         void ensure_cache_valid(
                 float cutoff,
                 const float* aligned_pos1, const int pos1_stride, int* id1, 
@@ -138,17 +139,21 @@ struct PairlistComputation {
                     auto my_id2 = Int4((symmetric?cache_id1:cache_id2)[i2]);
                     auto i2_vec = Int4(i2);
 
-                    Int4 is_hit = symmetric 
+                    Int4 is_hit = acceptable_id_pair(my_id1,my_id2) & (symmetric 
                         ? (i1_vec<i2_vec) & near.cast_int()
-                        :                   near.cast_int();
+                        :                   near.cast_int());
                     int is_hit_bits = is_hit.movemask();
 
                     // i2_vec and my_id2 is constant, so we don't have to left pack
-                    i2_vec                       .store(cache_edge_indices2+ne, Alignment::unaligned);
-                    my_id2                       .store(cache_edge_id2     +ne, Alignment::unaligned);
+                    // left_pack requires a read, so do before the writes
+
+                    // write out pairs
+                    int n_hit = popcnt_nibble(is_hit_bits);
                     i1_vec.left_pack(is_hit_bits).store(cache_edge_indices1+ne, Alignment::unaligned);
                     my_id1.left_pack(is_hit_bits).store(cache_edge_id1     +ne, Alignment::unaligned);
-                    ne += popcnt_nibble(is_hit_bits);
+                    i2_vec                       .store(cache_edge_indices2+ne, Alignment::unaligned);
+                    my_id2                       .store(cache_edge_id2     +ne, Alignment::unaligned);
+                    ne += n_hit;
                 }
             }
             cache_n_edge = ne;
@@ -192,7 +197,7 @@ struct PairlistComputation {
                         const float* aligned_pos1, const int pos1_stride, int* id1, 
                         const float* aligned_pos2, const int pos2_stride, int* id2) {
             // Timer timer_total("find_edges");
-            ensure_cache_valid(cutoff,
+            ensure_cache_valid<acceptable_id_pair>(cutoff,
                     aligned_pos1, pos1_stride, id1,
                     aligned_pos2, pos2_stride, id2);
             // Timer timer("pairlist_refine");
@@ -200,9 +205,9 @@ struct PairlistComputation {
             int ne=0;
             alignas(16) int32_t offset_v[4] = {0,1,2,3};
             Int4 offset(offset_v);
-            Int4 cache_n_edge4(cache_n_edge);
             Float4 cutoff2(sqr(cutoff));
 
+            int acceptable = 0;
             for(int i_edge=0; i_edge<cache_n_edge; i_edge+=4) {
                 auto i1 = Int4(cache_edge_indices1+i_edge);
                 auto i2 = Int4(cache_edge_indices2+i_edge);
@@ -222,21 +227,28 @@ struct PairlistComputation {
                 transpose4(x_diff[0],x_diff[1],x_diff[2],x_diff[3]);
                 auto dist2 = sqr(x_diff[0])+sqr(x_diff[1])+sqr(x_diff[2]);
                     
-                auto dist_acceptable = dist2<cutoff2;
-                auto i_edge_acceptable = Int4(i_edge)+offset<cache_n_edge4;
-                auto id_acceptable   = acceptable_id_pair(eid1,eid2);
-                auto acceptable = (dist_acceptable.cast_int() & i_edge_acceptable & id_acceptable).movemask();
+                acceptable = (dist2<cutoff2).movemask();
 
-                i1  .left_pack(acceptable).store(edge_indices1+ne, Alignment::unaligned);
-                i2  .left_pack(acceptable).store(edge_indices2+ne, Alignment::unaligned);
-                eid1.left_pack(acceptable).store(edge_id1     +ne, Alignment::unaligned);
-                eid2.left_pack(acceptable).store(edge_id2     +ne, Alignment::unaligned);
-                ne += popcnt_nibble(acceptable);
+                i1  .left_pack_inplace(acceptable);
+                i2  .left_pack_inplace(acceptable);
+                eid1.left_pack_inplace(acceptable);
+                eid2.left_pack_inplace(acceptable);
 
+                int n_acceptable = popcnt_nibble(acceptable);
+                i1  .store(edge_indices1+ne, Alignment::unaligned);
+                i2  .store(edge_indices2+ne, Alignment::unaligned);
+                eid1.store(edge_id1     +ne, Alignment::unaligned);
+                eid2.store(edge_id2     +ne, Alignment::unaligned);
+                ne += n_acceptable;
                 // FIXME it would nice to store the transposed positions for later
             }
-            n_edge = ne;
-            for(int i=ne; i<round_up(ne,4); ++i) {
+            // It is possible that some edges were inappropriately declared acceptable even though
+            // they were outside cache_n_edge due to the padding for SSE of 4.  Let's fix that.
+            int n_extra = round_up(cache_n_edge,4)-cache_n_edge;
+            int invalid_mask = ((1<<4)-1) & ~((1<<(4-n_extra))-1);
+            n_edge = ne-popcnt_nibble(acceptable&invalid_mask);;
+
+            for(int i=n_edge; i<round_up(n_edge,4); ++i) {
                 edge_indices1[i] = edge_indices1[i-i%4];
                 edge_indices2[i] = edge_indices2[i-i%4]; // just put something sane here
             }

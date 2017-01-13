@@ -71,8 +71,13 @@ struct alignas(16) Int4
             vec = _mm_load_si128((const __m128i*)data);
         }
 
-        Int4 left_pack(int mask) {
+        Int4 left_pack(int mask) const {
             return Int4(_mm_shuffle_epi8(vec, ((__m128i*)left_pack_control_vector)[mask]));
+        }
+
+        Int4 left_pack_inplace(int mask) {
+            vec = _mm_shuffle_epi8(vec, ((__m128i*)left_pack_control_vector)[mask]);
+            return *this;
         }
 
         Int4 operator+(const Int4 &o) const {return Int4(_mm_add_epi32  (vec, o.vec));}
