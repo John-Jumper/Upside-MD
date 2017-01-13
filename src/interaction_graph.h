@@ -163,7 +163,8 @@ struct PairlistComputation {
         }
 
     public:
-        PairlistComputation(int n_elem1_, int n_elem2_, float cache_buffer_, int max_n_edge):
+        void change_cache_buffer(float new_buffer) {cache_buffer=new_buffer;}
+        PairlistComputation(int n_elem1_, int n_elem2_, int max_n_edge):
             n_elem1(n_elem1_), n_elem2(n_elem2_),
 
             edge_indices1(new_aligned<int32_t>(max_n_edge, 16)),
@@ -174,7 +175,7 @@ struct PairlistComputation {
             n_edge(0),
 
             cache_valid(false),
-            cache_buffer(cache_buffer_),
+            cache_buffer(1.f), // reasonable value that the user can modify
             cache_pos1(new_aligned<float>(round_up(n_elem1,16)*4,             4)),
             cache_pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*4,4)),
             cache_id1(new_aligned<int32_t>(round_up(n_elem1,16),4)),
@@ -190,11 +191,11 @@ struct PairlistComputation {
         void find_edges(float cutoff,
                         const float* aligned_pos1, const int pos1_stride, int* id1, 
                         const float* aligned_pos2, const int pos2_stride, int* id2) {
-            Timer timer_total("find_edges");
+            // Timer timer_total("find_edges");
             ensure_cache_valid(cutoff,
                     aligned_pos1, pos1_stride, id1,
                     aligned_pos2, pos2_stride, id2);
-            Timer timer("pairlist_refine");
+            // Timer timer("pairlist_refine");
 
             int ne=0;
             alignas(16) int32_t offset_v[4] = {0,1,2,3};
@@ -309,7 +310,7 @@ struct InteractionGraph{
         pos1(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             align_bytes)),
         pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, align_bytes)),
 
-        pairlist(n_elem1,n_elem2,1.5f,max_n_edge),
+        pairlist(n_elem1,n_elem2,max_n_edge),
         edge_indices1(pairlist.edge_indices1.get()),
         edge_indices2(pairlist.edge_indices2.get()),
         edge_id1      (pairlist.edge_id1.get()),
@@ -381,6 +382,9 @@ struct InteractionGraph{
                 }
             }
         }
+        float new_buffer = 1.0f + 0.2f*cutoff;
+        pairlist.change_cache_buffer(new_buffer);
+        // printf("using cache_buffer %.2f for %i %i %i\n", new_buffer, n_dim1, n_dim2, int(symmetric));
     }
 
     #ifdef PARAM_DERIV
