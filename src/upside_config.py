@@ -998,7 +998,7 @@ def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_nam
 
 
 def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
-                     excluded_residues, UHB_residues_type1, UHB_residues_type2):
+                             excluded_residues, UNH_residues, UCO_residues):
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
     grp._v_attrs.arguments = np.array(['placement_point_only_CB'])
 
@@ -1007,51 +1007,45 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     z_energy  = potential_library.root.z_energy[:]
     z_lib_min = potential_library.root.z_energy._v_attrs.z_min
     z_lib_max = potential_library.root.z_energy._v_attrs.z_max
+    z_lib_thickness = potential_library.root.z_energy._v_attrs.thickness
     potential_library.close()
 
-    for res_num in list(excluded_residues): 
-        if not (0<=res_num<len(sequence)):
-            raise ValueError('Residue number %i is invalid in excluded_residues'%res_num)
-    for res_num in list(UHB_residues_type1):
-        if not (0<=res_num<len(sequence)):
-            raise ValueError('Residue number %i is invalid in UHB_residues_type1'%res_num)
-    for res_num in list(UHB_residues_type2):
-        if not (0<=res_num<len(sequence)):
-            raise ValueError('Residue number %i is invalid in UHB_residues_type2'%res_num)
-                         
-    UHB_residues_type1_included = sorted(set(UHB_residues_type1).difference(excluded_residues))
-    UHB_residues_type2_included = sorted(set(UHB_residues_type2).difference(excluded_residues))
+    default_half_thickness = z_lib_thickness/2.
 
-    if set(UHB_residues_type1_included).intersection(UHB_residues_type2_included) != None:
-        for res_num in set(UHB_residues_type1_included).intersection(UHB_residues_type2_included):
-            raise ValueError('Residue number %i is in both UHB_type1 and UHB_type2 lists'%res_num)
+    ## sort out residue types and indices
+    if set(excluded_residues).difference(range(len(sequence))) != set():
+        raise ValueError('Residue number',set(excluded_residues).difference(range(len(sequence))),'not valid')
+    if set(UNH_residues)     .difference(range(len(sequence))) != set():
+        raise ValueError('Residue number',set(UNH_residues)     .difference(range(len(sequence))),'not valid')
+    if set(UCO_residues)     .difference(range(len(sequence))) != set():
+        raise ValueError('Residue number',set(UCO_residues)     .difference(range(len(sequence))),'not valid')
 
-    highlight_residues('membrane_potential_residues_excluded', sequence, excluded_residues)
-    highlight_residues('         UHB_residues_type1_included', sequence, UHB_residues_type1_included)
-    highlight_residues('         UHB_residues_type2_included', sequence, UHB_residues_type2_included)
+    UNH_residues_included = sorted(set(UNH_residues).difference(excluded_residues))
+    UCO_residues_included = sorted(set(UCO_residues).difference(excluded_residues))
 
-    sequence = list(sequence) 
+    #highlight_residues('membrane_potential_residues_excluded', sequence, excluded_residues)
+    #highlight_residues('               UNH_residues_included', sequence, UNH_residues_included)
+    #highlight_residues('               UCO_residues_included', sequence, UCO_residues_included)
+
+    sequence = list(sequence)
     for num in excluded_residues:
-        sequence[num] = 'NON'                  # abbreviation for residues excluded from membrane potential
-                                               # the residue will have membrane potential equal to 0 everywhere
-                                               # the index for NON in the potential library is 0  
-    for num in UHB_residues_type1_included:
-        sequence[num] = sequence[num]+'UHB1'   # abbreviation for Unsatisfied HBond type1 
-                                               # sequence is comprised of 3-letter codes of aa
-    for num in UHB_residues_type2_included:
-        sequence[num] = sequence[num]+'UHB2'   # abbreviation for Unsatisfied HBond type2 
-
+        sequence[num] = 'NON' # abbreviation for residues excluded from membrane potential, which will be filtered out from simulation
+    for num in set(UNH_residues_included).difference(UCO_residues_included):
+        sequence[num] = sequence[num]+'_UNH'     # abbreviation for residues with unsatisfied NH H-bond
+    for num in set(UCO_residues_included).difference(UNH_residues_included):
+        sequence[num] = sequence[num]+'_UCO'     # abbreviation for residues with unsatisfied CO H-bond
+    for num in set(UCO_residues_included)&set(UNH_residues_included):
+        sequence[num] = sequence[num]+'_UNH_UCO' # abbreviation for residues with both unsatisfied NH, CO H-bonds
     sequence = np.array(sequence)
     #print 'sequence: length ', len(sequence), '\n', sequence
-    
-    z_lib = np.linspace(z_lib_min, z_lib_max, z_energy.shape[-1])
 
+    z_lib = np.linspace(z_lib_min, z_lib_max, z_energy.shape[-1])
     import scipy.interpolate
     def extrapolated_spline(x0,y0):
         spline = scipy.interpolate.InterpolatedUnivariateSpline(x0,y0)
         def f(x, spline=spline):
             return np.select(
-                    [(x<x0[0]),              (x>x0[-1]),              np.ones_like(x,dtype='bool')], 
+                    [(x<x0[0]),              (x>x0[-1]),              np.ones_like(x,dtype='bool')],
                     [np.zeros_like(x)+y0[0], np.zeros_like(x)+y0[-1], spline(x)])
         return f
 
@@ -1060,13 +1054,31 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
     half_thickness = membrane_thickness/2
     z = np.linspace(-half_thickness - 15., half_thickness + 15., int((membrane_thickness+30.)/0.3)+1)
 
-    # if z>0, then use the spline evaluated at z-half_thickness, else use the spline evaluated at -z-half_thickness
-    z_transformed     = np.where((z>=0.), z-half_thickness, -z-half_thickness)
-    membrane_energies = np.array([spline(z_transformed) for spline in energy_splines])
-    resname_to_num    = dict([(nm,i) for i,nm in enumerate(resnames)])
+    # ensure that the potential is continuous
+    membrane_energies = []
+    if half_thickness < default_half_thickness:
+        # spline(z-(half_thickness-default_half_thickness)) may not equal to spline(z+(half_thickness-default_half_thickness))
+        for spline in energy_splines:
+            delta_spline = spline(-half_thickness+default_half_thickness) - spline(half_thickness-default_half_thickness)
+            membrane_energies_ = np.select([(z<0), (z>=0.)],
+                    [spline(z+(half_thickness-default_half_thickness))+0.5*delta_spline,
+                     spline(z-(half_thickness-default_half_thickness))-0.5*delta_spline])
+            membrane_energies.append(membrane_energies_)
+    else:
+        for spline in energy_splines:
+            membrane_energies_ = np.select([
+                (z <  -half_thickness+default_half_thickness),
+                (z >= -half_thickness+default_half_thickness) & (z <= half_thickness-default_half_thickness),
+                (z >   half_thickness-default_half_thickness)],
+                [spline(z+(half_thickness-default_half_thickness)),
+                 spline(0),
+                 spline(z-(half_thickness-default_half_thickness))])
+            membrane_energies.append(membrane_energies_)
+    membrane_energies = np.array(membrane_energies)
 
-    residue_id_filtered = [i for i,x in enumerate(sequence) if sequence[i] != 'NON'] 
-    sequence_filtered   = [x for i,x in enumerate(sequence) if sequence[i] != 'NON'] 
+    resname_to_num      = dict([(nm,i) for i,nm in enumerate(resnames)])
+    residue_id_filtered = [i for i,x in enumerate(sequence) if sequence[i] != 'NON']
+    sequence_filtered   = [x for i,x in enumerate(sequence) if sequence[i] != 'NON']
     energy_index        = np.array([resname_to_num[aa] for aa in sequence_filtered])
 
     #print sequence_filtered
@@ -1075,7 +1087,7 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
 
     create_array(grp, 'residue_id', np.array(residue_id_filtered))
     create_array(grp, 'restype',    energy_index)
-    create_array(grp, 'energy',     membrane_energies * scale)
+    create_array(grp, 'energy',     membrane_energies)
     grp.energy._v_attrs.z_min = z[0]
     grp.energy._v_attrs.z_max = z[-1]
 
@@ -1238,25 +1250,22 @@ def main():
     parser.add_argument('--membrane-thickness', default=None, type=float,
             help='Thickness of the membrane in angstroms for use with --membrane-potential.')
     parser.add_argument('--membrane-potential', default='',
-            help='Parameter file (.h5 format) for membrane potential. User must also supply --membrane-thickness.' + 
-                 'There are 3 types of residue-specific types in the potential file now. ' +   
-                 'Basic types  : XXX; Derived types: XXXUHB1, XXXUHB2. (XXX is the three-letter code for an amino acid) ' +
-                 'UHB1: used for the Helical residues at both ends of a helix (usually 4 at each end), energy = XXX + UHB1. ' +
-                 'UHB2: used for the non-Helical residues or unspecified non-hbonded residues, energy = XXX + UHB2.') 
-    parser.add_argument('--membrane-potential-scale',            default=1.0,type=float,
-            help='scale the membrane potentials. User must also supply --membrane-potential.')  
+            help='Parameter file (.h5 format) for membrane potential. User must also supply --membrane-thickness. '+
+                 'There are 2 categories of residue-specific types in the potential file now. ' +
+                 'Basic types: XXX; Derived types: XXX_UNH, XXX_UCO, XXX_UNH_UCO. (XXX is the three-letter code for an amino acid).')
     parser.add_argument('--membrane-potential-exclude-residues', default=[], type=parse_segments,
             help='Residues that do not participate in the --membrane-potential(same format as --restraint-group).' +
-                 'User must also supply --membrane-potential.')      
-    parser.add_argument('--membrane-potential-unsatisfied-hbond-residues-type1',default=[], type=parse_segments,
-            help='Residues that have 1 unsatisfied hydrogen bond, which will be marked as XXXUHB1 in --membrane-potential. ' +
-                 'Normally, this argument is only turned on when user wants to determine the burial orientation of a given membrane protein ' +
-                 'and the residues with unsatisfied hbonds are awared of (same format as --restraint-group). ' + 
                  'User must also supply --membrane-potential.')
-    parser.add_argument('--membrane-potential-unsatisfied-hbond-residues-type2',default=[], type=parse_segments,
-            help='Residues that have 2 unsatisfied hydrogen bonds, which will be marked as XXXUHB2 in --membrane-potential. ' +
-                 'NOTE: the indices here should not have overlap with those in --membrane-potential-unsatisfied-hbond-residues-type1.')
-
+    parser.add_argument('--membrane-potential-unsatisfied-NH-hbond-residues',default=[], type=parse_segments,
+            help='Residues with unsatisfied NH hydrogen bond, which will be marked as XXX_UNH in --membrane-potential. ' +
+                 'Normally, this argument is only turned on when user wants to determine the burial orientation of ' +
+                 'a given membrane protein and the residues with unsatisfied hbonds are awared of (same format as --restraint-group). ' +
+                 'User must also supply --membrane-potential.')
+    parser.add_argument('--membrane-potential-unsatisfied-CO-hbond-residues',default=[], type=parse_segments,
+            help='Residues with unsatisfied CO hydrogen bonds, which will be marked as XXX_UCO in --membrane-potential. ' +
+                 'NOTE: residues with both unsatisfied NH and CO H-bonds will be inferred ' +
+                 'by --membrane-potential-unsatisfied-NH-hbond-residues and --membrane-potential-unsatisfied-CO-hbond-residues together, ' +
+                 'which will detonated as XXX_UNH_UCO in --membrane-potential.')
     parser_grp1 = parser.add_mutually_exclusive_group()
     parser_grp1.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
@@ -1505,13 +1514,12 @@ def main():
         if args.membrane_thickness is None:
             parser.error('--membrane-potential requires --membrane-thickness')
         require_backbone_point = True
-        write_membrane_potential(fasta_seq, 
-                                 args.membrane_potential, 
-                             args.membrane_potential_scale, 
-                             args.membrane_thickness,
-                             args.membrane_potential_exclude_residues, 
-                             args.membrane_potential_unsatisfied_hbond_residues_type1,
-                             args.membrane_potential_unsatisfied_hbond_residues_type2)
+        write_membrane_potential(fasta_seq,
+                                 args.membrane_potential,
+                                 args.membrane_thickness,
+                                 args.membrane_potential_exclude_residues,
+                                 args.membrane_potential_unsatisfied_NH_hbond_residues,
+                                 args.membrane_potential_unsatisfied_CO_hbond_residues)
 
     if require_backbone_point:
         require_affine = True
