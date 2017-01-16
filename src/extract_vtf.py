@@ -135,9 +135,9 @@ def main():
             start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
             print opath, total_frames_produced, 'cumulative frames found'
 
-    pos = np.concatenate(pos, axis=0)
-    print pos.shape[0], 'frames for output', pos.shape[0]/30., 'seconds at 30 frames/second video'
-    print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], pos, chain_first_residue)
+        pos = np.concatenate(pos, axis=0)
+        print pos.shape[0], 'frames for output', pos.shape[0]/30., 'seconds at 30 frames/second video'
+        print_augmented_vtf(args.output_vtf, t.root.input.sequence[:], pos, chain_first_residue)
 
 if __name__ == '__main__':
     main()
