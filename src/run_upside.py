@@ -161,6 +161,32 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
     return UpsideJob(job,config,output_path)
 
 
+def continue_sim(partition, configs, duration, frame_interval, **upside_kwargs):
+    upside_kwargs = dict(upside_kwargs)
+    temps = []
+
+    for fn in configs:
+        with tb.open_file(fn,'a') as t:
+            i = 0
+            while 'output_previous_%i'%i in t.root:
+                i += 1
+            new_name = 'output_previous_%i'%i
+            if 'output' in t.root:
+                n = t.root.output
+            else:
+                n = t.get_node('/output_previous_%i'%(i-1))
+
+            t.root.input.pos[:,:,0] = n.pos[-1,0]
+            temps.append(n.temperature[-1,0])
+
+            if 'output' in t.root:
+                t.root.output._f_rename(new_name)
+            print fn, temps[-1]
+
+    upside_kwargs['temperature'] = temps
+    return run_upside(partition, configs, duration, frame_interval, **upside_kwargs)
+
+
 def status(job):
     try:
         job_state = sp.check_output(['/usr/bin/env', 'squeue', '-j', job.job, '-h', '-o', '%t']).strip()
