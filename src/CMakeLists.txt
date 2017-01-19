@@ -73,6 +73,8 @@ macro(python_executable TARGET FILENAME)
     add_dependencies(${TARGET} ${PYTHON_NEW_NAME}_PYTHON)
 endmacro(python_executable)
 
+python_executable(support add_target_information.py)
+python_executable(support sim_timeseries.py)
 python_executable(support predict_chi1.py)
 python_executable(support upside_config.py)
 python_executable(support extract_vtf.py)

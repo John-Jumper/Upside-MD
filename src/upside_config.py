@@ -194,12 +194,12 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
     ref_pos[1] = ( 0.,          0.,          0.)        # CA
     ref_pos[2] = ( 1.25222632, -0.87268266,  0.)        # C
     ref_pos[3] = ( 0.,          0.94375626,  1.2068012) # CB
-    # FIXME this places the CB in a weird location since I should have 
+    # FIXME this places the CB in a weird location since I should have
     #  used ref_pos[:3].mean(axis=0,keepdims=1) instead.  I cannot change
     #  this without re-running training.  Thankfully, it is a fairly small
     #  mistake and probably irrelevant with contrastive divergence training.
     ref_pos -= ref_pos.mean(axis=0,keepdims=1)
-    
+
     placement_data = np.zeros((1,6))
     placement_data[0,0:3] = ref_pos[3]
     placement_data[0,3:6] = (ref_pos[3]-ref_pos[2])/vmag(ref_pos[3]-ref_pos[2])
@@ -381,7 +381,7 @@ def make_tab_matrices(phi, theta, bond_length):
 
     assert phi.shape == theta.shape == bond_length.shape
     r = np.zeros(phi.shape + (4,4), dtype=(phi+theta+bond_length).dtype)
-    
+
     cp = np.cos(phi  ); sp = np.sin(phi  )
     ct = np.cos(theta); st = np.sin(theta)
     l  = bond_length
@@ -566,10 +566,10 @@ def read_rama_maps_and_weights(seq, rama_group, mode='mixture', allow_CPR=True):
 
     pots   [0] = V(seq[0], 'right', seq[1])
     weights[0] = W(seq[0], 'right', seq[1])
-        
+
     for i,l,c,r in zip(range(1,len(seq)-1), seq[:-2], seq[1:-1], seq[2:]):
         if   mode == 'product':
-            pots[i]    = V(c,'left',l) + V(c,'right',r) - V(c,'right','ALL') 
+            pots[i]    = V(c,'left',l) + V(c,'right',r) - V(c,'right','ALL')
             weights[i] = 0.5*(W(c,'left',l) + W(c,'right',r))  # always just average weights
         elif mode == 'mixture':
             # it's a little sticky to figure out what the mixing proportions should be
@@ -579,7 +579,7 @@ def read_rama_maps_and_weights(seq, rama_group, mode='mixture', allow_CPR=True):
             weights[i] = 0.5*(W(c,'left',l) + W(c,'right',r))
         else:
             raise RuntimeError('impossible')
-        
+
     pots   [-1] = V(seq[-1], 'left', seq[-2])
     weights[-1] = W(seq[-1], 'left', seq[-2])
 
@@ -597,7 +597,7 @@ def read_weighted_maps(seq, rama_library_h5, sheet_mixing=None, mode='mixture'):
             return coil_pots
         else:
             sheet_pots, sheet_weights = read_rama_maps_and_weights(seq, tr.root.sheet, allow_CPR=False)
-            return mixture_potential([coil_weights, sheet_weights*np.exp(-sheet_mixing)], 
+            return mixture_potential([coil_weights, sheet_weights*np.exp(-sheet_mixing)],
                                      [coil_pots,    sheet_pots])
 
 
@@ -606,7 +606,7 @@ def write_torus_dbn(seq, torus_dbn_library):
     with tb.open_file(torus_dbn_library) as data:
         dbn_aa_num = dict((x,i) for i,x in enumerate(data.root.restype_order[:]))
         # basin_param order is log_norm,kappa_phi,mu_phi,kappa_psi,mu_psi,kappa_phi_minus_psi
-        basin_param = data.root.basin_param[:]  
+        basin_param = data.root.basin_param[:]
         aa_basin_energy = data.root.aa_basin_energy[:]
         transition_energy = data.root.transition_energy[:]
     restypes = np.array([dbn_aa_num[s] for s in seq])
@@ -672,7 +672,7 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, secstr_bi
 
         helical_basin = sigmoid_lessthan(phi,0.*deg) * sigmoid_lessthan(-100.*deg,psi) * sigmoid_lessthan(psi,50.*deg)
         sheet_basin   = sigmoid_lessthan(phi,0.*deg) * (sigmoid_lessthan(psi,-100.*deg) + sigmoid_lessthan(50.*deg,psi))
-        
+
         f = (ln.split() for ln in open(secstr_bias))
         assert f.next() == 'residue secstr energy'.split()
         for residue,secstr,energy in f:
@@ -686,7 +686,7 @@ def write_rama_map_pot(seq, rama_library_h5, sheet_mixing_energy=None, secstr_bi
             else:
                 raise ValueError('secstr in secstr-bias file must be helix or sheet')
 
-    # let's remove the average energy from each Rama map 
+    # let's remove the average energy from each Rama map
     # so that the Rama potential emphasizes its variation
 
     rama_pot -= (rama_pot*np.exp(-rama_pot)).sum(axis=(-2,-1),keepdims=1)
@@ -726,7 +726,7 @@ def rama_box(rama, center, half_width, sharpness):
         return (angular_compact_double_sigmoid(rama[...,0], rama, center, half_width, sharpness)*
                 angular_compact_double_sigmoid(rama[...,1], rama, center, half_width, sharpness))
     else:
-        result = np.zeros(rama.shape[:-1] + center.shape[:-1]) 
+        result = np.zeros(rama.shape[:-1] + center.shape[:-1])
         for inds in np.indices(s).reshape((len(s),-1)).T:
             inds = tuple(inds)
             if len(inds) == 1: inds = inds[0]
@@ -764,7 +764,7 @@ def write_CB(fasta):
     ref_pos[2] = ( 1.25222632, -0.87268266,  0.)        # C
     ref_pos[3] = ( 0.,          0.94375626,  1.2068012) # CB
     ref_pos -= ref_pos[:3].mean(axis=0,keepdims=1)
-    
+
     placement_data = np.zeros((1,3))
     placement_data[0,0:3] = ref_pos[3]
 
@@ -882,7 +882,7 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
                     %(header," ".join(actual_header),fix_rotamer))
 
         for residue, restype, chain, resnum, chi1, chi2 in fields[1:]:
-            if fasta[int(residue)] != (restype if restype != 'CPR' else 'PRO'): 
+            if fasta[int(residue)] != (restype if restype != 'CPR' else 'PRO'):
                 raise RuntimeError("fix-rotamer file does not match FASTA"
                     + ", residue %i should be %s but fix-rotamer file has %s"%(
                         int(residue), fasta[int(residue)], restype))
@@ -932,7 +932,7 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
             start,stop = start+n_bead*fix[rnum], start+n_bead*(fix[rnum]+1)
             n_rot = 1
 
-        if n_rot not in count_by_n_rot: 
+        if n_rot not in count_by_n_rot:
             count_by_n_rot[n_rot] = 0;
 
         base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
@@ -1146,10 +1146,13 @@ def main():
             usage='use "%(prog)s --help" for more information')
     parser.add_argument('--fasta', required=True,
             help='[required] FASTA sequence file')
-    parser.add_argument('--n-system', type=int, default=1, required=False, 
+    parser.add_argument('--n-system', type=int, default=1, required=False,
             help='[required] number of systems to prepare')
     parser.add_argument('--output', default='system.h5', required=True,
             help='path to output the created .h5 file (default system.h5)')
+    parser.add_argument('--target-structure', default='',
+            help='Add target .initial.pkl structure for later analysis.  This information is written under '+
+            '/target and is never read by Upside.  The /target group may be useful for later analysis.')
     parser.add_argument('--no-backbone', dest='backbone', default=True, action='store_false',
             help='do not use rigid nonbonded for backbone N, CA, C, and CB')
     parser.add_argument('--rotamer-placement', default=None, 
@@ -1158,15 +1161,15 @@ def main():
             help='Use dynamic rotamer placement (not recommended)')
     parser.add_argument('--dynamic-rotamer-1body', default=False, action='store_true',
             help='Use dynamic rotamer 1body (not recommended)')
-    parser.add_argument('--fix-rotamer', default='', 
+    parser.add_argument('--fix-rotamer', default='',
             help='Table of fixed rotamers for specific sidechains.  A header line must be present and the first '+
             'three columns of that header must be '+
             '"residue restype rotamer", but there can be additional, ignored columns.  The restype must '+
             'match the corresponding restype in the FASTA file (intended to prevent errors).  It is permissible '+
-            'to fix only a subset of rotamers.  The value of rotamer must be an integer, corresponding to the '+ 
+            'to fix only a subset of rotamers.  The value of rotamer must be an integer, corresponding to the '+
             'numbering in the --rotamer-placement file.  Such a file can be created with PDB_to_initial_structure '+
             '--output-chi1.')
-    parser.add_argument('--rotamer-interaction', default=None, 
+    parser.add_argument('--rotamer-interaction', default=None,
             help='rotamer sidechain pair interaction parameters')
     parser.add_argument('--rotamer-solve-damping', default=0.4, type=float,
             help='damping factor to use for solving sidechain placement problem')
@@ -1187,7 +1190,7 @@ def main():
             help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
-    parser.add_argument('--secstr-bias', default='', 
+    parser.add_argument('--secstr-bias', default='',
             help='Bias file for secondary structure.  First line of the file must be "residue secstr energy".  '+
             'secstr must be one of "helix" or "sheet".  Bias is implemented by a simple Rama bias, hence coil bias '+
             'is not implemented.')
@@ -1204,17 +1207,17 @@ def main():
     parser.add_argument('--loose-hbond-criteria', default=False, action='store_true',
             help='Use far more permissive angles and distances to judge HBonding.  Do not use for simulation. '+
             'This is only useful for static backbone training when crystal or NMR structures have poor '+
-            'hbond geometry.') 
-    parser.add_argument('--z-flat-bottom', default='', 
+            'hbond geometry.')
+    parser.add_argument('--z-flat-bottom', default='',
             help='Table of Z-flat-bottom springs.  Each line must contain 4 fields and the first line '+
             'must contain "residue z0 radius spring_constant".  The restraint is applied to the CA atom '+
             'of each residue.')
-    parser.add_argument('--tension', default='', 
+    parser.add_argument('--tension', default='',
             help='Table of linear tensions.  Each line must contain 4 fields and the first line '+
             'must contain "residue tension_x tension_y tension_z".  The residue will be pulled in the '+
             'direction (tension_x,tension_y,tension_z) by its CA atom.  The magnitude of the tension vector '+
             'sets the force.  Units are kT/Angstrom.')
-    parser.add_argument('--initial-structures', default='', 
+    parser.add_argument('--initial-structures', default='',
             help='Pickle file for initial structures for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
             'requested, structures will be recycled.  If not provided, a ' +
@@ -1235,7 +1238,7 @@ def main():
 
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
-    parser.add_argument('--contact-energies', default='', 
+    parser.add_argument('--contact-energies', default='',
             help='Path to text file that defines a contact energy function.  The first line of the file should ' +
             'be a header containing "residue1 residue2 energy distance transition_width", and the remaining '+
             'lines should contain space separated values.  The form of the interaction is approximately '+
@@ -1299,20 +1302,29 @@ def main():
     n_atom = 3*n_res
     
     t = tb.open_file(args.output,'w')
-    
+
     input = t.create_group(t.root, 'input')
     create_array(input, 'sequence', obj=fasta_seq_with_cpr)
-    
+
     if args.initial_structures:
         init_pos = cPickle.load(open(args.initial_structures))
-        assert init_pos.shape == (n_atom, 3, init_pos.shape[-1])
+        assert init_pos.shape == (n_atom, 3, 1)
+
+    if args.target_structure:
+        def f():
+            # little function closure to protect the namespace from ever seeing the target structure
+            target_pos = cPickle.load(open(args.target_structure))
+            assert target_pos.shape == (n_atom, 3, 1)
+            g_target = t.create_group(t.root, 'target')
+            t.create_array(t.root.target, 'pos', obj=target_pos[:,:,0])
+        f()
+
 
     pos = np.zeros((n_atom, 3, n_system), dtype='f4')
     for i in range(n_system):
         pos[:,:,i] = init_pos[...,i%init_pos.shape[-1]] if args.initial_structures else random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)
-    target = pos.copy()
-    
+
     potential = t.create_group(input,  'potential')
 
     if not args.debugging_only_disable_basic_springs:
@@ -1552,14 +1564,13 @@ def main():
         for i,restrained_residues in enumerate(args.restraint_group):
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
             highlight_residues('group_%i'%i, fasta_seq, restrained_residues)
-            make_restraint_group(i,set(restrained_residues),target[:,:,0], args.restraint_spring_constant)
-        
+            make_restraint_group(i,set(restrained_residues),pos[:,:,0], args.restraint_spring_constant)
 
     # if we have the necessary information, write pivot_sampler
     if require_rama and 'rama_map_pot' in potential:
         grp = t.create_group(input, 'pivot_moves')
         pivot_atom = potential.rama_coord.id[:]
-        non_terminal_residue = np.array([not(np.int64(-1).astype(pivot_atom.dtype) in tuple(x)) 
+        non_terminal_residue = np.array([not(np.int64(-1).astype(pivot_atom.dtype) in tuple(x))
             for x in pivot_atom])
 
         create_array(grp, 'proposal_pot',  potential.rama_map_pot.rama_pot[:])
