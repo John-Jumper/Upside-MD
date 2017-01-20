@@ -52,7 +52,7 @@ target_link_libraries(upside stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
-add_library(upside_calculation SHARED EXCLUDE_FROM_ALL
+add_library(upside_calculation SHARED
     engine_c_library.cpp
     ${ENGINE_SRC})
 
