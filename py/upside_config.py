@@ -1369,8 +1369,8 @@ def main():
             print "chain_first_residue:", chain_first_residue
             n_chains = chain_first_residue.size+1
             if has_rl_info:
-                rl_chains = chain_dat[-1].split()
-                rl_chains = [int(i) for i in rl_chains]
+                rl_chains = np.array(chain_dat[-1].split(), dtype='int32')
+                # rl_chains = [int(i) for i in rl_chains]
                 print "rl_chains:", rl_chains
 
         print
@@ -1380,6 +1380,8 @@ def main():
         if chain_first_residue.size:
             break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
             t.create_array(break_grp, "chain_first_residue", chain_first_residue, "Contains array of chain first residues, apart from residue 0")
+            if has_rl_info:
+                t.create_array(break_grp, "rl_chains", rl_chains, "Numbers of receptor and ligand chains")    
 
             required_hbond_exclude_res = [i+j for i in chain_first_residue for j in [-1,0]]
             if args.hbond_exclude_residues:

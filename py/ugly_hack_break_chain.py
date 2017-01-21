@@ -47,25 +47,40 @@ def main():
     parser_grp0 = parser.add_mutually_exclusive_group()
     parser_grp0.add_argument('--chain-first-residue', default=[0], type=int, action='append', help=
             'First residue index of a new chain.  May be specified multiple times.  --chain-first-residue=0 is assumed '+
-            'and need not be specified.')
+            'and need not be specified')
     parser_grp0.add_argument('--chain-break-from-file', action='store_true', help='Use indices of chain first residues stored in config file.')
+    parser.add_argument('--rl-chains', nargs=2, type=int, help=
+            'Two (space separated) integers indicating the number of receptor and ligand chains, for attempting collective jumps')
     parser.add_argument('--jump-length-scale', type=float, default=5., help='Translational gaussian width in angstroms for Monte Carlo JumpSampler. Default: 5 angstroms')
     parser.add_argument('--jump-rotation-scale', type=float, default=30., help='Rotational gaussian width in degrees for Monte Carlo JumpSampler. Default: 30 degrees')
     parser.add_argument('--remove-pivot', action='store_true', help='Whether to remove the MC PivotSampler param group to isolate JumpSampler for testing')
     args = parser.parse_args()
 
+    if args.rl_chains and not (args.chain_first_residue or chain_break_from_file):
+        parser.error('must specify either --chain-first-residue or --chain-break-from-file to use --rl-chains')
+
     t = tb.open_file(args.config, 'a')
     if len(args.chain_first_residue) > 1:
         break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
-        t.create_array(break_grp, "chain_first_residue", chain_first_residue[1:], "Contains array of chain first residues, apart from residue 0")
+        t.create_array(break_grp, "chain_first_residue", args.chain_first_residue[1:], "Contains array of chain first residues, apart from residue 0")
+
+    if args.rl_chains:
+        rl_chains = np.array(args.rl_chains, dtype='int32')
+        t.create_array(t.root.input.chain_break, "rl_chains", rl_chains, "Numbers of receptor and ligand chains")
 
     if args.chain_break_from_file:
         try:
             args.chain_first_residue = np.append([0], t.root.input.chain_break.chain_first_residue)
         except tb.exceptions.NoSuchNodeError:
-            print >>sys.stderr, 'WARNING: --chain-break-from-file requires chain first residues stored in config file. Halting'
+            print >>sys.stderr, 'ERROR: --chain-break-from-file requires chain first residues stored in config file. Halting'
             t.close()
             raise SystemExit(0)
+
+    if not args.rl_chains:
+        if 'rl_chains' in t.root.input.chain_break:
+            rl_chains = t.root.input.chain_break.rl_chains[:]
+        else:
+            rl_chains = None
 
     print 'This program is an ugly hack, and your simulation may give very bad results.'
     print 'If you are lucky, the results will be only a little bad.'
@@ -86,8 +101,15 @@ def main():
     chain_starts_plus = np.append(chain_starts, len(t.root.input.sequence)*3)
 
     jump_atom_range = np.array([[chain_starts_plus[i], chain_starts_plus[i+1]] for i in xrange(n_chains)], dtype='int32')
-    jump_sigma_trans = np.array([args.jump_length_scale]*n_chains, dtype='float32')
-    jump_sigma_rot = np.array([args.jump_rotation_scale*np.pi/180.]*n_chains, dtype='float32') # Converts to radians
+    # Add ranges of all chains in receptor and ligand for collective jumps
+    if rl_chains is not None:
+        if rl_chains[0] > 1:
+            jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[0], chain_starts_plus[rl_chains[0]]]], axis=0)
+        if rl_chains[1] > 1:
+            jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[rl_chains[0]], chain_starts_plus[-1]]], axis=0)
+
+    jump_sigma_trans = np.array([args.jump_length_scale]*len(jump_atom_range), dtype='float32')
+    jump_sigma_rot = np.array([args.jump_rotation_scale*np.pi/180.]*len(jump_atom_range), dtype='float32') # Converts to radians
 
     print "jump atom_range:\n{}\nsigma_trans:\n{}\nsigma_rot:\n{}\n".format(jump_atom_range, jump_sigma_trans, jump_sigma_rot)
 
