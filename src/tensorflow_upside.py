@@ -6,9 +6,11 @@ import os
 import cPickle as cp
 import collections
 import uuid
+import predict_chi1
 
 gensym_salt = str(uuid.uuid4()).replace('-','')
 gensym_count = [0]
+deg = np.pi/180.
 
 def _unique_name(prefix):
     nm = '%s_%i_%s' %(prefix, gensym_count[0], gensym_salt)
@@ -22,7 +24,8 @@ def numpy_reduce_inplace(comm, arrays, root=0):
         comm.Reduce(a_copy,a, root=root)
 
 class UpsideEnergy(object):
-    def __init__(self, name_list, path_list, mpi_comm=None):
+    def __init__(self, n_restype, name_list, path_list, chi1_file_list, mpi_comm=None):
+        import pandas as pd
         self.mpi_comm = mpi_comm
         self.is_master = self.mpi_comm is None or self.mpi_comm.rank==0
 
@@ -31,20 +34,29 @@ class UpsideEnergy(object):
         import upside_engine as ue
         self.systems = dict()
 
-        assert len(name_list) == len(path_list)
-        name_path_list = list(zip(name_list,path_list))
+        assert len(name_list) == len(path_list) == len(chi1_file_list)
+        name_path_list = list(zip(name_list,path_list,chi1_file_list))
 
         if self.mpi_comm is not None:
             name_path_list = self.mpi_comm.scatter(
                     [name_path_list[i::self.mpi_comm.size] for i in range(self.mpi_comm.size)])
+            n_restype = self.mpi_comm.bcast(n_restype)
+        self.n_restype = n_restype
 
-        for name,path in name_path_list:
+        for name,path,chi1_file in name_path_list:
             d = dict()
             d['path'] = path
             with tb.open_file(path) as t:
+                d['predict_chi1'] = predict_chi1.Chi1Predict(t.root.input.args._v_attrs.rotamer_placement)
                 d['pos'] = t.root.input.pos[:,:,0]
                 d['seq'] = t.root.input.sequence[:]
+                d['residue_num'] = t.root.input.potential.placement_fixed_point_vector_only.affine_residue[:]
                 d['n_res'] = len(d['seq'])
+                chi1_true = pd.read_csv(chi1_file, delim_whitespace=1)
+                chi1_true = chi1_true[np.isfinite(chi1_true.chi1)]
+                d['chi1_state'] = predict_chi1.compute_chi1_state(chi1_true.chi1.as_matrix()*deg)
+                d['chi1_residue'] = chi1_true.residue.as_matrix()
+                # d['chi1'] = chi1_true.chi1.as_matrix()
             d['engine'] = ue.Upside(d['pos'].shape[0], path)
             self.systems[name] = d
 
@@ -66,8 +78,11 @@ class UpsideEnergy(object):
                 elif rpc[0] == 'evaluate':
                     # be careful here about the keyword argument energy_sens
                     self.evaluate(*rpc[1:-1], energy_sens=rpc[-1])
+                elif rpc[0] == 'evaluate_chi1_loss':
+                    self.evaluate_chi1_loss(*rpc[1:])
                 else:
                     raise RuntimeError('bad command')
+
 
     def evaluate_tensorflow(self, system_names, param_names, *param_tensors):
         name=None
@@ -80,7 +95,6 @@ class UpsideEnergy(object):
 
         if self.grad_name is None:
             self.grad_name = _unique_name('UpsideEnergyGrad')
-
 
             @tf.RegisterGradient(self.grad_name)
             def grad(op, energy_sens, n_res_sens, self=self):
@@ -101,6 +115,47 @@ class UpsideEnergy(object):
                     (system_names,param_names) + param_tensors,
                     [tf.float32, tf.int32],
                     name=name)
+
+    def evaluate_chi1_loss_tensorflow(self, system_names, param_names, *param_tensors):
+        import tensorflow as tf
+        return tf.py_func(
+                (lambda system_names, param_names, *param_tensors:
+                    self.evaluate_chi1_loss(system_names, param_names, param_tensors)),
+                (system_names,param_names) + param_tensors,
+                tf.float32)
+
+    def evaluate_chi1_loss(self, system_names, param_names, param_tensors):
+        if self.mpi_comm is not None and self.is_master:
+            # activate the workers with send to match their waiting collectives
+            self.mpi_comm.bcast(('evaluate_chi1_loss', system_names, param_names,param_tensors,))
+
+        my_results = np.zeros((self.n_restype,2), dtype='i8')
+
+        for i,name in enumerate(system_names):
+            if name not in self.systems:
+                continue
+
+            d = self.systems[name]
+            engine = d['engine']
+            predictor = d['predict_chi1']
+
+            for pnm, pt in zip(param_names, param_tensors):
+                engine.set_param(pt, pnm)
+
+            engine.energy(d['pos'])
+            chi1_prob = predictor.predict_chi1(d['seq'], d['residue_num'], engine.get_sens('hbond_coverage')[:,0])
+            # print d['seq']
+            # print d['chi1_residue']
+            # for qq in  zip(d['seq'][d['chi1_residue']], chi1_prob[d['chi1_residue']], d['chi1'], d['chi1_state']):
+            #     print qq
+            my_results += predictor.compute_zero_one_stats(
+                    d['seq'][d['chi1_residue']], chi1_prob[d['chi1_residue']], d['chi1_state'])
+
+        if self.mpi_comm is not None:
+            numpy_reduce_inplace(self.mpi_comm, [my_results])
+
+        if self.is_master:
+            return my_results.astype('f4')
 
 
     def evaluate(self, system_names, param_names, param_tensors, energy_sens=None):

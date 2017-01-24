@@ -4,36 +4,67 @@ import sys
 import os
 import tempfile
 import time
-import pandas as pd
 import numpy as np
 import tables as tb
 import shutil
 import subprocess as sp
 
-src = os.path.expanduser('~/upside/src')
-sys.path.append(src)
-import upside_engine as ue
+deg = np.pi/180.
+
+compute_chi1_state = lambda chi1: (((chi1/deg)%360.)/120.).astype('i')
+
+
+class Chi1Predict(object):
+    def __init__(self, sidechain_file):
+        with tb.open_file(sidechain_file) as t:
+            self.restype_dict = dict((x,i) for i,x in enumerate(t.root.restype_order[:]))
+            self.n_restype = len(self.restype_dict)
+            self.restype_dict['CPR'] = self.restype_dict['PRO']
+            self.restype_and_chi_and_state = t.root.restype_and_chi_and_state[:]
+            rotamer_start_stop_bead = t.root.rotamer_start_stop_bead
+
+        x = self.restype_and_chi_and_state
+        chi1_state_ref = compute_chi1_state(x[:,1])
+        self.chi1_partition = dict([
+                (aa,[np.array(sorted(set(x[(x[:,0]==self.restype_dict[aa])&(chi1_state_ref==j),-1].astype('i')))) 
+                     for j in range(3)])
+          for aa in sorted(self.restype_dict)])
+        self.chi1_partition['CPR'] = self.chi1_partition['PRO']
+
+
+    def predict_chi1(self, seq, residue, rotamer_posterior_prob):
+        assert len(residue) == len(rotamer_posterior_prob)
+
+        chi1_prob_array = []
+        for resnum,aa in enumerate(seq):
+            if aa=='ALA' or aa=='GLY':
+                chi1_prob_array.append(np.array([1.,0.,0.]))
+            else:
+                correct_residue = residue==resnum
+                admissible_restype = self.restype_and_chi_and_state[:,0] == self.restype_dict[aa]
+                probs = rotamer_posterior_prob[correct_residue]  # find all probs for correct residue
+                chi1_probs = np.array([probs[s].sum() for s in self.chi1_partition[aa]])
+                chi1_prob_array.append(chi1_probs)
+        return np.array(chi1_prob_array, dtype='f4')
+
+    def compute_zero_one_stats(self, seq, chi1_prob, chi1_states):
+        results = np.zeros((self.n_restype,2), dtype='i8')  # correct,total chi1
+        assert len(seq) == len(chi1_prob) == len(chi1_states)
+        for aa,p,state in zip(seq,chi1_prob,chi1_states):
+           results[self.restype_dict[aa],0] += np.argmax(p) == state
+           results[self.restype_dict[aa],1] += 1
+        return results
 
 
 def main():
+    import pandas as pd
+    src = os.path.expanduser('~/upside/src')
+    sys.path.append(src)
+    import upside_engine as ue
     sidechain_file, pdb_file, chain, output_file = sys.argv[1:]
     direc = tempfile.mkdtemp()
 
-    deg = np.pi/180.
-    with tb.open_file('/home/jumper/upside-parameters/sidechain.h5') as t:
-        restype_dict = dict((x,i) for i,x in enumerate(t.root.restype_order[:]))
-        restype_dict['CPR'] = restype_dict['PRO']
-        restype_and_chi_and_state = t.root.restype_and_chi_and_state[:]
-        rotamer_start_stop_bead = t.root.rotamer_start_stop_bead
-    compute_chi1_state = lambda chi1: (((chi1/deg)%360.)/120.).astype('i')
-    chi1_state_ref = compute_chi1_state(restype_and_chi_and_state[:,1])
-
-    x = restype_and_chi_and_state
-    chi1_partition = dict([
-            (aa,[np.array(sorted(set(x[(x[:,0]==restype_dict[aa])&(chi1_state_ref==j),-1].astype('i')))) 
-                 for j in range(3)])
-      for aa in sorted(restype_dict)])
-    chi1_partition['CPR'] = chi1_partition['PRO']
+    predictor = Chi1Predict(sidechain_file)
 
     try:
         base_initial = os.path.join(direc, 'initial_test')
@@ -76,17 +107,7 @@ def main():
     print
     print 'Time to compute %.4f seconds' % (t2-t0)
 
-    chi1_prob_array = []
-    for resnum,aa in enumerate(seq):
-        if aa=='ALA' or aa=='GLY':
-            chi1_prob_array.append(np.array([1.,0.,0.]))
-            continue
-        correct_residue = residue==resnum
-        admissible_restype = restype_and_chi_and_state[:,0] == restype_dict[aa]
-        probs = sens[correct_residue]
-        chi1_probs = np.array([probs[s].sum() for s in chi1_partition[aa]])
-        chi1_prob_array.append(chi1_probs)
-    chi1_prob_array = np.array(chi1_prob_array, dtype='f8')
+    chi1_prob_array = predictor.predict_chi1(seq, residue, sens)
 
     assert len(chi1_true) == len(seq)
     with open(output_file,'wt') as f:
