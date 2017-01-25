@@ -246,7 +246,7 @@ static const float M_1_PI_F = 0.3183098861837907f;  //!< value of 1/pi as float
 
 inline float approx_rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root at lower accuracy
 inline float rsqrt(float x) {return 1.f/sqrtf(x);}  //!< reciprocal square root (1/sqrt(x))
-template <typename D> inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
+template <typename D> constexpr inline D sqr(D x) {return x*x;}  //!< square a number (x^2)
 inline float rcp       (float x) {return 1.f/x;}  //!< reciprocal of number
 inline float approx_rcp(float x) {return 1.f/x;}  //!< reciprocal of number
 inline float ternary(bool b, float x, float y) {return b ? x : y;}

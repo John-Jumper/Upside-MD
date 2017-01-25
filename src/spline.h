@@ -99,27 +99,16 @@ inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) 
 }
 
 
-inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x) {
-    // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
-    // the first spline is centered at -1
-    // return is value then derivative
-
-    Int4 x_bin = x.truncate_to_int();  // must be at least 1
-    Float4 y = x - x.round<_MM_FROUND_TO_ZERO>();
-
-    // Read the coefficients for each slot then transpose to prepare
-    //   for vertical simd
-    Float4 c00(bspline_coeff[0]-1 + x_bin.x(), Alignment::unaligned);
-    Float4 c01(bspline_coeff[1]-1 + x_bin.y(), Alignment::unaligned);
-    Float4 c02(bspline_coeff[2]-1 + x_bin.z(), Alignment::unaligned);
-    Float4 c03(bspline_coeff[3]-1 + x_bin.w(), Alignment::unaligned);
-    transpose4(c00,c01,c02,c03);
-
+inline Vec<2,Float4> uniform_deBoor_algorithm(
+    const Float4& c00, const Float4& c01, const Float4& c02, const Float4& c03,
+    const Float4& excess) 
+    // excess should be on [0,1]
+{
     auto one = Float4(1.f);
 
-    auto yu1 = y + Float4(2.f);
-    auto yu2 = y + one;
-    auto yu3 = y;
+    auto yu1 = excess + Float4(2.f);
+    auto yu2 = excess + one;
+    auto yu3 = excess;
 
     auto frac13 = Float4(1.f/3.f);
     auto alpha11 = frac13*yu1;
@@ -148,6 +137,63 @@ inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const
     auto d33 = fmadd(one-alpha33,d22, alpha33*d23);
 
     return make_vec2(c33, d33);
+}
+
+
+inline Vec<3,Float4> deBoor2d_value_and_deriv(const int ny, const float* bspline_coeff[4], const Float4& x, const Float4& y) {
+    // return array contains (value, dvalue/dx, dvalue/dy)
+
+    // First compute the x bins so I know where to pick out rows for the y deBoor
+    alignas(16) int x_bin[4]; x.truncate_to_int().store(x_bin);  // must be at least 1
+    alignas(16) int y_bin[4]; y.truncate_to_int().store(y_bin);  // must be at least 1
+    alignas(16) float x_excess[4]; (x - x.round<_MM_FROUND_TO_ZERO>()).store(x_excess);
+
+    Float4 val_coeff[4];
+    Float4  dx_coeff[4];
+
+    for(int i=0; i<4; ++i) {
+        const float* bspline_base = bspline_coeff[i] + (x_bin[i]-1)*ny + y_bin[i]-1;  // lower left corner of coeffs
+        Float4 c00(bspline_base + 0*ny, Alignment::unaligned);
+        Float4 c01(bspline_base + 1*ny, Alignment::unaligned);
+        Float4 c02(bspline_base + 2*ny, Alignment::unaligned);
+        Float4 c03(bspline_base + 3*ny, Alignment::unaligned);
+
+        // execute deBoor for all y columns simultaneously
+        auto v = uniform_deBoor_algorithm(c00,c01,c02,c03, Float4(x_excess[i]));
+        val_coeff[i] = v[0];
+        dx_coeff [i] = v[1];
+    }
+
+    // prepare for second round
+    transpose4(val_coeff[0],val_coeff[1],val_coeff[2],val_coeff[3]);
+    transpose4( dx_coeff[0], dx_coeff[1], dx_coeff[2], dx_coeff[3]);
+
+    Float4 y_excess = y - y.round<_MM_FROUND_TO_ZERO>();
+
+    auto val = uniform_deBoor_algorithm(val_coeff[0],val_coeff[1],val_coeff[2],val_coeff[3], y_excess);
+    auto dx  = uniform_deBoor_algorithm( dx_coeff[0], dx_coeff[1], dx_coeff[2], dx_coeff[3], y_excess);
+
+    return make_vec3(val[0],dx[0],val[1]);
+}
+
+
+inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x) {
+    // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
+    // the first spline is centered at -1
+    // return is value then derivative
+
+    Int4 x_bin = x.truncate_to_int();  // must be at least 1
+    Float4 y = x - x.round<_MM_FROUND_TO_ZERO>();
+
+    // Read the coefficients for each slot then transpose to prepare
+    //   for vertical simd
+    Float4 c00(bspline_coeff[0]-1 + x_bin.x(), Alignment::unaligned);
+    Float4 c01(bspline_coeff[1]-1 + x_bin.y(), Alignment::unaligned);
+    Float4 c02(bspline_coeff[2]-1 + x_bin.z(), Alignment::unaligned);
+    Float4 c03(bspline_coeff[3]-1 + x_bin.w(), Alignment::unaligned);
+    transpose4(c00,c01,c02,c03);
+
+    return uniform_deBoor_algorithm(c00,c01,c02,c03, y);
 }
 
 inline float clamped_spline_left(const float* bspline_coeff, int n_coeff) {
@@ -206,7 +252,7 @@ inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4
     return value;
 }
 
-inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float* bspline_coeff, const float x) {
+inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float x) {
     // this function is not intended to be especially efficient
 
     int x_bin = int(x); // must be at least 1
@@ -226,9 +272,32 @@ inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float* 
     }
 }
 
+inline void deBoor2d_coeff_deriv(int* starting_bin, float result[4][4], int ny, const float x, const float y) {
+    // this function is not intended to be especially efficient
 
-inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const float* bspline_coeff, const float x, 
-        int n_knot) {
+    int x_bin = int(x); // must be at least 1
+    int y_bin = int(y); // must be at least 1
+    *starting_bin = (x_bin-1)*ny + (y_bin-1);  // lower left corner of coeffs
+
+    // Derivative with respect to coefficient
+    // is the value of spline with zeros for every coefficient
+    // except that one since the coefficients are linearly coupled
+    // to the basis functions
+    
+    // Since the 2d spline basis functions are just products of 1d spline basis functions,
+    // we can just take the outer product of the 1d coeff_deriv values.
+    
+    int unused;
+    float x_deriv[4]; deBoor_coeff_deriv(&unused, x_deriv, x);
+    float y_deriv[4]; deBoor_coeff_deriv(&unused, y_deriv, y);
+
+    for(int i=0; i<4; ++i)
+        for(int j=0; j<4; ++j)
+            result[i][j] = x_deriv[i]*y_deriv[j];
+}
+
+
+inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const float x, int n_knot) {
     if(x<=1.f) {
         *starting_bin = 0;
         result[0] = 1.f/6.f;
@@ -242,7 +311,7 @@ inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const
         result[2] = 2.f/3.f;
         result[3] = 1.f/6.f;
     } else {
-        deBoor_coeff_deriv(starting_bin, result, bspline_coeff, x);
+        deBoor_coeff_deriv(starting_bin, result, x);
     }
 }
 

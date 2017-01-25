@@ -7,9 +7,9 @@
 namespace {
     template<int n_knot_angular, int n_knot, int n_dim1, int n_dim2>
         inline Float4 quadspline(
-                Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, 
+                Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2,
                 const float inv_dtheta, const float inv_dx, const float* p[4],
-                const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) 
+                const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2)
         {
             Float4 one(1.f);
             auto displace = extract<0,3>(x2)-extract<0,3>(x1);
@@ -63,9 +63,9 @@ namespace {
 
     template<int n_knot_angular, int n_knot, int n_param, int n_dim1, int n_dim2>
         inline void quadspline_param_deriv(
-                Vec<n_param> &d_param, 
+                Vec<n_param> &d_param,
                 const float inv_dtheta, const float inv_dx, const float* p,
-                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) 
+                const Vec<n_dim1> &x1, const Vec<n_dim2> &x2)
         {
             d_param = make_zero<n_param>();
 
@@ -87,22 +87,22 @@ namespace {
             // wide_cover derivative
             int starting_bin;
             float result[4];
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular, dist_coord, n_knot);
+            clamped_deBoor_coeff_deriv(&starting_bin, result, dist_coord, n_knot);
             for(int i: range(4)) d_param[2*n_knot_angular+starting_bin+i] = result[i];
 
             // narrow_cover derivative
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p+2*n_knot_angular+n_knot, dist_coord, n_knot);
-            for(int i: range(4)) 
+            clamped_deBoor_coeff_deriv(&starting_bin, result, dist_coord, n_knot);
+            for(int i: range(4))
                 d_param[2*n_knot_angular+n_knot+starting_bin+i] = angular_sigmoid1.x()*angular_sigmoid2.x()*result[i];
 
             // angular_sigmoid derivatives
             float2 narrow_cover = clamped_deBoor_value_and_deriv(p+2*n_knot_angular+n_knot, dist_coord, n_knot);
 
-            deBoor_coeff_deriv(&starting_bin, result, p+n_knot_angular, (cos_cov_angle1+1.f)*inv_dtheta+1.f);
+            deBoor_coeff_deriv(&starting_bin, result, (cos_cov_angle1+1.f)*inv_dtheta+1.f);
             for(int i: range(4)) d_param[starting_bin+i] = angular_sigmoid2.x()*narrow_cover.x()*result[i];
 
-            deBoor_coeff_deriv(&starting_bin, result, p,                (cos_cov_angle2+1.f)*inv_dtheta+1.f);
-            for(int i: range(4)) 
+            deBoor_coeff_deriv(&starting_bin, result,                 (cos_cov_angle2+1.f)*inv_dtheta+1.f);
+            for(int i: range(4))
                 d_param[n_knot_angular+starting_bin+i] = angular_sigmoid1.x()*narrow_cover.x()*result[i];
         }
 
@@ -132,7 +132,7 @@ namespace {
             return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
         }
 
-        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4], 
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
                 const Vec<n_dim1,Float4> &x1, const Vec<n_dim2,Float4> &x2) {
             auto disp       = x1-x2;
             auto dist2      = mag2(disp);
@@ -145,13 +145,13 @@ namespace {
             return en.x();
         }
 
-        static void param_deriv(Vec<n_param> &d_param, const float* p, 
+        static void param_deriv(Vec<n_param> &d_param, const float* p,
                 const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
             auto dist_coord = inv_dx*mag(x1-x2);
 
             int starting_bin;
             float result[4];
-            clamped_deBoor_coeff_deriv(&starting_bin, result, p, dist_coord, n_param);
+            clamped_deBoor_coeff_deriv(&starting_bin, result, dist_coord, n_param);
             for(int i: range(4)) d_param[starting_bin+i] = result[i];
         }
     };
@@ -188,15 +188,13 @@ namespace {
             for(int nka: range(n_knot_angular))
                 if(p1[nka]!=p2[nka+n_knot_angular] || p1[nka+n_knot_angular]!=p2[nka])
                     throw std::string("bad angular match");
-                    // return false;
             for(int nk: range(2*n_knot))
                 if(p1[2*n_knot_angular + nk] != p2[2*n_knot_angular + nk])
                     return false;
 
             return true;
         }
-
-    };
+};
 
 typedef PosQuadSplineInteraction preferred_bead_type;
 

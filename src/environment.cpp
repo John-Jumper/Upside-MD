@@ -162,7 +162,7 @@ struct UniformTransform : public CoordNode {
     float spline_inv_dx;
     unique_ptr<float[]> bspline_coeff;
     unique_ptr<float[]> jac;
-    
+
 
     UniformTransform(hid_t grp, CoordNode& input_):
         CoordNode(input_.n_elem, 1),
@@ -202,7 +202,7 @@ struct UniformTransform : public CoordNode {
         copy_n(bspline_coeff.get(), n_coeff, &ret[2]);
         return ret;
     }
-        
+
     virtual std::vector<float> get_param_deriv() const override {
         vector<float> ret(2+n_coeff, 0.f);
         int starting_bin;
@@ -210,7 +210,7 @@ struct UniformTransform : public CoordNode {
         for(int ne=0; ne<n_elem; ++ne) {
             auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
             auto v = clamped_deBoor_value_and_deriv(bspline_coeff.get(), coord, n_coeff);
-            clamped_deBoor_coeff_deriv(&starting_bin, d, bspline_coeff.get(), coord, n_coeff);
+            clamped_deBoor_coeff_deriv(&starting_bin, d, coord, n_coeff);
 
             ret[0] += v[1];                                    // derivative of offset
             ret[1] += v[1]*(input.output(0,ne)-spline_offset); // derivative of inv_dx
@@ -270,7 +270,7 @@ struct LinearCoupling : public PotentialNode {
 
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>(
-                    (inactivation ? "linear_coupling_with_inactivation" : "linear_coupling_uniform"), 
+                    (inactivation ? "linear_coupling_with_inactivation" : "linear_coupling_uniform"),
                     {input.n_elem}, [&](float* buffer) {
                     for(int ne: range(input.n_elem)) {
                         float c = couplings[coupling_types[ne]];
@@ -285,7 +285,7 @@ struct LinearCoupling : public PotentialNode {
         float pot = 0.f;
         for(int ne=0; ne<n_elem; ++ne) {
             float c = couplings[coupling_types[ne]];
-            float act = inactivation ? sqr(1.f-inactivation->output(inactivation_dim,ne)) : 1.f; 
+            float act = inactivation ? sqr(1.f-inactivation->output(inactivation_dim,ne)) : 1.f;
             float val = input.output(0,ne);
             pot += c * val * act;
             input.sens(0,ne) += c*act;
@@ -298,20 +298,20 @@ struct LinearCoupling : public PotentialNode {
     virtual std::vector<float> get_param() const override {
         return couplings;
     }
-        
+
     virtual std::vector<float> get_param_deriv() const override {
         vector<float> deriv(couplings.size(), 0.f);
 
         int n_elem = input.n_elem;
         for(int ne=0; ne<n_elem; ++ne) {
-            float act = inactivation ? 1.f - inactivation->output(inactivation_dim,ne) : 1.f; 
+            float act = inactivation ? 1.f - inactivation->output(inactivation_dim,ne) : 1.f;
             deriv[coupling_types[ne]] += input.output(0,ne) * act;
         }
         return deriv;
     }
 
     virtual void set_param(const std::vector<float>& new_param) override {
-        if(new_param.size() != couplings.size()) 
+        if(new_param.size() != couplings.size())
             throw string("attempting to change size of couplings vector on set_param");
         copy(begin(new_param),end(new_param), begin(couplings));
     }
@@ -372,7 +372,7 @@ struct NonlinearCoupling : public PotentialNode {
     virtual std::vector<float> get_param() const override {
         return coeff;
     }
-        
+
     virtual std::vector<float> get_param_deriv() const override {
         vector<float> deriv(coeff.size(), 0.f);
 
@@ -381,15 +381,14 @@ struct NonlinearCoupling : public PotentialNode {
             int starting_bin;
             float result[4];
             auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
-            clamped_deBoor_coeff_deriv(&starting_bin, result,
-                    coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff);
+            clamped_deBoor_coeff_deriv(&starting_bin, result, coord, n_coeff);
             for(int i: range(4)) deriv[coupling_types[ne]*n_coeff+starting_bin+i] += result[i];
         }
         return deriv;
     }
 
     virtual void set_param(const std::vector<float>& new_param) override {
-        if(new_param.size() != coeff.size()) 
+        if(new_param.size() != coeff.size())
             throw string("attempting to change size of coeff vector on set_param");
         copy(begin(new_param),end(new_param), begin(coeff));
     }

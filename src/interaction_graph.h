@@ -390,7 +390,7 @@ struct InteractionGraph{
 
                 if(IType::symmetric && !IType::is_compatible(interaction_param+(nt1*n_type2+nt2)*IType::n_param, 
                                                              interaction_param+(nt2*n_type2+nt1)*IType::n_param)){
-                    throw std::string("incompatibile parameters");
+                    throw std::string("incompatible parameters");
                 }
             }
         }
@@ -413,7 +413,12 @@ struct InteractionGraph{
     }
 
     void set_param(const std::vector<float>& new_param) {
-        if(new_param.size() != size_t(n_type1*n_type2*IType::n_param)) throw std::string("Bad param size");
+        if(new_param.size() != size_t(n_type1*n_type2*IType::n_param))
+            throw std::string("Bad param size, got ") + 
+                std::to_string(new_param.size()) + " params, but expected "+
+                std::to_string(n_type1*n_type2*IType::n_param) + " params of shape (" +
+                std::to_string(n_type1)+", "+std::to_string(n_type2)+", "+
+                std::to_string(IType::n_param)+")";
         std::copy(begin(new_param), end(new_param), interaction_param.get());
         update_cutoffs();
     }

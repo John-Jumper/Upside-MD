@@ -240,24 +240,43 @@ int get_clamped_value_and_deriv(int N, float* result, const float* bspline_coeff
     return 0;
 }
 
-// int get_clamped_value_and_deriv_simd(int N, float* result, const float* bspline_coeff, float* x) {
-//     const float* coeff_ptrs[4] = {bspline_coeff, bspline_coeff+N, bspline_coeff+2*N, bspline_coeff+3*N};
-//     auto en = clamped_deBoor_value_and_deriv(coeff_ptrs, Float4(x, Alignment::unaligned), N);
-//     result[0] = en.x().x();
-//     result[1] = en.y().x();
-//     result[2] = en.x().y();
-//     result[3] = en.y().y();
-//     result[4] = en.x().z();
-//     result[5] = en.y().z();
-//     result[6] = en.x().w();
-//     result[7] = en.y().w();
-//     return 0;
-// }
+
+int get_bounded_value_and_deriv_2d(int N, float* result, const float* bspline_coeff, int nx, const float* x) {
+    // this is a rather convoluted function because there is no scalar interface to the 2d splines
+    const float* p[4] = {bspline_coeff, bspline_coeff, bspline_coeff, bspline_coeff};
+
+    for(int i: range(0,nx,4)) {
+        alignas(16) float x4[4] = {0.f,0.f,0.f,0.f};
+        alignas(16) float y4[4] = {0.f,0.f,0.f,0.f};
+        for(int j=0; j<4; ++j) {
+            x4[j] = j<min(4,nx-i) ? x[2*(i+j)  ] : 1.f;
+            y4[j] = j<min(4,nx-i) ? x[2*(i+j)+1] : 1.f;
+
+            if((x4[j]<1.f)|(x4[j]>=float(N-2))|(y4[j]<1.f)|(y4[j]>=float(N-2))) return 1;
+        }
+
+        auto v = deBoor2d_value_and_deriv(N, p, Float4(x4), Float4(y4));
+
+        alignas(16) float val[4] = {0.f,0.f,0.f,0.f};
+        alignas(16) float der_x[4] = {0.f,0.f,0.f,0.f};
+        alignas(16) float der_y[4] = {0.f,0.f,0.f,0.f};
+        v[0].store(val);  
+        v[1].store(der_x);
+        v[2].store(der_y);
+
+        for(int j=0; j<min(4,nx-i); ++j) {
+            result[(i+j)*3+0] = val[j];
+            result[(i+j)*3+1] = der_x[j];
+            result[(i+j)*3+2] = der_y[j];
+        }
+    }
+    return 0;
+}
 
 int get_clamped_coeff_deriv(int N, float* result, const float* bspline_coeff, float x) {
     int starting_bin;
     float data[4];
-    clamped_deBoor_coeff_deriv(&starting_bin, data, bspline_coeff, x, N);
+    clamped_deBoor_coeff_deriv(&starting_bin, data, x, N);
     for(int i: range(N)) result[i] = 0.f;
     for(int i: range(4)) result[starting_bin+i] = data[i];
     return 0;

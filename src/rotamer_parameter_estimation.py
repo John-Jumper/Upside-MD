@@ -99,7 +99,7 @@ def unpack_param_maker():
 
     rotscalar_param = read_param((n_rotpos,1))
 
-    n_param = n_restype**2 * (n_angular+2*(n_knot_sc-3))+3*n_restype*(n_angular+2*(n_knot_hb-3)) + n_fix*6 + n_rotpos*6 + n_rotpos
+    n_param = int(i[0])
 
     return func(rot_param), func(cov_param), func(hyd_param), func(hydpl_param), func(rotpos_param), func(rotscalar_param), n_param
 
@@ -142,6 +142,7 @@ def pack_param(*args):
             0.5+np.zeros(n_param),
             method = 'L-BFGS-B', options=dict(maxiter=10000),
             jac = (lambda x: d_discrep(x, *args)))
+    # print 'required %i evaluations' % (results.nfev, )
 
     if not (discrep(results.x, *args) < 1e-4):
         raise ValueError('Failed to converge')
@@ -193,8 +194,6 @@ def bind_param_and_evaluate(pos_fix_free, node_names, param_matrices):
 
         energy[0] += fix .energy(pos)
         energy[1] += free.energy(pos)
-
-        # print fix,free,'ENERGY', energy
 
         if np.isnan(energy[0]): raise RuntimeError('NaN energy for %s %s'%(fix,
             [np.any(np.isnan(x)) for x in param_matrices]))
