@@ -26,17 +26,100 @@ def _output_groups(t):
         yield t.get_node('/output')
         i += 1
 
+def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
+    H_bond_length = 0.88
+    O_bond_length = 1.24
+
+    n_frame = len(pos)
+    n_res = len(seq)
+    seq = np.array([('PRO' if x == 'CPR' else x) for x in seq])
+
+    chain_first_residue = set(chain_first_residue).union(set([0,n_res]))
+    assert all(x<=n_res for x in chain_first_residue)
+    assert 0 in chain_first_residue
+
+    assert pos.shape == (n_frame, 3*n_res, 3)
+    assert seq.shape == (n_res,)
+
+    topo = md.Topology()
+    # ch = topo.add_chain()
+    # res = topo.add_residue((restype if restype!='CPR' else 'PRO'), ch[chain_idx], resSeq=i)
+
+    # Main atoms
+    expanded_pos_columns = []
+    atoms = []
+    last_C_atom = None  # needed for adding bonds
+    atom_num = 0
+
+    for nr in range(n_res):
+        if nr in chain_first_residue:
+            current_chain = topo.add_chain()
+
+        res = topo.add_residue(seq[nr], current_chain, resSeq=nr)
+        atoms.append(topo.add_atom('N', el.nitrogen, res, atom_num)); atom_num+=1; N =atoms[-1]
+        atoms.append(topo.add_atom('CA',el.carbon,   res, atom_num)); atom_num+=1; CA=atoms[-1]
+        atoms.append(topo.add_atom('C', el.carbon,   res, atom_num)); atom_num+=1; C =atoms[-1]
+
+        expanded_pos_columns.append(pos[:,3*nr:3*(nr+1)])
+        N_pos  = expanded_pos_columns[-1][:,0]
+        CA_pos = expanded_pos_columns[-1][:,1]
+        C_pos  = expanded_pos_columns[-1][:,2]
+
+        if nr not in chain_first_residue:
+            topo.add_bond(last_C,N)
+        topo.add_bond(N ,CA)
+        topo.add_bond(CA,C)
+
+        # Add NH
+        if nr not in chain_first_residue and seq[nr] != 'PRO':
+            atoms.append(topo.add_atom('NH', el.hydrogen, res, atom_num)); atom_num+=1; H =atoms[-1]
+            topo.add_bond(N,H)
+
+            last_C_pos = pos[:,3*nr-1]
+            H_pos = N_pos - H_bond_length*vhat(vhat(last_C_pos-N_pos) + vhat(CA_pos-N_pos))
+            expanded_pos_columns.append(H_pos[:,None].astype('f4'))
+
+        # Add CB
+        if seq[nr] != 'GLY':
+            atoms.append(topo.add_atom('CB', el.carbon, res, atom_num)); atom_num+=1; CB=atoms[-1]
+            topo.add_bond(CA,CB)
+
+            extend_dir = vhat(vhat(CA_pos-N_pos)+vhat(CA_pos-C_pos))
+            cross_dir  = np.cross(N_pos-CA_pos, C_pos-CA_pos)
+            CB_pos = CA_pos + 0.94375626*extend_dir + 0.5796686718421049*cross_dir
+            expanded_pos_columns.append(CB_pos[:,None].astype('f4'))
+
+        # Add O
+        if nr+1 not in chain_first_residue:
+            atoms.append(topo.add_atom('O', el.oxygen, res, atom_num)); atom_num+=1; O =atoms[-1]
+            topo.add_bond(C,O)
+
+            next_N_pos = pos[:,3*nr+3]
+            O_pos = C_pos - O_bond_length*vhat(vhat(CA_pos-C_pos) + vhat(next_N_pos-C_pos))
+            expanded_pos_columns.append(O_pos[:,None].astype('f4'))
+
+        last_C = C
+    xyz = np.concatenate(expanded_pos_columns,axis=1)
+
+    # There is some weird bug related to the indices of the topology object.  Basically, the 
+    # indices seem to be messed up by the fact when I didn't add them in residue order.  I will
+    # continue to try to avoid issues by making a copy, which fixes numbering issues.
+    topo = topo.copy()
+
+    # VERY IMPORTANT all distances must be in nanometers for MDTraj
+    return md.Trajectory(xyz=xyz*angstrom, topology=topo, time=time)
+
 
 @FormatRegistry.register_loader('.up')
-def load_upside_traj(fname, stride=1, input_pos_only=False):
+def load_upside_traj(fname, stride=1, target_pos_only=False):
     with tb.open_file(fname) as t:
         last_time = 0.
         start_frame = 0
         total_frames_produced = 0
         xyz = []
         time = []
-        if input_pos_only:
-            xyz.append(t.root.input.pos[:,:,0])
+        if target_pos_only:
+            xyz.append(t.root.target.pos[:,:,0])
             time.append(np.zeros(1,dtype='f4'))
             last_time = time[-1]
             total_frames_produced = 1
@@ -56,70 +139,12 @@ def load_upside_traj(fname, stride=1, input_pos_only=False):
 
         seq = t.root.input.sequence[:]
 
-        g = t.root.input.potential.infer_H_O.donors
-        n_don = g.bond_length.shape[0]
-        hb_length = g.bond_length[:]
-        hb_atoms  = g.id[:]
-        hb_residue= g.residue[:]
-
-        g = t.root.input.potential.infer_H_O.acceptors
-        n_acc = g.bond_length.shape[0]
-        hb_length = np.concatenate([hb_length ,g.bond_length[:]], axis=0)
-        hb_atoms  = np.concatenate([hb_atoms  ,g.id[:]], axis=0)
-        hb_residue= np.concatenate([hb_residue,g.residue[:]], axis=0)
-        is_donor = np.arange(n_don+n_acc)<n_don
-
-        hb_xyz = [(xyz[:,i[1]] - b*vhat(vhat(xyz[:,i[0]]-xyz[:,i[1]]) + vhat(xyz[:,i[2]]-xyz[:,i[1]])))[:,None]
-                  for i,b in zip(hb_atoms, hb_length)]
-        xyz = np.concatenate([xyz]+hb_xyz,axis=1)
-
-        topo = md.Topology()
-
         # Check for chain breaks in config file
         chain_first_residue = np.array([0], dtype='int32')
         if 'chain_break' in t.root.input:
             chain_first_residue = np.append(chain_first_residue, t.root.input.chain_break.chain_first_residue[:])
 
-        ch = [topo.add_chain() for i in xrange(chain_first_residue.size)] 
-
-        residues = []
-        atoms = []
-
-        # Main atoms
-        chain_idx = 0
-        for i,restype in enumerate(seq):
-            if chain_first_residue.size > 1 and i in chain_first_residue[1:]: chain_idx += 1
-            res = topo.add_residue((restype if restype!='CPR' else 'PRO'), ch[chain_idx], resSeq=i)
-            residues.append(res)
-            atoms.append(topo.add_atom('N', el.nitrogen, res, 3*i+0))
-            atoms.append(topo.add_atom('CA',el.carbon,   res, 3*i+1))
-            atoms.append(topo.add_atom('C', el.carbon,   res, 3*i+2))
-
-        # Main chain bonds
-        omitted_bonds = set([3*nr-1 for nr in chain_first_residue[1:]])
-        for i in xrange(len(atoms)-1):
-            if i not in omitted_bonds:
-                topo.add_bond(atoms[i],atoms[i+1])  # don't add bond at chain_break
-
-        # Hydrogens and oxygens
-        for i in xrange(n_don+n_acc):
-            atoms.append(topo.add_atom(
-                ('NH' if is_donor[i] else 'O'), 
-                (el.hydrogen if is_donor[i] else el.oxygen),
-                residues[hb_residue[i]],
-                3*len(seq)+i))
-            topo.add_bond(atoms[hb_atoms[i,1]],atoms[-1])
-
-        # Now we need to permute the trajectory data for the topology order
-        xyz = xyz[:,np.array([a.index for a in topo.atoms])]
-
-        # There is some weird bug related to the indices of the topology object.  Basically, the 
-        # indices seem to be messed up by the fact that I did not add them in residue order.
-        # Making a copy of the Topology object fixes the numbering issue
-        topo = topo.copy()
-
-        # VERY IMPORTANT all distances must be in nanometers for MDTraj
-        return md.Trajectory(xyz=xyz*angstrom, topology=topo, time=time)
+    return traj_from_upside(seq, time, xyz, chain_first_residue=chain_first_residue)
 
 
 def ca_contact_pca(traj, n_pc, cutoff_angstroms=8., variance_scaled=True):
