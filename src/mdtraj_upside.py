@@ -1,5 +1,4 @@
 # VERY IMPORTANT all distances must be in nanometers for MDTraj
-import tables as tb
 import numpy as np
 import mdtraj.core.element as el
 import mdtraj as md
@@ -112,6 +111,7 @@ def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
 
 @FormatRegistry.register_loader('.up')
 def load_upside_traj(fname, stride=1, target_pos_only=False):
+    import tables as tb
     with tb.open_file(fname) as t:
         last_time = 0.
         start_frame = 0
@@ -237,6 +237,33 @@ def pick_all_representative_points(coord, labels, sigma_fraction=0.1):
 
 def select(traj, sel_text):
     return traj.atom_slice(traj.topology.select(sel_text))
+
+def replex_demultiplex(list_of_replex_traj, replica_index):
+    n_frame = list_of_replex_traj[0].n_frames
+    n_atom  = list_of_replex_traj[0].n_atoms
+
+
+
+
+def ca_interfacial_rmsd_angstroms(traj, native, group1, group2, ca_cutoff_angstroms=10., verbose=True):
+    native = native[0]  # ensure only a single frame is passed
+
+    res_group1, res_group2 = [np.array(sorted(set([native.topology.atom(i).residue.index for i in g])))
+            for g in (group1,group2)]
+
+    contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
+    is_contact = (10.*md.compute_contacts(native,scheme='ca', contacts=contact_pairs)[0]<ca_cutoff_angstroms)[0]
+    contacts = contact_pairs[is_contact]
+            
+    interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
+    if verbose:
+        print '%i interface residues (%i,%i)' % (
+                len(interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
+    interface_atom_indices = np.array([a.index for a in native.topology.atoms
+                                               if  a.residue.index in interface_residues])
+
+    return 10.*md.rmsd(traj.atom_slice(interface_atom_indices), native.atom_slice(interface_atom_indices))
+    
 
 def ca_rmsd_angstroms(traj, native, cut_tails=False, verbose=True):
     ''' Computes RMSD of the CA atoms in angstroms, rather than the MDTraj default of nanometers.  If 
