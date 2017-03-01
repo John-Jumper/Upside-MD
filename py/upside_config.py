@@ -4,6 +4,7 @@ import numpy as np
 import tables as tb
 import sys,os
 import cPickle
+import random
 
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
@@ -1281,10 +1282,10 @@ def main():
     parser_grp1.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
-    parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true',
-            help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
-    parser_grp1.add_argument('--cavity-radius-from-config', default='', 
-            help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
+    parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', default=0., type=float,
+        help='Set the cavity radius to this provided scale factor times the max distance between com\'s and atoms of the chains.')
+    parser_grp1.add_argument('--cavity-radius-from-config', default='', help='Config file with cavity radius set. Useful for applying'+
+            ' the same heuristic cavity of bound complex config to unbound counterpart')
 
     parser.add_argument('--make-unbound', action='store_true',
             help='Separate chains into different corners of a cavity that you set with one of the cavity options.')
@@ -1462,7 +1463,7 @@ def main():
                 for j in xrange(n_atom):
                         com_dist_list.append(vmag(com_list[i]-pos[j,:,0]))
 
-            args.cavity_radius = 1.2*max(com_dist_list)
+            args.cavity_radius = args.debugging_only_heuristic_cavity_radius*max(com_dist_list)
             print
             print "cavity_radius"
             print args.cavity_radius
@@ -1506,13 +1507,14 @@ def main():
                 # move receptor chains
                 first_res = chain_endpts(n_res, chain_first_residue, 0)[0]
                 next_first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0]-1)[1]
-                pos[first_res*3:next_first_res*3,:,i] = (pos[first_res*3:next_first_res*3,:,0] +
-                        displacement[0]*0.5*args.cavity_radius)
+                pick_disp = random.choice([0, 2, 4])
+                pos[first_res*3:next_first_res*3,:,0] = pos[first_res*3:next_first_res*3,:,0] + displacement[pick_disp]*0.5*args.cavity_radius
+
                 # move ligand chains
                 first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0])[0]
                 next_first_res = chain_endpts(n_res, chain_first_residue, n_chains-1)[1]
-                pos[first_res*3:next_first_res*3,:,0] = (pos[first_res*3:next_first_res*3,:,0] +
-                        displacement[1]*0.5*args.cavity_radius)
+                pick_disp = random.choice([1, 3, 5])
+                pos[first_res*3:next_first_res*3,:,0] = pos[first_res*3:next_first_res*3,:,0] + displacement[pick_disp]*0.5*args.cavity_radius
             t.root.input.pos[:] = pos
             target = pos.copy()
 
