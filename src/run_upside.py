@@ -4,9 +4,36 @@ import numpy as np
 import subprocess as sp
 import os, sys
 import json,uuid
+import time
 
 params_dir = os.path.expanduser('~/upside-parameters/')
 upside_dir = os.path.expanduser('~/upside/')
+
+def stop_upside_gently(process, allowed_termination_seconds=60.):
+    # Upside checks for sigterm periodically, then writes buffered frames and exits with a 
+    # success code.  We give time for a well-behaving Upside process to stop before issuing
+    # a sigkill.
+
+    # Python raises an OSError if terminate is called on an already finished process.  This creates
+    # a number of possible race conditions in this code.  We will avoid these problems by simply
+    # trapping the resulting exceptions, rather than trying to lock against them
+
+    try:
+        if process.poll() is not None:
+            return
+
+        process.terminate()
+
+        # make sure we can break out of the termination process early
+        poll_interval = allowed_termination_seconds/60.
+        for poll_index in range(60):
+            time.sleep(poll_interval)
+            if process.poll() is not None:
+                return  # we have succeeded in stopping the job
+
+        process.kill()
+    except OSError:
+        pass
 
 
 def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True, 
@@ -91,10 +118,23 @@ def compile():
     return sp.check_output(['/bin/bash', '-c', 'cd %s; make -j4'%(upside_dir+'obj')])
 
 
-UpsideJob = collections.namedtuple('UpsideJob', 'job config output'.split())
+class UpsideJob(object):
+    def __init__(self,job,config,output, timer_object=None):
+        self.job = job
+        self.config = config
+        self.output = output
+        self.timer_object = timer_object
 
+    def wait(self,):
+        retcode = self.job.wait()
+        if self.timer_object is not None:
+            try:
+                self.timer_object.cancel()
+            except:  # if cancelling the timer fails, we don't care 
+                pass
+        return retcode
 
-def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, temperature=1., seed=None,
+def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=None, temperature=1., seed=None,
                replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
                log_level='detailed', account=None, disable_recentering=False):
@@ -127,16 +167,26 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
     upside_args.extend(['--seed','%li'%(seed if seed is not None else np.random.randint(1<<31))])
     
     output_path = config[0]+'.output'
+    timer_object = None
 
     if queue == '': 
         env = os.environ.copy()
         env['OMP_NUM_THREADS'] = str(n_threads)
         output_file = open(output_path,'w')
         job = sp.Popen(upside_args, stdout=output_file, stderr=output_file)
+
+        if minutes is not None:
+            # FIXME in Python 3.3+, subprocess supports job timeout directly
+            import threading
+            timer_object = threading.Timer(minutes*60., stop_upside_gently, args=[job])
+            timer_object.start()
+
     elif queue == 'srun':
         # set num threads carefully so that we don't overwrite the rest of the environment
         # setting --export on srun will blow away the rest of the environment
         # afterward, we will undo the change
+
+        assert minutes is not None  # time limits currently not supported by srun-launcher
 
         old_omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
 
@@ -151,14 +201,16 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, hours=36, t
             else:
                 os.environ['OMP_NUM_THREADS'] = old_omp_num_threads
     else:
-        args = ['sbatch', '-p', queue, '--time=0-%i'%hours, '--ntasks=1', 
+        args = ['sbatch', '-p', queue, 
+                '--time=%i'%(minutes if minutes is not None else 36*60),
+                '--ntasks=1', 
                 '--cpus-per-task=%i'%n_threads, '--export=OMP_NUM_THREADS=%i'%n_threads,
                 '--output=%s'%output_path, '--parsable', '--wrap', ' '.join(upside_args)]
         if account is not None:
             args.append('--account=%s'%account)
         job = sp.check_output(args).strip()
 
-    return UpsideJob(job,config,output_path)
+    return UpsideJob(job,config,output_path, timer_object=timer_object)
 
 
 def continue_sim(partition, configs, duration, frame_interval, **upside_kwargs):
