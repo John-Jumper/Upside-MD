@@ -105,7 +105,7 @@ def main():
         shutil.rmtree(direc)
 
     print
-    print 'Time to compute %.4f seconds' % (t2-t0)
+    print 'Time to compute %.5f seconds for %i residues' % (t2-t0, len(pos)/3)
 
     chi1_prob_array = predictor.predict_chi1(seq, residue, sens)
 
