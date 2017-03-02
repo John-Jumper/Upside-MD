@@ -102,7 +102,7 @@ struct EnvironmentCoverage : public CoordNode {
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
-    virtual std::vector<float> get_param_deriv() const override {return igraph.get_param_deriv();}
+    virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
     virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
 };
@@ -203,7 +203,7 @@ struct UniformTransform : public CoordNode {
         return ret;
     }
 
-    virtual std::vector<float> get_param_deriv() const override {
+    virtual std::vector<float> get_param_deriv() override {
         vector<float> ret(2+n_coeff, 0.f);
         int starting_bin;
         float d[4];
@@ -299,7 +299,7 @@ struct LinearCoupling : public PotentialNode {
         return couplings;
     }
 
-    virtual std::vector<float> get_param_deriv() const override {
+    virtual std::vector<float> get_param_deriv() override {
         vector<float> deriv(couplings.size(), 0.f);
 
         int n_elem = input.n_elem;
@@ -373,7 +373,7 @@ struct NonlinearCoupling : public PotentialNode {
         return coeff;
     }
 
-    virtual std::vector<float> get_param_deriv() const override {
+    virtual std::vector<float> get_param_deriv() override {
         vector<float> deriv(coeff.size(), 0.f);
 
         int n_elem = input.n_elem;

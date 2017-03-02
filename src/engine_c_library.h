@@ -1,8 +1,13 @@
 #ifndef ENGINE_C_LIBRARY_H
 #define ENGINE_C_LIBRARY_H
 
+#include "main.h"
+
 extern "C" {
     struct DerivEngine;
+
+    // defined in main.h
+    // int upside_main(int argc, const char* const char*)
 
     DerivEngine* construct_deriv_engine(int n_atom, const char* potential_file, bool quiet);
     void free_deriv_engine(DerivEngine* engine);

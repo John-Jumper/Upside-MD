@@ -399,7 +399,7 @@ struct HBondCoverage : public CoordNode {
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
-    virtual std::vector<float> get_param_deriv() const override {return igraph.get_param_deriv();}
+    virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
     virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
 
@@ -445,7 +445,7 @@ struct HBondEnergy : public HBondCounter
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return vector<float>(1,E_protein);}
-    virtual std::vector<float> get_param_deriv() const override {return vector<float>(1,float(n_hbond));}
+    virtual std::vector<float> get_param_deriv() override {return vector<float>(1,float(n_hbond));}
     virtual void set_param(const std::vector<float>& new_param) override {
         if(new_param.size() != 1u) throw string("expected 1 param to hbond_energy but got "+to_string(new_param.size()));
         E_protein = new_param[0];

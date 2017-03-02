@@ -1,3 +1,4 @@
+#include "main.h"
 #include "monte_carlo_sampler.h"
 #include "h5_support.h"
 #include <tclap/CmdLine.h>
@@ -309,9 +310,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     return relative_error;
 }
 
-
-
-int main(int argc, const char* const * argv)
+int upside_main(int argc, const char* const * argv)
 try {
     using namespace TCLAP;  // Templatized C++ Command Line Parser (tclap.sourceforge.net)
     CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (Upside)\n Author: John Jumper", 
@@ -367,6 +366,9 @@ try {
             "of the potential for the initial structure.  This may give strange answers for native structures "
             "(no steric clashes may given an agreement of NaN) or random structures (where bonds and angles are "
             "exactly at their equilibrium values).  Interpret these results at your own risk.", cmd, false);
+    SwitchArg disable_signal_handler_arg("", "disable-signal-handler",
+            "(developer use only) disable signal handler for SIGINT and SIGTERM.  This does not affect the simulation "
+            "and is for developer use only.", cmd, false);
     UnlabeledMultiArg<string> config_args("config_files","configuration .h5 files", true, "h5_files");
     cmd.add(config_args);
     cmd.parse(argc, argv);
@@ -583,8 +585,10 @@ try {
         // loss of buffered data and to present final statistics.  It is especially useful when being killed due to running 
         // out of time on a cluster.
 
-        signal(SIGINT,  abort_like_handler);
-        signal(SIGTERM, abort_like_handler);
+        if(!disable_signal_handler_arg.getValue()) {
+            signal(SIGINT,  abort_like_handler);
+            signal(SIGTERM, abort_like_handler);
+        }
 
         // we need to run everyone until the next synchronization event
         // a little care is needed if we are multiplexing the events
@@ -715,4 +719,8 @@ try {
 } catch(const string &e) {
     fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
     return 1;
+}
+
+int main(int argc, const char* const * argv) {
+    return upside_main(argc, argv);
 }

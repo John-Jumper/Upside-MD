@@ -44,7 +44,7 @@ struct DerivComputation
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return std::vector<float>();}
     virtual void set_param(const std::vector<float>& new_params) {}
-    virtual std::vector<float> get_param_deriv() const {return std::vector<float>();}
+    virtual std::vector<float> get_param_deriv() {return std::vector<float>();}
 #endif
     virtual std::vector<float> get_value_by_name(const char* log_name) {
         throw std::string("No values implemented");

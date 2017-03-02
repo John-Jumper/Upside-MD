@@ -23,6 +23,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
+    main.cpp
     environment.cpp
     hmm.cpp
     hbond.cpp 
@@ -42,9 +43,7 @@ set (ENGINE_SRC
     state_logger.cpp
     monte_carlo_sampler.cpp)
 
-add_executable (upside
-    ${ENGINE_SRC}
-    main.cpp)
+add_executable (upside ${ENGINE_SRC})
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIRS})
 target_link_libraries(upside stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})

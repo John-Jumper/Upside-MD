@@ -52,6 +52,31 @@ calc.clamped_spline_solve.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p]
 calc.get_clamped_coeff_deriv.restype  = ct.c_int
 calc.get_clamped_coeff_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
 
+
+def in_process_upside(args):
+    # A bit of paranoia to make sure this doesn't interfere with python handlers
+    # I more sophisticated strategy would modify the signal handlers to interoperate with
+    # the Python handlers
+    # Additionally, add a first argument because the program name is expected in argv[0]
+    exec_args = ['python_library', '--disable-signal-handler'] + args
+    exec_c_strs = [ct.c_char_p(s) for s in exec_args]
+
+    # c_str_length = 1+max(len(a) for a in args)
+    # print 'arg length %i' % c_str_length
+
+    # build the strings into a char** for C
+    c_arr_t = (ct.c_char_p * len(exec_args))
+    c_arr = c_arr_t()
+    for i,a in enumerate(exec_c_strs):
+        c_arr[i] = a
+
+    calc.upside_main.restype  = ct.c_int
+    # calc.upside_main.argtypes = [ct.c_int, ct.POINTER(ct.c_char_p)]
+    calc.upside_main.argtypes = [ct.c_int, c_arr_t]
+
+    return calc.upside_main(len(exec_args), c_arr)
+
+
 def clamped_spline_value(bspline_coeff, x):
     x = np.require(x, dtype='f4', requirements='C')
     assert len(x.shape) == 1

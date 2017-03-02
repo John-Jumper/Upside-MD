@@ -206,7 +206,7 @@ struct FixedHMM : public PotentialNode
 
 #ifdef PARAM_DERIV
     virtual vector<float> get_param() const override {return copy_eigen_to_stl(transition_energy);}
-    virtual vector<float> get_param_deriv() const override {return copy_eigen_to_stl(edge_transition_counts);}
+    virtual vector<float> get_param_deriv() override {return copy_eigen_to_stl(edge_transition_counts);}
     virtual void set_param(const vector<float>& new_param) override {
         copy_stl_to_eigen(transition_energy,new_param);
         update_transition_matrix_from_transition_energy();
@@ -339,7 +339,7 @@ struct TorusDBN_Emission : public CoordNode {
             ret[nrt*n_state+ns] = prior_offset_energies(ns,nrt);
         return ret;
     }
-    virtual vector<float> get_param_deriv() const {
+    virtual vector<float> get_param_deriv() {
         vector<float> ret(n_restype*n_state, 0.f);
         for(int nr: range(n_residue)) for(int ns: range(n_state))
             ret[restypes[nr]*n_state+ns] += sens(ns,nr);

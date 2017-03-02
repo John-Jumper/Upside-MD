@@ -93,7 +93,7 @@ struct RamaPlacement {
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return {};}
-    virtual std::vector<float> get_param_deriv() const {return {};}
+    virtual std::vector<float> get_param_deriv() {return {};}
     virtual void set_param(const std::vector<float>& new_param) {}
 #endif
 };
@@ -152,7 +152,7 @@ struct FixedPlacement {
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = data(d,nl);
         return ret;
     }
-    virtual std::vector<float> get_param_deriv() const {
+    virtual std::vector<float> get_param_deriv() {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = param_deriv(d,nl);
         return ret;
@@ -307,7 +307,7 @@ struct PlacementNode: public CoordNode
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return placement_data.get_param();}
-    virtual std::vector<float> get_param_deriv() const {return placement_data.get_param_deriv();}
+    virtual std::vector<float> get_param_deriv() {return placement_data.get_param_deriv();}
     virtual void set_param(const std::vector<float>& new_param) {placement_data.set_param(new_param);}
 #endif
 };

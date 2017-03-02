@@ -297,10 +297,8 @@ struct InteractionGraph{
 
     std::unique_ptr<float[]> pos1_deriv, pos2_deriv;
 
-    #ifdef PARAM_DERIV
     std::vector<Vec<n_param>> edge_param_deriv;
     VecArrayStorage           interaction_param_deriv;
-    #endif
 
     InteractionGraph(hid_t grp, CoordNode* pos_node1_, CoordNode* pos_node2_ = nullptr):
         pos_node1(pos_node1_), pos_node2(pos_node2_),
@@ -337,9 +335,7 @@ struct InteractionGraph{
         pos1_deriv(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             maxint(4,simd_width))),
         pos2_deriv(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, maxint(4,simd_width)))
 
-        #ifdef PARAM_DERIV
         ,interaction_param_deriv(n_param, n_type1*n_type2)
-        #endif
     {
         using namespace h5;
         auto suffix1 = [](const char* base) {return base + std::string(symmetric?"":"1");};
@@ -399,12 +395,15 @@ struct InteractionGraph{
         // printf("using cache_buffer %.2f for %i %i %i\n", new_buffer, n_dim1, n_dim2, int(symmetric));
     }
 
-    #ifdef PARAM_DERIV
     std::vector<float> get_param() const {
         return {interaction_param.get(), interaction_param.get()+n_type1*n_type2*n_param};
     }
 
-    std::vector<float> get_param_deriv() const {
+    std::vector<float> get_param_deriv() {
+        // Re-execute the computation with parameter derivatives on
+        compute_edges<true>();
+        propagate_derivatives<true>();
+
         std::vector<float> ret; ret.reserve(n_type1*n_type2*n_param);
         for(int i: range(n_type1*n_type2))
             for(int d: range(n_param))
@@ -422,7 +421,6 @@ struct InteractionGraph{
         std::copy(begin(new_param), end(new_param), interaction_param.get());
         update_cutoffs();
     }
-    #endif
 
     std::vector<float> count_edges_by_type() {
         // must be called after compute_edges 
@@ -440,6 +438,7 @@ struct InteractionGraph{
         return retval;
     }
 
+    template<bool param_deriv=false>
     void compute_edges() {
         // Copy in the data to packed arrays to ensure contiguity
         {
@@ -463,9 +462,8 @@ struct InteractionGraph{
         // printf("n_edge for n_dim1 %i n_dim2 %i n_elem1 %i n_elem2 %i is %i\n", n_dim1, n_dim2, n_elem1, n_elem2, n_edge);
 
         // Compute edge values
-        #ifdef PARAM_DERIV
-        edge_param_deriv.clear();
-        #endif
+        if(param_deriv)
+            edge_param_deriv.clear();
 
         for(int ne=0; ne<n_edge; ne+=4) {
             auto i1 = Int4(edge_indices1+ne);
@@ -487,29 +485,24 @@ struct InteractionGraph{
             Vec<n_dim1,Float4> d1;
             Vec<n_dim2,Float4> d2;
 
-            // print_vector("i1 ", i1);
-            // print_vector("i2 ", i2);
-            // print_vector("t1 ", t1);
-            // print_vector("t2 ", t2);
-            // print_vector("id1", Int4(edge_id1+ne));
-            // print_vector("id2", Int4(edge_id2+ne));
             IType::compute_edge(d1,d2, interaction_ptr, coord1,coord2).store(edge_value+ne);
             store_vec(edge_deriv + ne*(n_dim1+n_dim2),          d1);
             store_vec(edge_deriv + ne*(n_dim1+n_dim2)+4*n_dim1, d2);
 
-            #ifdef PARAM_DERIV
-            for(int i: range(4)) {
-                Vec<n_dim1> c1; for(int d: range(n_dim1)) c1[d] = extract_float(coord1[d],i);
-                Vec<n_dim2> c2; for(int d: range(n_dim2)) c2[d] = extract_float(coord2[d],i);
+            if(param_deriv) {
+                for(int i: range(4)) {
+                    Vec<n_dim1> c1; for(int d: range(n_dim1)) c1[d] = extract_float(coord1[d],i);
+                    Vec<n_dim2> c2; for(int d: range(n_dim2)) c2[d] = extract_float(coord2[d],i);
 
-                edge_param_deriv.push_back(make_zero<n_param>());
-                IType::param_deriv(edge_param_deriv.back(), interaction_ptr[i], c1,c2);
+                    edge_param_deriv.push_back(make_zero<n_param>());
+                    IType::param_deriv(edge_param_deriv.back(), interaction_ptr[i], c1,c2);
+                }
             }
-            #endif
         }
     }
 
 
+    template<bool param_deriv=false>
     void propagate_derivatives() {
         // Finally put the data where it is needed.
         // This function must be called after the user sets edge_sensitivity
@@ -523,9 +516,8 @@ struct InteractionGraph{
         // Zero accumulation buffers
         fill_n(pos1_deriv, n_elem1*n_dim1a, 0.f);
         if(!symmetric) fill_n(pos2_deriv, n_elem2*n_dim2a, 0.f);
-        #ifdef PARAM_DERIV
-        fill(interaction_param_deriv, 0.f);
-        #endif
+        if(param_deriv)
+            fill(interaction_param_deriv, 0.f);
 
         // Accumulate derivatives
         for(int ne=0; ne<n_edge; ne+=4) {
@@ -539,13 +531,13 @@ struct InteractionGraph{
             aligned_scatter_update_vec_destructive(pos1_deriv.get(),                       i1*Int4(n_dim1a), d1);
             aligned_scatter_update_vec_destructive((symmetric?pos1_deriv:pos2_deriv).get(),i2*Int4(n_dim2a), d2);
 
-            #ifdef PARAM_DERIV
-            for(int i: range(4)) {
-                int t1 = types1[edge_indices1[ne+i]];
-                int t2 = types2[edge_indices2[ne+i]];
-                update_vec(interaction_param_deriv, t1*n_type2+t2, extract_float(sens,i)*edge_param_deriv[ne+i]);
+            if(param_deriv) {
+                for(int i: range(4)) {
+                    int t1 = types1[edge_indices1[ne+i]];
+                    int t2 = types2[edge_indices2[ne+i]];
+                    update_vec(interaction_param_deriv, t1*n_type2+t2, extract_float(sens,i)*edge_param_deriv[ne+i]);
+                }
             }
-            #endif
         }
 
         // Push derivatives to slots
