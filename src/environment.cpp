@@ -100,11 +100,11 @@ struct EnvironmentCoverage : public CoordNode {
         igraph.propagate_derivatives();
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 };
 static RegisterNodeType<EnvironmentCoverage,2> environment_coverage_node("environment_coverage");
 
@@ -194,7 +194,6 @@ struct UniformTransform : public CoordNode {
             input.sens(0,ne) += jac[ne]*sens(0,ne);
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override{
         vector<float> ret(2+n_coeff);
         ret[0] = spline_offset;
@@ -203,6 +202,7 @@ struct UniformTransform : public CoordNode {
         return ret;
     }
 
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {
         vector<float> ret(2+n_coeff, 0.f);
         int starting_bin;
@@ -218,6 +218,7 @@ struct UniformTransform : public CoordNode {
         }
         return ret;
     }
+#endif
 
     virtual void set_param(const std::vector<float>& new_param) override {
         if(new_param.size() < size_t(2+4)) throw string("too small of size for spline");
@@ -230,7 +231,6 @@ struct UniformTransform : public CoordNode {
         spline_inv_dx = new_param[1];
         copy_n(begin(new_param)+2, n_coeff, bspline_coeff.get());
     }
-#endif
 };
 static RegisterNodeType<UniformTransform,1> uniform_transform_node("uniform_transform");
 
@@ -294,11 +294,11 @@ struct LinearCoupling : public PotentialNode {
         potential = pot;
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {
         return couplings;
     }
 
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {
         vector<float> deriv(couplings.size(), 0.f);
 
@@ -309,13 +309,13 @@ struct LinearCoupling : public PotentialNode {
         }
         return deriv;
     }
+#endif
 
     virtual void set_param(const std::vector<float>& new_param) override {
         if(new_param.size() != couplings.size())
             throw string("attempting to change size of couplings vector on set_param");
         copy(begin(new_param),end(new_param), begin(couplings));
     }
-#endif
 };
 static RegisterNodeType<LinearCoupling,1> linear_coupling_node1("linear_coupling_uniform");
 static RegisterNodeType<LinearCoupling,2> linear_coupling_node2("linear_coupling_with_inactivation");
@@ -368,11 +368,11 @@ struct NonlinearCoupling : public PotentialNode {
         potential = pot;
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {
         return coeff;
     }
 
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {
         vector<float> deriv(coeff.size(), 0.f);
 
@@ -386,13 +386,13 @@ struct NonlinearCoupling : public PotentialNode {
         }
         return deriv;
     }
+#endif
 
     virtual void set_param(const std::vector<float>& new_param) override {
         if(new_param.size() != coeff.size())
             throw string("attempting to change size of coeff vector on set_param");
         copy(begin(new_param),end(new_param), begin(coeff));
     }
-#endif
 };
 static RegisterNodeType<NonlinearCoupling,1> nonlinear_coupling_node("nonlinear_coupling");
 

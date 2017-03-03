@@ -1044,10 +1044,6 @@ struct RotamerSidechain: public PotentialNode {
         calculate_new_beliefs(0.f, true);
         float max_deviation = 1e10f;
         int iter = 0;
-        // for(int i: range(nodes3.n_elem)) for(int j: range(3)) printf("nodes3 %i %i %.2f\n", i,j, nodes3.cur_belief(i,j));
-        // for(int i: range(nodes6.n_elem)) for(int j: range(6)) printf("nodes6 %i %i %.2f\n", i,j, nodes6.cur_belief(i,j));
-        // for(int i: range(edges33.nodes_to_edge.n_edge)) for(int j: range(6)) printf("edges33 %i %i %.2f\n", i,j, edges33.cur_belief(i,j));
-        // for(int i: range(5)) for(int j: range(10)) printf("edges36 %i %i %i %.2f\n", i,j, i*12+j, edges36.cur_belief(i,j));
 
         for(; max_deviation>tol && iter<max_iter; iter+=iteration_chunk_size) {
             for(int j=0; j<iteration_chunk_size; ++j) {
@@ -1072,11 +1068,11 @@ struct RotamerSidechain: public PotentialNode {
         return make_pair(iter, max_deviation);
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 };
 
 template <typename BT>

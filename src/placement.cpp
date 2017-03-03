@@ -91,11 +91,11 @@ struct RamaPlacement {
         update_vec(r_sens, params[ne].rama_residue, rd);
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return {};}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() {return {};}
-    virtual void set_param(const std::vector<float>& new_param) {}
 #endif
+    virtual void set_param(const std::vector<float>& new_param) {}
 };
 
 
@@ -146,23 +146,24 @@ struct FixedPlacement {
         #endif
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = data(d,nl);
         return ret;
     }
+
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) ret[nl*n_pos_dim+d] = param_deriv(d,nl);
         return ret;
     }
+#endif
 
     virtual void set_param(const std::vector<float>& new_param) {
         if(new_param.size() != size_t(n_layer*n_pos_dim)) throw string("wrong param size");
         for(int nl: range(n_layer)) for(int d: range(n_pos_dim)) data(d,nl) = new_param[nl*n_pos_dim+d];
     }
-#endif
 };
 
 
@@ -305,11 +306,11 @@ struct PlacementNode: public CoordNode
       }
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return placement_data.get_param();}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() {return placement_data.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) {placement_data.set_param(new_param);}
 #endif
+    virtual void set_param(const std::vector<float>& new_param) {placement_data.set_param(new_param);}
 };
 
 // There is definitely too much template code generation here.  I should

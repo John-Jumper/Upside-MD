@@ -11,6 +11,7 @@
 #include "random.h"
 #include "state_logger.h"
 #include <csignal>
+#include <map>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -369,16 +370,29 @@ try {
     SwitchArg disable_signal_handler_arg("", "disable-signal-handler",
             "(developer use only) disable signal handler for SIGINT and SIGTERM.  This does not affect the simulation "
             "and is for developer use only.", cmd, false);
+    ValueArg<string> set_param_arg("", "set-param", "Developer use only", false, "", "param_arg", cmd);
     UnlabeledMultiArg<string> config_args("config_files","configuration .h5 files", true, "h5_files");
     cmd.add(config_args);
     cmd.parse(argc, argv);
 
     try {
-
-        printf("invocation:");
+        printf("invocation: ");
         std::string invocation(argv[0]);
         for(auto arg=argv+1; arg!=argv+argc; ++arg) invocation += string(" ") + *arg;
         printf("%s\n", invocation.c_str());
+
+        map<string,vector<float>> set_param_map;
+        if(set_param_arg.getValue().size()) {
+            auto param_file = h5_obj(H5Fclose, H5Fopen(set_param_arg.getValue().c_str(),
+                        H5F_ACC_RDONLY, H5P_DEFAULT));
+
+            for(const string& node_name: node_names_in_group(param_file.get(), ".")) {
+                set_param_map[node_name] = vector<float>();
+                auto& values = set_param_map[node_name];
+                traverse_dset<1,float>(param_file.get(), node_name.c_str(), [&](size_t i, float x) {
+                        values.push_back(x);});
+            }
+        }
 
         float dt = time_step_arg.getValue();
         double duration = duration_arg.getValue();
@@ -474,6 +488,10 @@ try {
 
             auto potential_group = open_group(sys->config.get(), "/input/potential");
             sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get());
+
+            // Override parameters as instructed by users
+            for(const auto& p: set_param_map)
+                sys->engine.get(p.first).computation->set_param(p.second);
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
                     sys->engine.pos->output(d,na) = x;});

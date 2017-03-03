@@ -41,9 +41,9 @@ struct DerivComputation
     virtual void compute_value(ComputeMode mode)=0;
     virtual void propagate_deriv() =0;
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const {return std::vector<float>();}
     virtual void set_param(const std::vector<float>& new_params) {}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() {return std::vector<float>();}
 #endif
     virtual std::vector<float> get_value_by_name(const char* log_name) {

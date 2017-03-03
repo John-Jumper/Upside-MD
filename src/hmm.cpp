@@ -204,14 +204,14 @@ struct FixedHMM : public PotentialNode
         // tback.stop();
     }
 
-#ifdef PARAM_DERIV
     virtual vector<float> get_param() const override {return copy_eigen_to_stl(transition_energy);}
+#ifdef PARAM_DERIV
     virtual vector<float> get_param_deriv() override {return copy_eigen_to_stl(edge_transition_counts);}
+#endif
     virtual void set_param(const vector<float>& new_param) override {
         copy_stl_to_eigen(transition_energy,new_param);
         update_transition_matrix_from_transition_energy();
     }
-#endif
 };
 static RegisterNodeType<FixedHMM,1> fixed_hmm_node("fixed_hmm");
 
@@ -332,19 +332,20 @@ struct TorusDBN_Emission : public CoordNode {
         }
     }
 
-#ifdef PARAM_DERIV
     virtual vector<float> get_param() const {
         vector<float> ret(n_restype*n_state);
         for(int nrt: range(n_restype)) for(int ns: range(n_state))
             ret[nrt*n_state+ns] = prior_offset_energies(ns,nrt);
         return ret;
     }
+#ifdef PARAM_DERIV
     virtual vector<float> get_param_deriv() {
         vector<float> ret(n_restype*n_state, 0.f);
         for(int nr: range(n_residue)) for(int ns: range(n_state))
             ret[restypes[nr]*n_state+ns] += sens(ns,nr);
         return ret;
     }
+#endif
     virtual void set_param(const vector<float>& new_param) {
         if(new_param.size() != size_t(n_restype*n_state))
             throw string("Invalid dimensions for prior energy table");
@@ -353,6 +354,5 @@ struct TorusDBN_Emission : public CoordNode {
             prior_offset_energies(ns,nrt) = new_param[nrt*n_state+ns];
         update_prior_offset();
     }
-#endif
 };
 static RegisterNodeType<TorusDBN_Emission,1> torus_dbn_node("torus_dbn");

@@ -397,11 +397,11 @@ struct HBondCoverage : public CoordNode {
         igraph.propagate_derivatives();
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
-    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 #endif
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 
     virtual vector<float> get_value_by_name(const char* log_name) override {
         if(!strcmp(log_name, "count_edges_by_type")) {
@@ -443,13 +443,14 @@ struct HBondEnergy : public HBondCounter
         n_hbond = tot_hb;
     }
 
-#ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {return vector<float>(1,E_protein);}
+#ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() override {return vector<float>(1,float(n_hbond));}
+#endif
     virtual void set_param(const std::vector<float>& new_param) override {
-        if(new_param.size() != 1u) throw string("expected 1 param to hbond_energy but got "+to_string(new_param.size()));
+        if(new_param.size() != 1u) throw string("expected 1 param to hbond_energy but got "+
+                to_string(new_param.size()));
         E_protein = new_param[0];
     }
-#endif
 };
 static RegisterNodeType<HBondEnergy,1> hbond_energy_node("hbond_energy");
