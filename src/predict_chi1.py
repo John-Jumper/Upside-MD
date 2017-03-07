@@ -61,18 +61,23 @@ def main():
     src = os.path.expanduser('~/upside/src')
     sys.path.append(src)
     import upside_engine as ue
-    sidechain_file, pdb_file, chain, output_file = sys.argv[1:]
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sidechain-param', help='Parameter file for side chains', required=True)
+    parser.add_argument('--chain', default=None, help='Only load specific chain')
+    parser.add_argument('pdb_input',  help='Input pdb file')
+    parser.add_argument('chi_output', help='Output chi file')
+    args = parser.parse_args()
+
     direc = tempfile.mkdtemp()
 
-    predictor = Chi1Predict(sidechain_file)
+    predictor = Chi1Predict(args.sidechain_param)
 
     try:
         base_initial = os.path.join(direc, 'initial_test')
-        sp.check_call([
-            os.path.join(src, 'PDB_to_initial_structure.py'),
-            '--chains', chain,
-            '--allow-unexpected-chain-breaks',
-            pdb_file, base_initial])
+        sp.check_call([os.path.join(src, 'PDB_to_initial_structure.py')] +
+                (['--chain=%s'%args.chain] if args.chain is not None else []) +
+                ['--allow-unexpected-chain-breaks', args.pdb_input, base_initial])
 
         config = os.path.join(direc, 'config.h5')
         sp.check_call([
@@ -81,8 +86,8 @@ def main():
                 '--initial-structures=%s.initial.pkl'%base_initial,
                 '--loose-hbond-criteria',  # handle poor hbond geometry in some crystal structures
                 '--dynamic-rotamer-1body',
-                '--rotamer-placement=%s'%sidechain_file, 
-                '--rotamer-interaction=%s'%sidechain_file, 
+                '--rotamer-placement=%s'  %args.sidechain_param,
+                '--rotamer-interaction=%s'%args.sidechain_param,
                 '--debugging-only-disable-basic-springs',
                 '--no-backbone',
                 '--hbond-energy=-1e-5',
@@ -110,7 +115,7 @@ def main():
     chi1_prob_array = predictor.predict_chi1(seq, residue, sens)
 
     assert len(chi1_true) == len(seq)
-    with open(output_file,'wt') as f:
+    with open(args.chi_output,'wt') as f:
         print >>f, 'residue restype chain resnum chi1_prob0 chi1_prob1 chi1_prob2 chi1_from_input_file'
         for resnum in range(len(seq)):
             print >>f, '%i %s %s %s %.4f %.4f %.4f %.1f' % (
