@@ -37,6 +37,7 @@ def stop_upside_gently(process, allowed_termination_seconds=60.):
 
 
 def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True, 
+                  target='',
                   sidechain=False, hbond=None, sheet_mix_energy=None, helical_energy_shift=None,
                   sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, 
                   rama_pot=params_dir+'rama_libraries.h5',
@@ -57,6 +58,8 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
 
     if init:
         args.append('--initial-structures=%s'%init)
+    if target:
+        args.append('--target-structure=%s'%target)
     if torus_dbn is not None:
         args.append('--torus-dbn-library=%s'%torus_dbn)
     if rama_pot is not None:
