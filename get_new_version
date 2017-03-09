@@ -1,8 +1,0 @@
-#!/bin/bash
-
-set -e
-script_path="`dirname $0`"  # find this script
-cd "$script_path/obj"  # go to obj/ subdirectory
-
-git pull  # obtain new source code
-make -j4               # compile the code with 4 processors
