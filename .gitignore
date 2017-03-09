@@ -1,7 +1,6 @@
 run/
 bin/
 data/
-analysis/
 doc/
 *~
 *.swp
@@ -13,7 +12,6 @@ a.out
 *.o
 *.i
 *.s
-obj/
 .clang_complete
 CMakeCache.txt
 CMakeFiles/
