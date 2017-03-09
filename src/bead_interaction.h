@@ -4,6 +4,28 @@
 #include "vector_math.h"
 #include "spline.h"
 
+// Due to a cascade of requirements because I made n_param essentially a template parameter
+// of InteractionGraph (as a constexpr member of IType), I have to switch out the number of 
+// knots for the various splines using the preprocessor defines.  This is poor practice
+// FIXME Make n_param and the various n_knots proper runtime flags, probably by making sure
+// that InteractionGraph receives an IType object rather than just using it as a namespace.
+#if defined(PARAM_OLD)
+    #define N_KNOT_SC_SC   16
+    #define N_KNOT_SC_BB   12
+    #define N_KNOT_ANGULAR 15
+    #define KNOT_SPACING   0.5f
+#elif defined(PARAM_10A_CUTOFF)
+    #define N_KNOT_SC_SC   12
+    #define N_KNOT_SC_BB   12
+    #define N_KNOT_ANGULAR 8
+    #define KNOT_SPACING   1.f
+#else
+    #define N_KNOT_SC_SC   9
+    #define N_KNOT_SC_BB   7
+    #define N_KNOT_ANGULAR 8
+    #define KNOT_SPACING   1.f
+#endif
+
 namespace {
     template<int n_knot_angular, int n_knot, int n_dim1, int n_dim2>
         inline Float4 quadspline(
@@ -117,7 +139,7 @@ namespace {
 
         constexpr static float inv_dx = 1.f/0.50f;  // half-angstrom bins
         constexpr static bool  symmetric = true;
-        constexpr static int   n_param=16, n_dim1=3, n_dim2=3, simd_width=1;  // 8 angstrom cutoff
+        constexpr static int   n_param=N_KNOT_SC_SC, n_dim1=3, n_dim2=3, simd_width=1;  // 8 angstrom cutoff
 
         static float cutoff(const float* p) {
             return (n_param-2-1e-6)/inv_dx;  // 1e-6 just insulates us from round-off error
@@ -162,9 +184,9 @@ namespace {
         // first group is donors; second group is acceptors
 
         constexpr static bool  symmetric = true;
-        constexpr static int   n_knot = 16, n_knot_angular=15;
+        constexpr static int   n_knot = N_KNOT_SC_SC, n_knot_angular=N_KNOT_ANGULAR;
         constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=6, n_dim2=6, simd_width=1;
-        constexpr static float inv_dx = 1.f/0.5f, inv_dtheta = (n_knot_angular-3)/2.f;
+        constexpr static float inv_dx = 1.f/KNOT_SPACING, inv_dtheta = (n_knot_angular-3)/2.f;
 
         static float cutoff(const float* p) {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff

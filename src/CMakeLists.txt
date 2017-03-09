@@ -55,8 +55,7 @@ add_library(upside_calculation SHARED
     engine_c_library.cpp
     ${ENGINE_SRC})
 
-set_target_properties(upside_calculation PROPERTIES
-    COMPILE_FLAGS "-DPARAM_DERIV")
+set_target_properties(upside_calculation PROPERTIES COMPILE_FLAGS "-DPARAM_DERIV")
 
 target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 
