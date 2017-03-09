@@ -98,7 +98,7 @@ def main():
             seq = t.root.input.sequence[:]
             residue = t.root.input.potential.placement_fixed_point_vector_only.affine_residue[:]
 
-        engine = ue.Upside(pos.shape[0], config)
+        engine = ue.Upside(config)
         
         t0 = time.time()
         engine.energy(pos)

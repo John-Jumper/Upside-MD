@@ -57,7 +57,7 @@ class UpsideEnergy(object):
                 d['chi1_state'] = predict_chi1.compute_chi1_state(chi1_true.chi1.as_matrix()*deg)
                 d['chi1_residue'] = chi1_true.residue.as_matrix()
                 # d['chi1'] = chi1_true.chi1.as_matrix()
-            d['engine'] = ue.Upside(d['pos'].shape[0], path)
+            d['engine'] = ue.Upside(path)
             self.systems[name] = d
 
         self.grad_name = None

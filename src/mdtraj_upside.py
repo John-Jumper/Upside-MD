@@ -193,7 +193,8 @@ def compute_upside_values(config_path, traj, outputs=dict(), named_values=dict()
     if len(ret) != 1+len(outputs)+len(named_values):
         raise RuntimeError('Some of the output or value names are repeated')
 
-    engine = ue.Upside(pos.shape[1], config_path)
+    engine = ue.Upside(config_path)
+    assert engine.n_atom == pos.shape[1]
     for x in pos:
         # must compute energy before any other quantities
         ret['energy'].append(engine.energy(x))

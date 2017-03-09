@@ -143,9 +143,12 @@ def clamped_coeff_deriv(bspline_coeff, x):
 
 
 class Upside(object):
-    def __init__(self, n_atom, config_file_path, quiet=True):
+    def __init__(self, config_file_path, quiet=True):
         self.config_file_path = str(config_file_path)
-        self.n_atom = int(n_atom)
+        with tb.open_file(self.config_file_path) as t:
+            self.initial_pos = t.root.input.pos[:,:,0]
+            self.n_atom = self.initial_pos.shape[0]
+            self.sequence = t.root.input.sequence[:]
         self.engine = calc.construct_deriv_engine(self.n_atom, self.config_file_path, bool(quiet))
         if self.engine is None: raise RuntimeError('Unable to initialize upside engine')
 
@@ -235,10 +238,9 @@ def freeze_nodes(new_h5_path, old_h5_path, nodes_to_freeze, additional_nodes_to_
     '''Replace computation nodes with constant nodes that give the same answer on the initial structure'''
     shutil.copyfile(old_h5_path, new_h5_path)
 
-    with tb.open_file(old_h5_path) as to:
-        pos = to.root.input.pos[:,:,0]
+    engine = Upside(old_h5_path)
+    pos = engine.initial_pos
 
-    engine = Upside(pos.shape[0], old_h5_path)
     en = engine.energy(pos)  # required to fill output
     if not quiet: print 'energy', en
     freeze = dict((nm,engine.get_output(nm)) for nm in nodes_to_freeze)
@@ -257,5 +259,5 @@ def freeze_nodes(new_h5_path, old_h5_path, nodes_to_freeze, additional_nodes_to_
                     [('constant_'+nm if nm in freeze else nm) 
                         for nm in node._v_attrs.arguments])
 
-    new_en = Upside(pos.shape[0], new_h5_path).energy(pos)
+    new_en = Upside(new_h5_path).energy(pos)
     if not quiet: print 'new_energy', new_en
