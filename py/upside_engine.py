@@ -5,7 +5,7 @@ import tables as tb
 import os
 import time
 
-calc = ct.cdll.LoadLibrary(os.path.expanduser('~/upside/obj/libupside_calculation.so'))
+calc = ct.cdll.LoadLibrary(os.path.expanduser('~/upside/obj/libupside.so'))
 
 calc.construct_deriv_engine.restype  = ct.c_void_p
 calc.construct_deriv_engine.argtypes = [ct.c_int, ct.c_char_p, ct.c_bool]

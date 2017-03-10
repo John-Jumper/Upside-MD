@@ -7,11 +7,7 @@ find_package(OpenMP QUIET)
 
 set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler")
 
-if(${OLD_DWARF_FORMAT})
-    set(DEBUG_FLAGS "-gdwarf-3")
-else()
-    set(DEBUG_FLAGS "-g")
-endif()
+set(DEBUG_FLAGS "-g")
 
 set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
@@ -55,32 +51,11 @@ add_library(upside_calculation SHARED
     engine_c_library.cpp
     ${ENGINE_SRC})
 
-set_target_properties(upside_calculation PROPERTIES COMPILE_FLAGS "-DPARAM_DERIV")
+set_target_properties(upside_calculation PROPERTIES
+    COMPILE_FLAGS "-DPARAM_DERIV"
+    OUTPUT_NAME   "upside")
 
 target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
-
-add_custom_target(support ALL COMMENT "Creating supporting executables")
-
-macro(python_executable TARGET FILENAME)
-    string(REGEX REPLACE "\\.py$" "" PYTHON_NEW_NAME ${FILENAME})
-    add_custom_command(
-	OUTPUT   ${PYTHON_NEW_NAME}
-	COMMAND  ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME}
-	DEPENDS  ${FILENAME})
-    add_custom_target(${PYTHON_NEW_NAME}_PYTHON DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON_NEW_NAME})
-    add_dependencies(${TARGET} ${PYTHON_NEW_NAME}_PYTHON)
-endmacro(python_executable)
-
-python_executable(support add_target_information.py)
-python_executable(support sim_timeseries.py)
-python_executable(support predict_chi1.py)
-python_executable(support upside_config.py)
-python_executable(support extract_vtf.py)
-python_executable(support PDB_to_initial_structure.py)
-python_executable(support P_of_r.py)
-python_executable(support attr_overview.py)
-python_executable(support ugly_hack_break_chain.py)
-python_executable(support estimate_rama_distributions.py)
 
 add_executable(compute_rotamer_centers generate_from_rotamer.cpp compute_rotamer_centers.cpp h5_support.cpp)
 target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
