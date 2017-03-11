@@ -38,7 +38,7 @@ following paper tags have been created.
 
 To get the precise version of Upside needed for the side chain free energy
 paper, just do `git checkout sidechain_paper`.  Note that you should ignore the
-rest of this README, and consult README.md after checking out the tagged
+rest of this ignore, and consult `README.md` after checking out the tagged
 version.  The compile or run instructions may be different between the versions.
 
 External users of Upside are encourage to tag the version used in their work
@@ -121,6 +121,9 @@ evaluation for the same structure in part because Upside must calculate pair
 lists for the first time.  
 
 #### Running molecular dynamics
+
+The following sections illustrate running simple molecular dynamics simulations
+with Upside.
 
 ### Converting a PDB file to Upside input
 
