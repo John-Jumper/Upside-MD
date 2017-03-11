@@ -19,3 +19,5 @@ CMakeFiles/
 *.bak
 *.DS_Store
 ._*
+.ycm_extra_conf.py
+compile_commands.json
