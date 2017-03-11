@@ -1146,8 +1146,6 @@ def main():
             usage='use "%(prog)s --help" for more information')
     parser.add_argument('--fasta', required=True,
             help='[required] FASTA sequence file')
-    parser.add_argument('--n-system', type=int, default=1, required=False,
-            help='[required] number of systems to prepare')
     parser.add_argument('--output', default='system.h5', required=True,
             help='path to output the created .h5 file (default system.h5)')
     parser.add_argument('--target-structure', default='',
@@ -1160,7 +1158,7 @@ def main():
     parser.add_argument('--dynamic-rotamer-placement', default=False, action='store_true',
             help='Use dynamic rotamer placement (not recommended)')
     parser.add_argument('--dynamic-rotamer-1body', default=False, action='store_true',
-            help='Use dynamic rotamer 1body (not recommended)')
+            help='Use dynamic rotamer 1body')
     parser.add_argument('--fix-rotamer', default='',
             help='Table of fixed rotamers for specific sidechains.  A header line must be present and the first '+
             'three columns of that header must be '+
@@ -1186,8 +1184,8 @@ def main():
     parser.add_argument('--rama-library-combining-rule', default='mixture',
             help='How to combine left and right coil distributions in Rama library '+
             '(mixture or product).  Default is mixture.')
-    parser.add_argument('--torus-dbn-library', default='',
-            help='TorusDBN Rama probability function')
+    # parser.add_argument('--torus-dbn-library', default='',
+    #         help='TorusDBN Rama probability function')
     parser.add_argument('--rama-sheet-library', default=None,
             help='smooth Rama probability library for sheet structures')
     parser.add_argument('--secstr-bias', default='',
@@ -1217,8 +1215,8 @@ def main():
             'must contain "residue tension_x tension_y tension_z".  The residue will be pulled in the '+
             'direction (tension_x,tension_y,tension_z) by its CA atom.  The magnitude of the tension vector '+
             'sets the force.  Units are kT/Angstrom.')
-    parser.add_argument('--initial-structures', default='',
-            help='Pickle file for initial structures for the simulation.  ' +
+    parser.add_argument('--initial-structure', default='',
+            help='Pickle file for initial structure for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
             'requested, structures will be recycled.  If not provided, a ' +
             'freely-jointed chain with good bond lengths and angles but bad dihedrals will be used ' +
@@ -1296,8 +1294,7 @@ def main():
     require_rama = False
     require_backbone_point = False
 
-    global n_system, n_atom, t, potential
-    n_system = args.n_system
+    global n_atom, t, potential
     n_res = len(fasta_seq)
     n_atom = 3*n_res
     
@@ -1320,9 +1317,11 @@ def main():
         f()
 
 
-    pos = np.zeros((n_atom, 3, n_system), dtype='f4')
-    for i in range(n_system):
-        pos[:,:,i] = init_pos[...,i%init_pos.shape[-1]] if args.initial_structures else random_initial_config(len(fasta_seq))
+    pos = np.zeros((n_atom, 3, 1), dtype='f4')
+    if args.initial_structures:
+        pos[:,:,0] = init_pos[...,i%init_pos.shape[-1]] 
+    else:
+        pos[:,:,0] = random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)
 
     potential = t.create_group(input,  'potential')
@@ -1399,10 +1398,9 @@ def main():
         require_rama = True
         write_rama_map_pot(fasta_seq_with_cpr, args.rama_library, args.rama_sheet_mixing_energy,
                 args.secstr_bias, args.rama_library_combining_rule)
-
-    elif args.torus_dbn_library:
-        require_rama = True
-        write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)
+    # elif args.torus_dbn_library:
+    #     require_rama = True
+    #     write_torus_dbn(fasta_seq_with_cpr, args.torus_dbn_library)
     else:
         print>>sys.stderr, 'WARNING: running without any Rama potential !!!'
 
@@ -1486,21 +1484,22 @@ def main():
                                      [0.,-1.,0.], [0.,1.,0.],
                                      [0.,0.,-1.], [0.,0.,1.],])
             if not has_rl_info: # separate all chains
-                for i in xrange(n_system):
-                    for j in xrange(n_chains):
-                        first_res, next_first_res = chain_endpts(n_res, chain_first_residue, j)
-                        #com = pos[first_res*3:next_first_res*3,:,0].mean(axis=0)
-                        pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[j]*0.5*args.cavity_radius #- displacement[j]*com
+                for j in xrange(n_chains):
+                    first_res, next_first_res = chain_endpts(n_res, chain_first_residue, j)
+                    #com = pos[first_res*3:next_first_res*3,:,0].mean(axis=0)
+                    pos[first_res*3:next_first_res*3,:,0] = (pos[first_res*3:next_first_res*3,:,0] +
+                            displacement[j]*0.5*args.cavity_radius) #- displacement[j]*com
             else: # keep receptor and ligand chains together
-                for i in xrange(n_system):
-                    # move receptor chains
-                    first_res = chain_endpts(n_res, chain_first_residue, 0)[0]
-                    next_first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0]-1)[1]
-                    pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[0]*0.5*args.cavity_radius
-                    # move ligand chains
-                    first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0])[0]
-                    next_first_res = chain_endpts(n_res, chain_first_residue, n_chains-1)[1]
-                    pos[first_res*3:next_first_res*3,:,i] = pos[first_res*3:next_first_res*3,:,i] + displacement[1]*0.5*args.cavity_radius
+                # move receptor chains
+                first_res = chain_endpts(n_res, chain_first_residue, 0)[0]
+                next_first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0]-1)[1]
+                pos[first_res*3:next_first_res*3,:,i] = (pos[first_res*3:next_first_res*3,:,0] +
+                        displacement[0]*0.5*args.cavity_radius)
+                # move ligand chains
+                first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0])[0]
+                next_first_res = chain_endpts(n_res, chain_first_residue, n_chains-1)[1]
+                pos[first_res*3:next_first_res*3,:,0] = (pos[first_res*3:next_first_res*3,:,0] +
+                        displacement[1]*0.5*args.cavity_radius)
             t.root.input.pos[:] = pos
             target = pos.copy()
 

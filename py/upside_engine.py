@@ -5,7 +5,18 @@ import tables as tb
 import os
 import time
 
-calc = ct.cdll.LoadLibrary(os.path.expanduser('~/upside/obj/libupside.so'))
+# We have to do a dirty trick to get the correct path to libupside.so
+# It is likely possible to modify the build system to drop a config file 
+# that contains the necessary paths.  Since I do a lot of work concurrently
+# in the source tree, I don't want to depend on the build system to copy the
+# python executables into obj/.  This would make it easy not to commit changes
+# back when live-editing.
+
+# FIXME This could fail if the user links directly into the py directory
+# instead of going through upside/py.  
+py_source_dir = os.path.dirname(__file__)
+obj_dir = os.path.join(py_source_dir, '..', 'obj')
+calc = ct.cdll.LoadLibrary(os.path.join(obj_dir, 'libupside.so'))
 
 calc.construct_deriv_engine.restype  = ct.c_void_p
 calc.construct_deriv_engine.argtypes = [ct.c_int, ct.c_char_p, ct.c_bool]

@@ -6,8 +6,11 @@ import os, sys
 import json,uuid
 import time
 
-params_dir = os.path.expanduser('~/upside-parameters/')
-upside_dir = os.path.expanduser('~/upside/')
+# FIXME This assumes that upside-parameters is a sibling of upside in the 
+# directory structure.  Later, I will move the parameter directory into the
+# upside tree.
+py_source_dir = os.path.dirname(__file__)
+upside_dir = os.path.expanduser(os.path.join(py_source_dir,'..'))
 
 def stop_upside_gently(process, allowed_termination_seconds=60.):
     # Upside checks for sigterm periodically, then writes buffered frames and exits with a 
@@ -36,19 +39,24 @@ def stop_upside_gently(process, allowed_termination_seconds=60.):
         pass
 
 
-def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True, 
+def upside_config(fasta,
+                  output,
+                  backbone=True,
                   target='',
-                  sidechain=False, hbond=None, sheet_mix_energy=None, helical_energy_shift=None,
-                  sidechain_scale=None, inverse_scale=0., inverse_radius_scale=None, init=None, 
-                  rama_pot=params_dir+'rama_libraries.h5',
+                  hbond=None,
+                  sheet_mix_energy=None,
+                  init='', 
+                  rama_pot=None,
                   fix_rotamer = '',
                   dynamic_1body = False,
-                  environment=None,
-                  torus_dbn = None,
-                  placement=params_dir+'rotamer-extended-with-direc.h5',
-                  reference_rama=None, restraint_groups=[], restraint_spring=None, hbond_coverage_radius=None,
-                  rotamer_interaction_param='/home/jumper/optimized_param4_env.h5',
-                  contacts='', secstr_bias='',
+                  environment='',
+                  placement='',
+                  reference_rama='',
+                  restraint_groups=[],
+                  restraint_spring=None,
+                  rotamer_interaction_param='',
+                  contacts='',
+                  secstr_bias='',
                   chain_break_from_file='',
                   debugging_only_heuristic_cavity_radius=False,
                   cavity_radius_from_config='',
@@ -60,16 +68,10 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
         args.append('--initial-structures=%s'%init)
     if target:
         args.append('--target-structure=%s'%target)
-    if torus_dbn is not None:
-        args.append('--torus-dbn-library=%s'%torus_dbn)
     if rama_pot is not None:
         args.append('--rama-library=%s'%rama_pot)
     if sheet_mix_energy is not None:
         args.append('--rama-sheet-mixing-energy=%f'%sheet_mix_energy)
-    if helical_energy_shift is not None:
-        args.append('--helical-energy-shift=%f'%helical_energy_shift)
-    if dimer:
-        args.append('--dimer-basin-library=%s'%(params_dir+'TCB_count_matrices.pkl'))
     if not backbone:
         args.append('--no-backbone')
     if hbond:
@@ -81,11 +83,11 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
     if restraint_spring is not None:
         args.append('--restraint-spring-constant=%f'%restraint_spring)
         
-    if rotamer:
+    if rotamer_interaction_param:
         args.append('--rotamer-placement=%s'%placement)
     if dynamic_1body:
         args.append('--dynamic-rotamer-1body')
-    if rotamer:
+    if rotamer_interaction_param:
         args.append('--rotamer-interaction=%s'%rotamer_interaction_param)
     if fix_rotamer:
         args.append('--fix-rotamer=%s'%fix_rotamer)
@@ -93,17 +95,10 @@ def upside_config(fasta, output, dimer=False, backbone=True, rotamer=True,
     if environment:
         args.append('--environment=%s'%environment)
     
-    if sidechain:
-        args.append('--sidechain-radial=%s'%(params_dir+'radial-MJ-1996.h5'))
     if secstr_bias:
         args.append('--secstr-bias=%s'%secstr_bias)
     if contacts:
         args.append('--contact-energies=%s'%contacts)
-    if sidechain_scale is not None: 
-        args.append('--sidechain-radial-scale-energy=%f'%sidechain_scale)
-    if inverse_scale: 
-        args.append('--sidechain-radial-scale-inverse-energy=%f'%inverse_scale)
-        args.append('--sidechain-radial-scale-inverse-radius=%f'%inverse_radius_scale)
 
     if chain_break_from_file:
         args.append('--chain-break-from-file=%s'%chain_break_from_file)
@@ -140,7 +135,7 @@ class UpsideJob(object):
 def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=None, temperature=1., seed=None,
                replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
-               log_level='detailed', account=None, disable_recentering=False):
+               log_level='basic', account=None, disable_recentering=False):
     if isinstance(config,str): config = [config]
     
     upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
@@ -290,7 +285,6 @@ def read_constant_hb(tr, n_res):
     hb[:,acc_res,1,2] = 1.-hb_raw[:,len(don_res):].sum(axis=-1)
     
     return hb
-    
 
 
 def rmsd_transform(target, model):

@@ -21,7 +21,6 @@ include_directories(SYSTEM "include")
 set (ENGINE_SRC 
     main.cpp
     environment.cpp
-    hmm.cpp
     hbond.cpp 
     rotamer.cpp
     placement.cpp
@@ -29,7 +28,7 @@ set (ENGINE_SRC
     spline.cpp
     deriv_engine.cpp 
     sidechain_radial.cpp
-    nonbond.cpp 
+    backbone_steric.cpp 
     bonds.cpp 
     eig.cpp 
     membrane_potential.cpp
