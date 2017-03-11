@@ -143,12 +143,12 @@ configuration, `simulation.up`.
     upside/py/upside_config.py --output                simulation.up \
                                --fasta                 output_basename.fasta \
                                --initial-structure     output_basename.initial.pkl \
-			       --hbond-energy          -1.8 \
-			       --dynamic-rotamer-1body \
+                               --hbond-energy          -1.8 \
+                               --dynamic-rotamer-1body \
                                --rotamer-placement     upside/parameters/sidechain.h5 \
-			       --rotamer-interaction   upside/parameters/sidechain.h5 \
-			       --rama-library          upside/parameters/rama_libraries.h5 \
-			       --reference-state-rama  upside/parameters/reference_state_rama.pkl
+                               --rotamer-interaction   upside/parameters/sidechain.h5 \
+                               --rama-library          upside/parameters/rama_libraries.h5 \
+                               --reference-state-rama  upside/parameters/reference_state_rama.pkl
 
 The `sidechain.h5` and `--hbond-energy` may be varied to reproduce the various
 simulations in the paper.  If `--initial-structure` is omitted, the simulation
@@ -187,12 +187,12 @@ five configurations,
 
     upside/obj/upside --duration 1e7 --frame-interval 1e2 \
                       --temperature 0.5,0.53,0.56,0.60,0.64 \
-		      --swap-set 0-1,2-3 \
-		      --swap-set 1-2,3-4 \
-		      --replica-interval 20 \
-		      --monte-carlo-interval 5 \
-		      --seed $RANDOM \
-		      config_0.up config_1.up config_2.up config_3.up config_4.up
+                      --swap-set 0-1,2-3 \
+                      --swap-set 1-2,3-4 \
+                      --replica-interval 20 \
+                      --monte-carlo-interval 5 \
+                      --seed $RANDOM \
+                      config_0.up config_1.up config_2.up config_3.up config_4.up
 
 The multiple simulations are parallelized using OpenMP threads on a single
 machine.  On the SLURM scheduler, jobs should be launched with `sbatch --ntasks
