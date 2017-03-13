@@ -123,7 +123,9 @@ lists for the first time.
 #### Running molecular dynamics
 
 The following sections illustrate running simple molecular dynamics simulations
-with Upside.
+with Upside.  These sections require the parameters directory which is not currently 
+available in this repository due to licensing issues.  Please contact the author
+at jumper at uchicago, which is an edu address, to request the parameters.
 
 ### Converting a PDB file to Upside input
 
@@ -163,7 +165,7 @@ written in the "/input" group within the `.up` file.  The `upside_config.py`
 copies all of the parameters into its output, so that only `simulation.up` is
 needed to run the simulation.  
 
-### Constant temperature simulation
+## Constant temperature simulation
 
 A simple, constant-temperature simulation may be run with 
 
