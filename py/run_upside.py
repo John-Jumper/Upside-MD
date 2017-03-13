@@ -62,7 +62,7 @@ def upside_config(fasta,
                   cavity_radius_from_config='',
                   make_unbound=False):
     
-    args = [upside_dir + 'src/upside_config.py', '--fasta=%s'%fasta, '--output=%s'%output]
+    args = [os.path.join(upside_dir,'src/upside_config.py'), '--fasta=%s'%fasta, '--output=%s'%output]
 
     if init:
         args.append('--initial-structures=%s'%init)
@@ -138,7 +138,7 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
                log_level='basic', account=None, disable_recentering=False):
     if isinstance(config,str): config = [config]
     
-    upside_args = [upside_dir+'obj/upside', '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
+    upside_args = [os.path.join(upside_dir,'obj/upside'), '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
 
     try:
         upside_args.extend(['--temperature', ','.join(map(str,temperature))])

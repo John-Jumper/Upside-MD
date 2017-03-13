@@ -1282,7 +1282,7 @@ def main():
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
 
     args = parser.parse_args()
-    if args.restraint_group and not args.initial_structures:
+    if args.restraint_group and not args.initial_structure:
         parser.error('must specify --initial-structures to use --restraint-group')
 
     if args.apply_restraint_group_to_each_chain and not args.chain_break_from_file:
@@ -1303,8 +1303,8 @@ def main():
     input = t.create_group(t.root, 'input')
     create_array(input, 'sequence', obj=fasta_seq_with_cpr)
 
-    if args.initial_structures:
-        init_pos = cPickle.load(open(args.initial_structures))
+    if args.initial_structure:
+        init_pos = cPickle.load(open(args.initial_structure))
         assert init_pos.shape == (n_atom, 3, 1)
 
     if args.target_structure:
@@ -1318,7 +1318,7 @@ def main():
 
 
     pos = np.zeros((n_atom, 3, 1), dtype='f4')
-    if args.initial_structures:
+    if args.initial_structure:
         pos[:,:,0] = init_pos[...,i%init_pos.shape[-1]] 
     else:
         pos[:,:,0] = random_initial_config(len(fasta_seq))
