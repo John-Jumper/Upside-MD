@@ -69,7 +69,7 @@ def in_process_upside(args):
     # I more sophisticated strategy would modify the signal handlers to interoperate with
     # the Python handlers
     # Additionally, add a first argument because the program name is expected in argv[0]
-    exec_args = ['python_library', '--disable-signal-handler'] + args
+    exec_args = ['python_library', '--re-raise-signal'] + args
     exec_c_strs = [ct.c_char_p(s) for s in exec_args]
 
     # c_str_length = 1+max(len(a) for a in args)

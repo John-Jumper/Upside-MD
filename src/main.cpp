@@ -22,7 +22,8 @@ using namespace h5;
 
 // If any stop signal is received (currently we trap sigterm and sigint)
 // we increment any_stop_signal_received.
-volatile sig_atomic_t stop_signal_received = 0;
+constexpr sig_atomic_t NO_SIGNAL = -1;  // FIXME is this a valid sentinel value?
+volatile sig_atomic_t received_signal = NO_SIGNAL;
 
 // if any stop signal is received, attempt to dump buffered state immediately.
 // Perhaps I should also dump the exactly last position for each replica as
@@ -33,32 +34,61 @@ volatile sig_atomic_t stop_signal_received = 0;
 // that I can dump state before 100 frames if I need to while continuing the
 // simulation.
 
-extern "C" {
-    static void abort_like_handler(int signal) {
-        // NOTE TO THE INEXPERIENCED:
-        //     This is a signal handler called in response to things like
-        //     Ctrl-C.  These functions are very special, and there are very
-        //     few things you are allowed to do in such a function without
-        //     causing problems.  Basically, just set a global variable of type
-        //     volatile sig_atomic_t and then notice the flag is set later in
-        //     the code.  Even most forms of exiting the program are disallowed
-        //     in a signal handler.  Please do not edit this function unless
-        //     you have read extensively about signal handlers, especially for
-        //     multithreaded code.
+static void abort_like_handler(int signal) {
+    // NOTE TO THE INEXPERIENCED:
+    //     This is a signal handler called in response to things like
+    //     Ctrl-C.  These functions are very special, and there are very
+    //     few things you are allowed to do in such a function without
+    //     causing problems.  Basically, just set a global variable of type
+    //     volatile sig_atomic_t and then notice the flag is set later in
+    //     the code.  Even most forms of exiting the program are disallowed
+    //     in a signal handler.  Please do not edit this function unless
+    //     you have read extensively about signal handlers, especially for
+    //     multithreaded code.
 
-        // This signal handler is intended for signals that indicate the user
-        // or OS wishes the program to terminate but after possibly writing any
-        // remaining state.  There is some danger that a later SIGKILL could
-        // corrupt the file being written to dump the last small amount of
-        // state.  I think this is a risk worth taking.
+    // This signal handler is intended for signals that indicate the user
+    // or OS wishes the program to terminate but after possibly writing any
+    // remaining state.  There is some danger that a later SIGKILL could
+    // corrupt the file being written to dump the last small amount of
+    // state.  I think this is a risk worth taking.
 
-        // Note that repeated Ctrl-C will not terminate the program if it is
-        // still writing to the (possibly hanging) filesystem.  This is also
-        // annoying, but the user can terminate with SIGKILL.
+    // Note that repeated Ctrl-C will not terminate the program if it is
+    // still writing to the (possibly hanging) filesystem.  This is also
+    // annoying, but the user can terminate with SIGKILL.
 
-        stop_signal_received = 1;
-    }
+    received_signal = signal;
 }
+
+struct SignalHandlerHandler {
+    // class to handle replacing signal handlers with orderly termination
+    // If upside_main is used as a Python function, we must use RAII to
+    // ensure than any termination will restore the Python signal handlers.
+    typedef void (*signal_handler_t)(int);
+
+    int signum;
+    signal_handler_t old_handler;
+
+    SignalHandlerHandler(int signum_, signal_handler_t handler):
+        signum(signum_), old_handler(SIG_ERR)
+    {
+        // I will assume that I can use the standard signal system.  I am not 
+        // sure how this will interact with Python, which can use sigaction.
+
+        old_handler = signal(signum, handler);
+        if(old_handler == SIG_ERR)
+            fprintf(stderr, "Warning: problem installing signal handler."
+                    " Does not affect correctness of simulation.\n");
+    }
+
+    virtual ~SignalHandlerHandler() {
+        if(old_handler != SIG_ERR)
+            if(signal(signum, old_handler) == SIG_ERR)
+                fprintf(stderr, "Warning: problem restoring signal handler."
+                    " Does not affect correctness of simulation.\n");
+    }
+};
+
+    
 
 struct System {
     int n_atom;
@@ -246,33 +276,6 @@ struct ReplicaExchange {
 };
 
 
-void deriv_matching(hid_t config, DerivEngine& engine, bool generate, double deriv_tol=1e-4) {
-    auto &pos = *engine.pos;
-    if(generate) {
-        auto group = ensure_group(config, "/testing");
-        ensure_not_exist(group.get(), "expected_deriv");
-        auto tbl = create_earray(group.get(), "expected_deriv", H5T_NATIVE_FLOAT, 
-                {pos.n_atom, 3, -1}, {pos.n_atom, 3, 1});
-        vector<float> deriv_value(pos.n_atom*3);
-        for(int na=0; na<pos.n_atom; ++na)
-            for(int d=0; d<3; ++d)
-                deriv_value[na*3 + d] = pos.sens(d,na);
-        append_to_dset(tbl.get(), deriv_value, 2);
-    }
-
-    if(h5_exists(config, "/testing/expected_deriv")) {
-        check_size(config, "/testing/expected_deriv", pos.n_atom, 3, 1);
-        double rms_error = 0.;
-        traverse_dset<3,float>(config, "/testing/expected_deriv", [&](size_t na, size_t d, size_t ns, float x) {
-                double dev = x - pos.sens(d,na);
-                rms_error += dev*dev;});
-        rms_error = sqrtf(rms_error / pos.n_atom);
-        printf("RMS deriv difference: %.6f\n", rms_error);
-        // if(rms_error > deriv_tol) throw string("inacceptable deriv deviation");
-    }
-}
-
-
 vector<float> potential_deriv_agreement(DerivEngine& engine) {
     vector<float> relative_error;
     int n_atom = engine.pos->n_elem;
@@ -355,8 +358,8 @@ try {
     SwitchArg disable_z_recenter_arg("", "disable-z-recentering", 
             "Disable z-recentering of protein in the universe", 
             cmd, false);
-    SwitchArg generate_expected_deriv_arg("", "generate-expected-deriv", 
-            "write an expected deriv to the input for later testing (developer only)", 
+    SwitchArg raise_signal_on_exit_if_received_arg("", "re-raise-signal", 
+            "(Developer use only) Used for obscure details of signal handling.  No effect on simulation.", 
             cmd, false);
     ValueArg<string> log_level_arg("", "log-level", 
             "Use this option to control which arrays are stored in /output.  Available levels are basic, detailed, "
@@ -367,9 +370,6 @@ try {
             "of the potential for the initial structure.  This may give strange answers for native structures "
             "(no steric clashes may given an agreement of NaN) or random structures (where bonds and angles are "
             "exactly at their equilibrium values).  Interpret these results at your own risk.", cmd, false);
-    SwitchArg disable_signal_handler_arg("", "disable-signal-handler",
-            "(developer use only) disable signal handler for SIGINT and SIGTERM.  This does not affect the simulation "
-            "and is for developer use only.", cmd, false);
     ValueArg<string> set_param_arg("", "set-param", "Developer use only", false, "", "param_arg", cmd);
     UnlabeledMultiArg<string> config_args("config_files","configuration .h5 files", true, "h5_files");
     cmd.add(config_args);
@@ -498,9 +498,7 @@ try {
 
             printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
-            deriv_matching(sys->config.get(), sys->engine, generate_expected_deriv_arg.getValue());
             if(potential_deriv_agreement_arg.getValue()){
-                // if(n_system>1) throw string("Testing code does not support n_system > 1");
                 sys->engine.compute(PotentialAndDerivMode);
                 printf("Initial potential:\n");
                 auto relative_error = potential_deriv_agreement(sys->engine);
@@ -602,16 +600,13 @@ try {
         // Install signal handlers to dump state only when the simulation has really started.  This is intended to prevent
         // loss of buffered data and to present final statistics.  It is especially useful when being killed due to running 
         // out of time on a cluster.
-
-        if(!disable_signal_handler_arg.getValue()) {
-            signal(SIGINT,  abort_like_handler);
-            signal(SIGTERM, abort_like_handler);
-        }
+        SignalHandlerHandler sigint_handler (SIGINT,  abort_like_handler);
+        SignalHandlerHandler sigterm_handler(SIGTERM, abort_like_handler);
 
         // we need to run everyone until the next synchronization event
         // a little care is needed if we are multiplexing the events
         auto tstart = chrono::high_resolution_clock::now();
-        while(systems[0].round_num < n_round && !stop_signal_received) {
+        while(systems[0].round_num < n_round && received_signal==NO_SIGNAL) {
             int last_start = systems[0].round_num;
             #pragma omp parallel for schedule(static,1)
             for(int ns=0; ns<int(systems.size()); ++ns) {
@@ -621,7 +616,7 @@ try {
 
                     // Check for stop signal somewhat infrequently to avoid any (possibly theoretical)
                     // performance cost on a NUMA machine
-                    if((nr%8==ns%8) && stop_signal_received) break;
+                    if((nr%8==ns%8) && received_signal!=NO_SIGNAL) break;
 
                     // Don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
@@ -663,12 +658,12 @@ try {
                 }
             }
             // Here we are running in serial again
-            if(stop_signal_received) break;
+            if(received_signal!=NO_SIGNAL) break;
 
             if(replica_interval && !(systems[0].round_num % replica_interval))
                 replex->attempt_swaps(base_random_seed, systems[0].round_num, systems);
         }
-        if(stop_signal_received) {fprintf(stderr, "Received early termination signal\n");}
+        if(received_signal!=NO_SIGNAL) {fprintf(stderr, "Received early termination signal\n");}
         for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr, which also flushes data during destructor
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
@@ -729,6 +724,12 @@ try {
         fprintf(stderr, "\n\nERROR: unknown error\n");
         return 1;
     }
+
+    // By this point in the program, the signal handlers have been returned to the handlers installed
+    // by the caller if Upside is running as a shared library function.  When we re-raise the signal,
+    // the caller's handler will be able to take the signal.
+    if(raise_signal_on_exit_if_received_arg.getValue() && received_signal!=NO_SIGNAL)
+        raise(received_signal);
 
     return 0;
 } catch(const TCLAP::ArgException &e) { 
