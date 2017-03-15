@@ -135,10 +135,12 @@ class UpsideJob(object):
 def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=None, temperature=1., seed=None,
                replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
-               log_level='basic', account=None, disable_recentering=False):
+               log_level='basic', account=None, disable_recentering=False,
+               extra_args=[]):
     if isinstance(config,str): config = [config]
     
-    upside_args = [os.path.join(obj_dir,'upside'), '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
+    upside_args = [os.path.join(obj_dir,'upside'), '--duration', '%f'%duration,
+            '--frame-interval', '%f'%frame_interval] + config
 
     try:
         upside_args.extend(['--temperature', ','.join(map(str,temperature))])
@@ -163,6 +165,7 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
         upside_args.extend(['--disable-recentering'])
 
     upside_args.extend(['--seed','%li'%(seed if seed is not None else np.random.randint(1<<31))])
+    upside_args.extend(extra_args)
     
     output_path = config[0]+'.output'
     timer_object = None
@@ -198,6 +201,8 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
                 del os.environ['OMP_NUM_THREADS']
             else:
                 os.environ['OMP_NUM_THREADS'] = old_omp_num_threads
+    elif queue == 'in_process':
+        job = ue.in_process_upside(upside_args[1:])
     else:
         args = ['sbatch', '-p', queue, 
                 '--time=%i'%(minutes if minutes is not None else 36*60),
