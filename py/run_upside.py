@@ -10,7 +10,7 @@ import time
 # directory structure.  Later, I will move the parameter directory into the
 # upside tree.
 py_source_dir = os.path.dirname(__file__)
-upside_dir = os.path.expanduser(os.path.join(py_source_dir,'..'))
+obj_dir = os.path.join(py_source_dir,'..','obj')
 
 def stop_upside_gently(process, allowed_termination_seconds=60.):
     # Upside checks for sigterm periodically, then writes buffered frames and exits with a 
@@ -62,7 +62,7 @@ def upside_config(fasta,
                   cavity_radius_from_config='',
                   make_unbound=False):
     
-    args = [os.path.join(upside_dir,'src/upside_config.py'), '--fasta=%s'%fasta, '--output=%s'%output]
+    args = [os.path.join(py_source_dir, 'upside_config.py'), '--fasta=%s'%fasta, '--output=%s'%output]
 
     if init:
         args.append('--initial-structures=%s'%init)
@@ -113,7 +113,7 @@ def upside_config(fasta,
 
 
 def compile():
-    return sp.check_output(['/bin/bash', '-c', 'cd %s; make -j4'%(upside_dir+'obj')])
+    return sp.check_output(['/bin/bash', '-c', 'cd %s; make -j4'%obj_dir])
 
 
 class UpsideJob(object):
@@ -138,7 +138,7 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
                log_level='basic', account=None, disable_recentering=False):
     if isinstance(config,str): config = [config]
     
-    upside_args = [os.path.join(upside_dir,'obj/upside'), '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
+    upside_args = [os.path.join(obj_dir,'upside'), '--duration', '%f'%duration, '--frame-interval', '%f'%frame_interval] + config
 
     try:
         upside_args.extend(['--temperature', ','.join(map(str,temperature))])
