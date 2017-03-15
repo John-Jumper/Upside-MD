@@ -1319,7 +1319,7 @@ def main():
 
     pos = np.zeros((n_atom, 3, 1), dtype='f4')
     if args.initial_structure:
-        pos[:,:,0] = init_pos[...,i%init_pos.shape[-1]] 
+        pos[:,:,0] = init_pos[...,0] 
     else:
         pos[:,:,0] = random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)

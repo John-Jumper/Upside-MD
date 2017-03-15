@@ -65,7 +65,7 @@ def upside_config(fasta,
     args = [os.path.join(py_source_dir, 'upside_config.py'), '--fasta=%s'%fasta, '--output=%s'%output]
 
     if init:
-        args.append('--initial-structures=%s'%init)
+        args.append('--initial-structure=%s'%init)
     if target:
         args.append('--target-structure=%s'%target)
     if rama_pot is not None:
