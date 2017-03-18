@@ -1532,16 +1532,16 @@ def main():
                                  args.membrane_potential_unsatisfied_NH_hbond_residues,
                                  args.membrane_potential_unsatisfied_CO_hbond_residues)
 
+    if args.contact_energies:
+        require_backbone_point = True
+        write_contact_energies(parser, fasta_seq, args.contact_energies)
+
     if require_backbone_point:
         require_affine = True
         write_CB(fasta_seq)
 
     if require_rama:
         write_rama_coord()
-
-    if args.contact_energies:
-        require_backbone_point = True
-        write_contact_energies(parser, fasta_seq, args.contact_energies)
 
     if require_affine:
         write_affine_alignment(len(fasta_seq))
