@@ -1300,6 +1300,9 @@ def main():
     if args.apply_restraint_group_to_each_chain and not args.chain_break_from_file:
         parser.error('--apply-restraint-group-to-each-chain requires --chain-break-from-file')
 
+    if args.make_unbound and not args.chain_break_from_file:
+        parser.error('--make-unbound requires --chain-break-from-file')
+
     fasta_seq_with_cpr = read_fasta(open(args.fasta,'U'))
     fasta_seq = np.array([(x if x != 'CPR' else 'PRO') for x in fasta_seq_with_cpr])  # most potentials don't care about CPR
     require_affine = False
@@ -1550,6 +1553,10 @@ def main():
         require_backbone_point = True
         write_contact_energies(parser, fasta_seq, args.contact_energies)
 
+    if args.contact_energies:
+        require_backbone_point = True
+        write_contact_energies(parser, fasta_seq, args.contact_energies)
+
     if require_backbone_point:
         require_affine = True
         write_CB(fasta_seq)
@@ -1573,6 +1580,8 @@ def main():
         print
         print 'Restraint groups (uppercase letters are restrained residues)'
         fasta_one_letter = ''.join(one_letter_aa[x] for x in fasta_seq)
+        print
+        print "Restraint spring constant: {}".format(args.restraint_spring_constant)
 
         for i,restrained_residues in enumerate(args.restraint_group):
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
