@@ -314,7 +314,7 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
     return relative_error;
 }
 
-int upside_main(int argc, const char* const * argv)
+int upside_main(int argc, const char* const * argv, int verbose=1)
 try {
     using namespace TCLAP;  // Templatized C++ Command Line Parser (tclap.sourceforge.net)
     CmdLine cmd("Using Protein Statistical Information for Dynamics Estimation (Upside)\n Author: John Jumper", 
@@ -376,10 +376,10 @@ try {
     cmd.parse(argc, argv);
 
     try {
-        printf("invocation: ");
+        if(verbose) printf("invocation: ");
         std::string invocation(argv[0]);
         for(auto arg=argv+1; arg!=argv+argc; ++arg) invocation += string(" ") + *arg;
-        printf("%s\n", invocation.c_str());
+        if(verbose) printf("%s\n", invocation.c_str());
 
         map<string,vector<float>> set_param_map;
         if(set_param_arg.getValue().size()) {
@@ -404,7 +404,7 @@ try {
         uint32_t base_random_seed = uint32_t(seed_arg.getValue() % big_prime);
 
         // initialize thermostat and thermalize momentum
-        printf("random seed: %lu\n", (unsigned long)(base_random_seed));
+        if(verbose) printf("random seed: %lu\n", (unsigned long)(base_random_seed));
 
         int mc_interval = mc_interval_arg.getValue() > 0. 
             ? max(1,int(mc_interval_arg.getValue()/(3*dt)))
@@ -449,6 +449,10 @@ try {
         // system 0 is the minimum temperature
         int n_system = systems.size();
 
+        // We are not allowed to exit an OpenMP critical section early.  For this reason, we must trap
+        // all exceptions.  To avoid crashing callers, we simply record the presence of an exception
+        // then exit immediately after the block.
+        bool error_exit_omp = false;
         #pragma omp critical
         for(int ns=0; ns<n_system; ++ns) try {
             System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
@@ -496,15 +500,15 @@ try {
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
                     sys->engine.pos->output(d,na) = x;});
 
-            printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
+            if(verbose) printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
             if(potential_deriv_agreement_arg.getValue()){
                 sys->engine.compute(PotentialAndDerivMode);
-                printf("Initial potential:\n");
+                if(verbose) printf("Initial potential:\n");
                 auto relative_error = potential_deriv_agreement(sys->engine);
-                printf("overall potential relative error: ");
+                if(verbose) printf("overall potential relative error: ");
                 for(auto r: relative_error) printf(" %.5f", r);
-                printf("\n");
+                if(verbose) printf("\n");
             }
 
             sys->thermostat = OrnsteinUhlenbeckThermostat(
@@ -559,16 +563,18 @@ try {
             }
         } catch(const string &e) {
             fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
-            exit(1);
+            error_exit_omp = true;
         } catch(...) {
             fprintf(stderr, "\n\nERROR: unknown error\n");
-            exit(1);
+            error_exit_omp = true;
         }
+        // We have just left the critical section
+        if(error_exit_omp) return 2;
         default_logger = shared_ptr<H5Logger>();  // FIXME kind of a hack for the ugly global variable
 
         unique_ptr<ReplicaExchange> replex;
         if(replica_interval) {
-            printf("initializing replica exchange\n");
+            if(verbose) printf("initializing replica exchange\n");
             replex.reset(new ReplicaExchange(systems, swap_set_args.getValue()));
             if(!replex->swap_sets.size()) throw string("replica exchange requested but no swap sets proposed");
         }
@@ -581,21 +587,21 @@ try {
                     throw string("Replica exchange requires all systems have the same number of atoms");
         }
 
-        printf("\n");
+        if(verbose) printf("\n");
         for(int ns: range(systems.size())) {
-            printf("%i %.2f\n", ns, systems[ns].temperature);
+            if(verbose) printf("%i %.2f\n", ns, systems[ns].temperature);
             float* temperature_pointer = &(systems[ns].temperature);
             systems[ns].logger->add_logger<double>("temperature", {1}, [temperature_pointer](double* temperature_buffer) {
                     temperature_buffer[0] = *temperature_pointer;});
         }
-        printf("\n");
+        if(verbose) printf("\n");
 
-        printf("Initial potential energy:");
+        if(verbose) printf("Initial potential energy:");
         for(System& sys: systems) {
             sys.engine.compute(PotentialAndDerivMode);
-            printf(" %.2f", sys.engine.potential);
+            if(verbose) printf(" %.2f", sys.engine.potential);
         }
-        printf("\n");
+        if(verbose) printf("\n");
 
         // Install signal handlers to dump state only when the simulation has really started.  This is intended to prevent
         // loss of buffered data and to present final statistics.  It is especially useful when being killed due to running 
@@ -638,7 +644,8 @@ try {
                             Rg += mag2(load_vec<3>(sys.engine.pos->output,na)-com);
                         Rg = sqrtf(Rg/sys.n_atom);
 
-                        printf("%*.0f / %*.0f elapsed %2i system %.2f temp %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
+                        if(verbose) printf(
+                                "%*.0f / %*.0f elapsed %2i system %.2f temp %5.1f hbonds, Rg %5.1f A, potential % 8.2f\n", 
                                 duration_print_width, nr*3*double(dt), 
                                 duration_print_width, duration, 
                                 ns, sys.temperature,
@@ -667,12 +674,13 @@ try {
         for(auto& sys: systems) sys.logger = shared_ptr<H5Logger>(); // release shared_ptr, which also flushes data during destructor
 
         auto elapsed = chrono::duration<double>(std::chrono::high_resolution_clock::now() - tstart).count();
-        printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.1e simulation_time_unit/hour)\n",
+        if(verbose)
+            printf("\n\nfinished in %.1f seconds (%.2f us/systems/step, %.1e simulation_time_unit/hour)\n",
                 elapsed,
                 elapsed*1e6/systems.size()/systems[0].round_num/3, 
                 systems[0].round_num*3*dt/elapsed * 3600.);
 
-        printf("\navg_kinetic_energy/1.5kT");
+        if(verbose) printf("\navg_kinetic_energy/1.5kT");
         for(auto& sys: systems) {
             double sum_kinetic = 0.;
             long n_kinetic = 0l;
@@ -681,41 +689,43 @@ try {
             traverse_dset<2,float>(sys.config.get(),"/output/kinetic", [&](size_t nf, size_t ns, float x){
                     if(nf>tot_frames/2){ sum_kinetic+=x; n_kinetic++; }
                     });
-            printf(" % .3f", sum_kinetic/n_kinetic / (1.5*sys.temperature));
+            if(verbose) printf(" % .3f", sum_kinetic/n_kinetic / (1.5*sys.temperature));
         }
-        printf("\n");
+        if(verbose) printf("\n");
 
         // FIXME this code should be moved into MC sampler code
         try {
             if(mc_interval) {
-                printf("pivot_success:\n");
+                if(verbose)printf("pivot_success:\n");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
                     traverse_dset<2,int>(sys.config.get(), "/output/pivot_stats", [&](size_t nf, int d, int x) {
                             ps[d] += x;});
-                    printf(" % .4f", double(ps[0])/double(ps[1]));
+                    if(verbose)printf(" % .4f", double(ps[0])/double(ps[1]));
                 }
-                printf("\n");
+                if(verbose)printf("\n");
             }
         } catch(...) {}  // stats reporting is optional
 
         try {
             if(mc_interval) {
-                printf("jump_success:\n");
+                if(verbose)printf("jump_success:\n");
                 for(auto& sys: systems) {
                     std::vector<int64_t> ps(2,0);
                     traverse_dset<2,int>(sys.config.get(), "/output/jump_stats", [&](size_t nf, int d, int x) {
                             ps[d] += x;});
-                    printf(" % .4f", double(ps[0])/double(ps[1]));
+                    if(verbose)printf(" % .4f", double(ps[0])/double(ps[1]));
                 }
-                printf("\n");
+                if(verbose)printf("\n");
             }
         } catch(...) {}  // stats reporting is optional
 
 #ifdef COLLECT_PROFILE
-        printf("\n");
-        global_time_keeper.print_report(3*systems[0].round_num+1);
-        printf("\n");
+        if(verbose) {
+            printf("\n");
+            global_time_keeper.print_report(3*systems[0].round_num+1);
+            printf("\n");
+        }
 #endif
     } catch(const string &e) {
         fprintf(stderr, "\n\nERROR: %s\n", e.c_str());

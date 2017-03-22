@@ -64,7 +64,7 @@ calc.get_clamped_coeff_deriv.restype  = ct.c_int
 calc.get_clamped_coeff_deriv.argtypes = [ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float]
 
 
-def in_process_upside(args):
+def in_process_upside(args, verbose=True):
     # A bit of paranoia to make sure this doesn't interfere with python handlers
     # I more sophisticated strategy would modify the signal handlers to interoperate with
     # the Python handlers
@@ -83,9 +83,12 @@ def in_process_upside(args):
 
     calc.upside_main.restype  = ct.c_int
     # calc.upside_main.argtypes = [ct.c_int, ct.POINTER(ct.c_char_p)]
-    calc.upside_main.argtypes = [ct.c_int, c_arr_t]
+    calc.upside_main.argtypes = [ct.c_int, c_arr_t, ct.c_int]
 
-    return calc.upside_main(len(exec_args), c_arr)
+    retcode = calc.upside_main(len(exec_args), c_arr, int(verbose))
+    if retcode:
+        raise RuntimeError('In process Upside returned %i'%retcode)
+    return
 
 
 def clamped_spline_value(bspline_coeff, x):

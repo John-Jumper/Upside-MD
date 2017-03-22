@@ -628,6 +628,8 @@ struct RotamerSidechain: public PotentialNode {
 
     bool energy_fresh_relative_to_derivative;
 
+    long n_bad_solve;
+
     RotamerSidechain(hid_t grp, CoordNode &pos_node_, vector<CoordNode*> prob_nodes_):
         PotentialNode(),
         prob_nodes(prob_nodes_),
@@ -657,7 +659,8 @@ struct RotamerSidechain: public PotentialNode {
         tol     (read_attribute<float>(grp, ".", "tol")),
         iteration_chunk_size(read_attribute<int>(grp, ".", "iteration_chunk_size")),
 
-        energy_fresh_relative_to_derivative(false)
+        energy_fresh_relative_to_derivative(false),
+        n_bad_solve(0)
     {
         for(int i: range(UPPER_ROT)) node_holders_matrix[i] = nullptr;
         node_holders_matrix[1] = &nodes1;
@@ -677,6 +680,10 @@ struct RotamerSidechain: public PotentialNode {
                 throw string("rotamer positions have " + to_string(igraph.pos_node1->n_elem) +
                         " elements but the " + to_string(i) + "-th (0-indexed) probability node has only " +
                         to_string(prob_nodes[i]->n_elem) + " elements.");
+
+        if(logging(LOG_BASIC))
+            default_logger->add_logger<long>("rotamer_bad_solves_cumulative", {1},
+                    [&](long* buffer) {buffer[0]=n_bad_solve;});
 
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("rotamer_free_energy", {nodes1.n_elem+nodes3.n_elem+nodes6.n_elem}, 
@@ -779,6 +786,12 @@ struct RotamerSidechain: public PotentialNode {
             }
 
             return edge_value;
+        } else if(!strcmp(log_name, "read n_bad_solve")) {
+            return vector<float>(1, float(n_bad_solve));
+        } else if(!strcmp(log_name, "read n_bad_solve and reset")) {
+            vector<float> ret(1, float(n_bad_solve));
+            n_bad_solve = 0;
+            return ret;
         } else {
             throw string("Value ") + log_name + string(" not implemented");
         }
@@ -794,8 +807,7 @@ struct RotamerSidechain: public PotentialNode {
         fill_holders();
         auto solve_results = solve_for_marginals();
         if(solve_results.first >= max_iter - iteration_chunk_size - 1)
-            printf("solved in %i iterations with an error of %f\n", 
-                    solve_results.first, solve_results.second);
+            n_bad_solve++;
 
         propagate_derivatives();
         if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();

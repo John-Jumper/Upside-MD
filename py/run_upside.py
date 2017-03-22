@@ -130,6 +130,7 @@ class UpsideJob(object):
         self.timer_object = timer_object
 
     def wait(self,):
+        if self.job is None: return 0  # in-process
         retcode = self.job.wait()
         if self.timer_object is not None:
             try:
@@ -142,7 +143,7 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
                replica_interval=None, anneal_factor=1., anneal_duration=-1., mc_interval=None, 
                time_step = None, swap_sets = None,
                log_level='basic', account=None, disable_recentering=False,
-               extra_args=[]):
+               extra_args=[], verbose=True):
     if isinstance(config,str): config = [config]
     
     upside_args = [os.path.join(obj_dir,'upside'), '--duration', '%f'%duration,
@@ -208,7 +209,10 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
             else:
                 os.environ['OMP_NUM_THREADS'] = old_omp_num_threads
     elif queue == 'in_process':
-        job = ue.in_process_upside(upside_args[1:])
+        import upside_engine as ue
+        if verbose: print 'args', ' '.join(upside_args)
+        os.environ['OMP_NUM_THREADS'] = str(n_threads)
+        job = ue.in_process_upside(upside_args[1:], verbose=verbose)
     else:
         args = ['sbatch', '-p', queue, 
                 '--time=%i'%(minutes if minutes is not None else 36*60),
