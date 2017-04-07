@@ -214,7 +214,9 @@ def run_upside(queue, config, duration, frame_interval, n_threads=1, minutes=Non
         os.environ['OMP_NUM_THREADS'] = str(n_threads)
         job = ue.in_process_upside(upside_args[1:], verbose=verbose)
     else:
-        args = ['sbatch', '-p', queue, 
+        args = ['sbatch',
+                '--no-requeue', # do not restart the job on a SLURM problem
+                '-p', queue, 
                 '--time=%i'%(minutes if minutes is not None else 36*60),
                 '--ntasks=1', 
                 '--cpus-per-task=%i'%n_threads, '--export=OMP_NUM_THREADS=%i'%n_threads,
