@@ -181,7 +181,9 @@ int get_value_by_name(int n_output, float* output, DerivEngine* engine, const ch
 try {
     auto& dc = engine->get_computation<DerivComputation&>(string(node_name));
     auto value = dc.get_value_by_name(log_name);
-    if(n_output != int(value.size())) throw string("expected size inconsistent with actual size");
+    if(n_output != int(value.size()))
+        throw string("expected size (") + to_string(n_output) +
+            " elements) inconsistent with actual size (" + to_string(value.size()) + ")";
     copy(begin(value),end(value), output);
     return 0;
 } catch(const string& s) {

@@ -11,6 +11,7 @@
 #include <tuple>
 #include <set>
 #include "Float4.h"
+#include <functional>
 
 using namespace std;
 using namespace h5;
@@ -226,63 +227,63 @@ float softplus(float& deriv, float x) {
 
 
 struct NodeHolder {
-        const int n_rot;
-        const int n_elem;
+    const int n_rot;
+    const int n_elem;
 
-        VecArrayStorage prob;
-        // VecArrayStorage energy_capping_deriv;
+    VecArrayStorage prob;
+    // VecArrayStorage energy_capping_deriv;
 
-        VecArrayStorage cur_belief;
-        VecArrayStorage old_belief;
+    VecArrayStorage cur_belief;
+    VecArrayStorage old_belief;
 
-        unique_ptr<float[]> energy_offset;
+    unique_ptr<float[]> energy_offset;
 
-        NodeHolder(int n_rot_, int n_elem_):
-            n_rot(n_rot_),
-            n_elem(n_elem_),
-            prob         (n_rot,n_elem),
-            // energy_capping_deriv(n_rot,n_elem),
-            cur_belief   (n_rot,n_elem),
-            old_belief   (n_rot,n_elem),
+    NodeHolder(int n_rot_, int n_elem_):
+        n_rot(n_rot_),
+        n_elem(n_elem_),
+        prob         (n_rot,n_elem),
+        // energy_capping_deriv(n_rot,n_elem),
+        cur_belief   (n_rot,n_elem),
+        old_belief   (n_rot,n_elem),
 
-            energy_offset(new_aligned<float>(n_elem,4))
+        energy_offset(new_aligned<float>(n_elem,4))
         {
             fill(cur_belief, 1.f);
             fill(old_belief, 1.f);
             reset();
         }
 
-        void reset() { fill(prob, 0.f); } // prob array initially contains energy
-        void swap_beliefs() { swap(cur_belief, old_belief); }
+    void reset() { fill(prob, 0.f); } // prob array initially contains energy
+    void swap_beliefs() { swap(cur_belief, old_belief); }
 
-        void convert_energy_to_prob(float e_cap, float e_cap_width) {
-            // prob array should initially contain energy
-            // prob array is not normalized at the end (one of the entries will be 1.),
-            //   but should be sanely scaled to resist underflow/overflow
-            // It might be more effective to l1 normalize the probabilities at the end,
-            //   but then I would need an extra logf to add to the offset if we are in energy mode
+    void convert_energy_to_prob(float e_cap, float e_cap_width) {
+        // prob array should initially contain energy
+        // prob array is not normalized at the end (one of the entries will be 1.),
+        //   but should be sanely scaled to resist underflow/overflow
+        // It might be more effective to l1 normalize the probabilities at the end,
+        //   but then I would need an extra logf to add to the offset if we are in energy mode
 
-            // float inv_e_cap_width = rcp(e_cap_width);
-            for(int ne: range(n_elem)) {
-                // for(int d=0; d<n_rot; ++d) {
-                //     // ensure that node energies are not too large
-                //     float deriv;
-                //     prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
-                //     energy_capping_deriv(d,ne) = deriv;
-                // }
+        // float inv_e_cap_width = rcp(e_cap_width);
+        for(int ne: range(n_elem)) {
+            // for(int d=0; d<n_rot; ++d) {
+            //     // ensure that node energies are not too large
+            //     float deriv;
+            //     prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
+            //     energy_capping_deriv(d,ne) = deriv;
+            // }
 
-                auto e_offset = prob(0,ne);
-                for(int d=1; d<n_rot; ++d)
-                    e_offset = min(e_offset, prob(d,ne));
+            auto e_offset = prob(0,ne);
+            for(int d=1; d<n_rot; ++d)
+                e_offset = min(e_offset, prob(d,ne));
 
-                for(int d=0; d<n_rot; ++d)
-                    prob(d,ne) = expf(e_offset-prob(d,ne));
+            for(int d=0; d<n_rot; ++d)
+                prob(d,ne) = expf(e_offset-prob(d,ne));
 
-                energy_offset[ne] = e_offset;
-            }
+            energy_offset[ne] = e_offset;
         }
+    }
 
-        template <int N_ROT>
+    template <int N_ROT>
         void standardize_belief_update(float damping) {
             if(damping != 0.f) {
                 for(int ne: range(n_elem)) {
@@ -299,15 +300,15 @@ struct NodeHolder {
             }
         }
 
-        float max_deviation() {
-            float dev = 0.f;
-            for(int d: range(n_rot)) 
-                for(int nn: range(n_elem)) 
-                    dev = max(cur_belief(d,nn)-old_belief(d,nn), dev);
-            return dev;
-        }
+    float max_deviation() {
+        float dev = 0.f;
+        for(int d: range(n_rot)) 
+            for(int nn: range(n_elem)) 
+                dev = max(cur_belief(d,nn)-old_belief(d,nn), dev);
+        return dev;
+    }
 
-        template<int N_ROT>
+    template<int N_ROT>
         void calculate_marginals() {
             // marginals are stored in the same array in cur_belief but l1 normalized
             for(int nn: range(n_elem)) {
@@ -316,12 +317,12 @@ struct NodeHolder {
             }
         }
 
-        template <int N_ROT>
+    template <int N_ROT>
         float node_free_energy(int nn) {
             auto b = load_vec<N_ROT>(cur_belief,nn);
             b *= rcp(sum(b));
             auto pr = load_vec<N_ROT>(prob,nn);
-            
+
             float en = energy_offset[nn];
             // free energy is average energy - entropy
             for(int no: range(N_ROT)) en += b[no] * logf((1e-10f+b[no])*rcp(1e-10f+pr[no]));
@@ -492,11 +493,6 @@ struct EdgeHolder {
 
                 int n_edge = nodes_to_edge.n_edge;
 
-                // auto p3 = [](const char* nm, const Float4& v) {printf("%s=np.array([%.4f, %.4f, %.4f]);\n", nm, v.x(),v.y(),v.z());};
-                //
-                // auto p6 = [](const char* nm, const Float4& v, const Float4& v2) {printf("%s=np.array([%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]);\n", nm, v.x(),v.y(),v.z(),v.w(),v2.x(),v2.y());};
-                // auto p4 = [](const char* nm, const Float4& v, bool newline) {printf("%s [%.3f, %.3f, %.3f, %.3f]%s", nm, v.x(),v.y(),v.z(),v.w(), newline?"\n":"");};
-
                 for(int ne=0; ne<n_edge; ++ne) {
                     int i1 = edge_indices1[ne]*4*w1;
                     int i2 = edge_indices2[ne]*4*w2;
@@ -514,46 +510,6 @@ struct EdgeHolder {
                     auto eprob = PaddedMatrix<N_ROT1,N_ROT2>(prob.x + ne*N_ROT1*4*w2);
                     auto cur_edge_belief1 = eprob.apply_left (v2);
                     auto cur_edge_belief2 = eprob.apply_right(v1);
-
-                    // if(N_ROT1==3 && N_ROT2==6) {
-                    //     printf("\nne %i\n", ne);
-                    //     p3("oeb1", old_edge_belief1[0]);
-                    //     p6("oeb2", old_edge_belief2[0], old_edge_belief2[1]);
-                    //     p3("ceb1", cur_edge_belief1[0]);
-                    //     p6("ceb2", cur_edge_belief2[0], cur_edge_belief2[1]);
-                    //     p3("onb1", old_node_belief1[0]);
-                    //     p6("onb2", old_node_belief2[0], old_node_belief2[1]);
-                    //     printf("\n");
-
-                    //     printf("row=np.zeros((3,6));\n");
-                    //     p6("row[0]",eprob.row[0][0], eprob.row[0][1]);
-                    //     p6("row[1]",eprob.row[1][0], eprob.row[1][1]);
-                    //     p6("row[2]",eprob.row[2][0], eprob.row[2][1]);
-                    //     p3("v1",v1[0]);
-                    //     p6("v2",v2[0],v2[1]);
-                    //     p3("m_v2",cur_edge_belief1[0]);
-                    //     p6("v1_m",cur_edge_belief2[0],cur_edge_belief2[1]);
-                    // }
-                    // if(N_ROT1==6 && N_ROT2==6) {
-                    //     printf("\nne %i\n", ne);
-                    //     p6("oeb1", old_edge_belief1[0], old_edge_belief1[1]);
-                    //     p6("oeb2", old_edge_belief2[0], old_edge_belief2[1]);
-                    //     p6("ceb1", cur_edge_belief1[0], cur_edge_belief1[1]);
-                    //     p6("ceb2", cur_edge_belief2[0], cur_edge_belief2[1]);
-                    //     printf("\n");
-
-                    //     printf("row=np.zeros((6,6));\n");
-                    //     p6("row[0]",eprob.row[0][0], eprob.row[0][1]);
-                    //     p6("row[1]",eprob.row[1][0], eprob.row[1][1]);
-                    //     p6("row[2]",eprob.row[2][0], eprob.row[2][1]);
-                    //     p6("row[3]",eprob.row[3][0], eprob.row[3][1]);
-                    //     p6("row[4]",eprob.row[4][0], eprob.row[4][1]);
-                    //     p6("row[5]",eprob.row[5][0], eprob.row[5][1]);
-                    //     p6("v1",v1[0],v1[1]);
-                    //     p6("v2",v2[0],v2[1]);
-                    //     p4("m_v2",cur_edge_belief1[0],0); p4("",cur_edge_belief1[1],1);
-                    //     p4("v1_m",cur_edge_belief2[0],0); p4("",cur_edge_belief2[1],1);
-                    // }
 
                     auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
                     auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
@@ -737,7 +693,7 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     virtual vector<float> get_value_by_name(const char* log_name) override {
-        int n_edge33 = edges33.nodes_to_edge.n_edge;
+        int n_node = nodes1.n_elem + nodes3.n_elem + nodes6.n_elem;
 
         if(!strcmp(log_name, "rotamer_free_energy")) {
             return residue_free_energies();
@@ -755,28 +711,74 @@ struct RotamerSidechain: public PotentialNode {
             return result;
         } else if(!strcmp(log_name, "count_edges_by_type")) {
             return igraph.count_edges_by_type();
-        } else if(!strcmp(log_name, "graph_nodes_edges_sizes")) {
-            // FIXME ROTX handle this generically (maybe pretend everyone is a nodes6 ?
-            vector<float> ret;  // really an int return but interface requires float
-            ret.push_back(float(nodes3.n_elem));
-            ret.push_back(float(n_edge33));
+        } else if(!strcmp(log_name, "n_node")) {
+            vector<float> ret(1, float(n_node));
             return ret;
-        } else if(!strcmp(log_name, "graph_node_prob")) {
-            vector<float> ret(nodes3.n_elem*3);
-            for(int ne: range(nodes3.n_elem)) for(int no: range(3)) ret[ne*3+no] = nodes3.prob(no,ne);
-            return ret;
-        } else if(!strcmp(log_name, "graph_edge_prob")) {
-            vector<float> ret(n_edge33*9);
-            for(int ne: range(n_edge33)) for(int no1: range(3)) for(int no2: range(3))
-                ret[ne*9+no1*3+no2] = edges33.prob(no1*ru(3)+no2,ne); // note careful indexing
-            return ret;
-        } else if(!strcmp(log_name, "graph_edge_indices")) {
-            vector<float> ret(n_edge33*2);  // really an int return but interface requires float
-            for(int ne: range(n_edge33)) {
-                ret[ne*2+0] = float(edges33.edge_indices1[ne]);
-                ret[ne*2+1] = float(edges33.edge_indices2[ne]);
+        } else if(!strcmp(log_name, "node_energy")) {
+            vector<float> node_energy(n_node*6);
+
+            int nn = 0; // global node counter
+            vector<int> node_starts(7,0);
+            for(const NodeHolder& nodes: {cref(nodes1), cref(nodes3), cref(nodes6)}) {
+                int n_rot = nodes.n_rot;
+                node_starts[n_rot] = nn;
+                for(int ne=0; ne<nodes.n_elem; ++ne, ++nn)  // increment both global and local counters
+                    for(int nr=0; nr<6; ++nr)
+                        node_energy[nn*6+nr] = (nr<n_rot) ? nodes.energy_offset[ne]-logf(nodes.prob(nr,ne)) : 1e5f;
             }
-            return ret;
+            return node_energy;
+        } else if(!strcmp(log_name, "edge_energy") || !strcmp(log_name, "edge_marginal_in_graph_order")) {
+            vector<float> edge_value(n_node*n_node*6*6, 0.f);
+
+            vector<int> node_starts(7,0);
+            node_starts[1] = 0;
+            node_starts[3] = nodes1.n_elem;
+            node_starts[6] = nodes1.n_elem+nodes3.n_elem;
+
+            bool do_marginal = !strcmp(log_name, "edge_marginal_in_graph_order");
+
+            if(do_marginal) {
+                // We pre-fill with the uncorrelated marginals because this is the assumption 
+                // for all zero-edges in belief propagation
+                
+                vector<float> node_marginal(n_node*6,0.f);
+                int nn=0;
+                for(const NodeHolder& nodes: {cref(nodes1), cref(nodes3), cref(nodes6)}) {
+                    int n_rot = nodes.n_rot;
+                    for(int ne=0; ne<nodes.n_elem; ++ne, ++nn)  // increment both global and local counters
+                        for(int nr=0; nr<6; ++nr)
+                            node_marginal[nn*6+nr] = (nr<n_rot) ? nodes.cur_belief(nr,ne) : 0.f;
+                }
+
+                for(int i1=0; i1<n_node; ++i1)
+                    for(int i2=0; i2<n_node; ++i2)
+                        for(int nr1=0; nr1<6; ++nr1)
+                            for(int nr2=0; nr2<6; ++nr2)
+                                edge_value[((i1*n_node + i2)*6 + nr1)*6 + nr2] =
+                                    (i1==i2)
+                                        ? node_marginal[i1*6+nr1] * (nr1==nr2)
+                                        : node_marginal[i1*6+nr1] * node_marginal[i2*6+nr2];
+            }
+
+            for(const EdgeHolder& edges: {cref(edges11), cref(edges33), cref(edges36), cref(edges66)}) {
+                int n_rot1 = edges.n_rot1;
+                int n_rot2 = edges.n_rot2;
+
+                for(int ne=0; ne<edges.nodes_to_edge.n_edge; ++ne) {
+                    int i1 = node_starts[n_rot1] + edges.edge_indices1[ne];
+                    int i2 = node_starts[n_rot2] + edges.edge_indices2[ne];
+
+                    for(int nr1=0; nr1<n_rot1; ++nr1)
+                        for(int nr2=0; nr2<n_rot2; ++nr2)
+                            edge_value[((i1*n_node + i2)*6 + nr1)*6 + nr2] =
+                                edge_value[((i2*n_node + i1)*6 + nr2)*6 + nr1] =
+                                    do_marginal
+                                        ? edges.marginal(nr1*n_rot2 + nr2, ne)
+                                        : -logf(edges.prob(nr1*ru(n_rot2) + nr2, ne));
+                }
+            }
+
+            return edge_value;
         } else {
             throw string("Value ") + log_name + string(" not implemented");
         }
@@ -1060,8 +1062,10 @@ struct RotamerSidechain: public PotentialNode {
             max_deviation = max(nodes3.max_deviation(), nodes6.max_deviation());
         }
 
+        nodes1 .calculate_marginals<1>  ();
         nodes3 .calculate_marginals<3>  ();
         nodes6 .calculate_marginals<6>  ();
+        edges11.calculate_marginals<1,1>();
         edges33.calculate_marginals<3,3>();
         edges36.calculate_marginals<3,6>();
         edges66.calculate_marginals<6,6>();
