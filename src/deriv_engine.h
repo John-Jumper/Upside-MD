@@ -204,6 +204,17 @@ struct RegisterNodeType<NodeClass,2> {
     }
 };
 
+// Wang Zongan ----
+template <typename NodeClass>
+struct RegisterNodeType<NodeClass,3> {
+    RegisterNodeType(std::string name_prefix){
+        NodeCreationFunction f = [](hid_t grp, const ArgList& args) {
+            check_arguments_length(args,3); 
+            return new NodeClass(grp, *args[0], *args[1], *args[2]);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+// ---- Wang Zongan
 
 enum ValueType {CARTESIAN_VALUE=0, ANGULAR_VALUE=1, BODY_VALUE=2};
 

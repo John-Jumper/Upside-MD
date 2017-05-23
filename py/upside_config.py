@@ -997,49 +997,31 @@ def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_nam
     create_array(pg, 'id',    sc_node.id_seq[:])
 
 
-def write_membrane_potential(sequence, potential_library_path, scale, membrane_thickness,
-                             excluded_residues, UNH_residues, UCO_residues):
+def write_membrane_potential(
+        fasta_seq, membrane_potential_fpath, membrane_thickness, membrane_exclude_residues, hbond_exclude_residues):
+
     grp = t.create_group(t.root.input.potential, 'membrane_potential')
-    grp._v_attrs.arguments = np.array(['placement_point_only_CB'])
+    grp._v_attrs.arguments = np.array(['placement_fixed_point_only_CB', 'environment_coverage', 'protein_hbond'])
 
-    potential_library = tb.open_file(potential_library_path)
-    resnames  = potential_library.root.names[:]
-    z_energy  = potential_library.root.z_energy[:]
-    z_lib_min = potential_library.root.z_energy._v_attrs.z_min
-    z_lib_max = potential_library.root.z_energy._v_attrs.z_max
-    z_lib_thickness = potential_library.root.z_energy._v_attrs.thickness
-    potential_library.close()
+    with tb.open_file(membrane_potential_fpath) as lib:
+        resnames        = lib.root.names[:]
+        cb_energy       = lib.root.cb_energy[:]
+        cb_z_min        = lib.root.cb_energy._v_attrs.z_min
+        cb_z_max        = lib.root.cb_energy._v_attrs.z_max
+        thickness       = lib.root.cb_energy._v_attrs.thickness
+        uhb_energy      = lib.root.uhb_energy[:]
+        uhb_z_min       = lib.root.uhb_energy._v_attrs.z_min
+        uhb_z_max       = lib.root.uhb_energy._v_attrs.z_max
+        cov_midpoint    = lib.root.cov_midpoint[:]
+        cov_sharpness   = lib.root.cov_sharpness[:]
+    
+    #<----- ----- ----- ----- donor/acceptor res ids ----- ----- ----- ----->#
+    # Note: hbond_excluded_residues is the same as in the function write_infer_H_O.
+    n_res                = len(fasta_seq)
+    donor_residue_ids    = np.array([i for i in range(n_res) if i>0       and i not in hbond_exclude_residues and fasta_seq[i]!='PRO'])
+    acceptor_residue_ids = np.array([i for i in range(n_res) if i<n_res-1 and i not in hbond_exclude_residues])
 
-    default_half_thickness = z_lib_thickness/2.
-
-    ## sort out residue types and indices
-    if set(excluded_residues).difference(range(len(sequence))) != set():
-        raise ValueError('Residue number',set(excluded_residues).difference(range(len(sequence))),'not valid')
-    if set(UNH_residues)     .difference(range(len(sequence))) != set():
-        raise ValueError('Residue number',set(UNH_residues)     .difference(range(len(sequence))),'not valid')
-    if set(UCO_residues)     .difference(range(len(sequence))) != set():
-        raise ValueError('Residue number',set(UCO_residues)     .difference(range(len(sequence))),'not valid')
-
-    UNH_residues_included = sorted(set(UNH_residues).difference(excluded_residues))
-    UCO_residues_included = sorted(set(UCO_residues).difference(excluded_residues))
-
-    #highlight_residues('membrane_potential_residues_excluded', sequence, excluded_residues)
-    #highlight_residues('               UNH_residues_included', sequence, UNH_residues_included)
-    #highlight_residues('               UCO_residues_included', sequence, UCO_residues_included)
-
-    sequence = list(sequence)
-    for num in excluded_residues:
-        sequence[num] = 'NON' # abbreviation for residues excluded from membrane potential, which will be filtered out from simulation
-    for num in set(UNH_residues_included).difference(UCO_residues_included):
-        sequence[num] = sequence[num]+'_UNH'     # abbreviation for residues with unsatisfied NH H-bond
-    for num in set(UCO_residues_included).difference(UNH_residues_included):
-        sequence[num] = sequence[num]+'_UCO'     # abbreviation for residues with unsatisfied CO H-bond
-    for num in set(UCO_residues_included)&set(UNH_residues_included):
-        sequence[num] = sequence[num]+'_UNH_UCO' # abbreviation for residues with both unsatisfied NH, CO H-bonds
-    sequence = np.array(sequence)
-    #print 'sequence: length ', len(sequence), '\n', sequence
-
-    z_lib = np.linspace(z_lib_min, z_lib_max, z_energy.shape[-1])
+    #<----- ----- ----- ----- make energy splines ----- ----- ----- ----->#
     import scipy.interpolate
     def extrapolated_spline(x0,y0):
         spline = scipy.interpolate.InterpolatedUnivariateSpline(x0,y0)
@@ -1049,47 +1031,84 @@ def write_membrane_potential(sequence, potential_library_path, scale, membrane_t
                     [np.zeros_like(x)+y0[0], np.zeros_like(x)+y0[-1], spline(x)])
         return f
 
-    energy_splines = [extrapolated_spline(z_lib,ene) for ene in z_energy]
+    cb_z_lib           = np.linspace(cb_z_min, cb_z_max, cb_energy.shape[-1])
+    cb_energy_splines  = [extrapolated_spline(cb_z_lib, ene) for ene in cb_energy]
 
-    half_thickness = membrane_thickness/2
-    z = np.linspace(-half_thickness - 15., half_thickness + 15., int((membrane_thickness+30.)/0.3)+1)
+    uhb_z_lib          = np.linspace(uhb_z_min, uhb_z_max, uhb_energy.shape[-1])
+    uhb_energy_splines = [extrapolated_spline(uhb_z_lib, ene) for ene in uhb_energy]
 
-    # ensure that the potential is continuous
-    membrane_energies = []
-    if half_thickness < default_half_thickness:
-        # spline(z-(half_thickness-default_half_thickness)) may not equal to spline(z+(half_thickness-default_half_thickness))
-        for spline in energy_splines:
-            delta_spline = spline(-half_thickness+default_half_thickness) - spline(half_thickness-default_half_thickness)
-            membrane_energies_ = np.select([(z<0), (z>=0.)],
-                    [spline(z+(half_thickness-default_half_thickness))+0.5*delta_spline,
-                     spline(z-(half_thickness-default_half_thickness))-0.5*delta_spline])
-            membrane_energies.append(membrane_energies_)
-    else:
-        for spline in energy_splines:
-            membrane_energies_ = np.select([
-                (z <  -half_thickness+default_half_thickness),
-                (z >= -half_thickness+default_half_thickness) & (z <= half_thickness-default_half_thickness),
-                (z >   half_thickness-default_half_thickness)],
-                [spline(z+(half_thickness-default_half_thickness)),
-                 spline(0),
-                 spline(z-(half_thickness-default_half_thickness))])
-            membrane_energies.append(membrane_energies_)
-    membrane_energies = np.array(membrane_energies)
+    #<----- ----- ----- ----- make energy splines ----- ----- ----- ----->#
+    # This step is necessary in case the supplied membrane thickness is not eaual to the thickness in the membrane potential file.
+    default_half_thickness = thickness/2.
+    half_thickness         = membrane_thickness/2.
+    z_                     = np.linspace(-half_thickness - 15., half_thickness + 15., int((membrane_thickness+30.)/0.25)+1)
 
-    resname_to_num      = dict([(nm,i) for i,nm in enumerate(resnames)])
-    residue_id_filtered = [i for i,x in enumerate(sequence) if sequence[i] != 'NON']
-    sequence_filtered   = [x for i,x in enumerate(sequence) if sequence[i] != 'NON']
-    energy_index        = np.array([resname_to_num[aa] for aa in sequence_filtered])
+    # ensure that the potential is continuous at 0
+    # spline(z-(half_thickness-default_half_thickness)) may not equal to spline(z+(half_thickness-default_half_thickness))
+    membrane_cb_energies = np.zeros((len(cb_energy_splines), len(z_)))
+    for ispl, spline in enumerate(cb_energy_splines):
+        if half_thickness < default_half_thickness:
+            delta_t = default_half_thickness - half_thickness
+            delta_s = spline(delta_t) - spline(-delta_t)
+            membrane_cb_energies[ispl] = np.select([(z_ < 0), (z_ >= 0.)],
+                                                   [spline(z_-delta_t) + 0.5*delta_s, spline(z_+delta_t) - 0.5*delta_s])
+        elif half_thickness > default_half_thickness:
+            delta_t = half_thickness - default_half_thickness
+            membrane_cb_energies[ispl] = np.select([
+                (z_ <  -delta_t),
+                (z_ >= -delta_t) & (z_ <= delta_t),
+                (z_ >   delta_t)],
+                [spline(z_+delta_t), spline(0), spline(z_-delta_t)])
+        else:
+            membrane_cb_energies[ispl] = spline(z_)
 
-    #print sequence_filtered
-    #print len(residue_id_filtered), residue_id_filtered
-    #print len(energy_index),energy_index
+    membrane_uhb_energies = np.zeros((len(uhb_energy_splines), len(z_)))
+    for ispl, spline in enumerate(uhb_energy_splines):
+        if half_thickness < default_half_thickness:
+            delta_t = default_half_thickness - half_thickness
+            delta_s = spline(delta_t) - spline(-delta_t)
+            membrane_uhb_energies[ispl] = np.select([(z_ < 0), (z_ >= 0.)],
+                                                    [spline(z_-delta_t) + 0.5*delta_s, spline(z_+delta_t) - 0.5*delta_s])
+        elif half_thickness > default_half_thickness:
+            delta_t = half_thickness - default_half_thickness
+            membrane_uhb_energies[ispl] = np.select([
+                (z_ <  -delta_t),
+                (z_ >= -delta_t) & (z_ <= delta_t),
+                (z_ >   delta_t)],
+                [spline(z_+delta_t), spline(0), spline(z_-delta_t)])
+        else:
+            membrane_uhb_energies[ispl] = spline(z_)
 
-    create_array(grp, 'residue_id', np.array(residue_id_filtered))
-    create_array(grp, 'restype',    energy_index)
-    create_array(grp, 'energy',     membrane_energies)
-    grp.energy._v_attrs.z_min = z[0]
-    grp.energy._v_attrs.z_max = z[-1]
+    #<----- ----- ----- ----- cb energy indices ----- ----- ----- ----->#
+    # Note: there's a residue type, NON, in resnames for those excluded from membrane potential.
+    # And there's a potential profile in cb_energy for NON, which is all zeros. 
+    if set(membrane_exclude_residues).difference(range(len(fasta_seq))) != set():
+        raise ValueError('Residue number', set(membrane_exclude_residues).difference(range(len(fasta_seq))), 'not valid')
+    highlight_residues('membrane_exclude_residues', fasta_seq, membrane_exclude_residues)
+
+    sequence = list(fasta_seq)
+    for num in membrane_exclude_residues:
+        sequence[num] = 'NON' 
+    sequence = np.array(sequence)
+
+    resname_to_num  = dict([(aa,i) for i,aa in enumerate(resnames)])
+    residue_id      = np.array([i for i,aa in enumerate(sequence)])
+    cb_energy_index = np.array([resname_to_num[aa] for aa in sequence])
+
+    #<----- ----- ----- ----- write to grp ----- ----- ----- ----->#
+    create_array(grp,             'cb_index', residue_id)
+    create_array(grp,            'env_index', residue_id)
+    create_array(grp,         'residue_type', cb_energy_index)
+    create_array(grp,         'cov_midpoint', cov_midpoint)
+    create_array(grp,        'cov_sharpness', cov_sharpness)
+    create_array(grp,            'cb_energy', membrane_cb_energies)
+    create_array(grp,           'uhb_energy', membrane_uhb_energies)
+    create_array(grp,    'donor_residue_ids', donor_residue_ids)
+    create_array(grp, 'acceptor_residue_ids', acceptor_residue_ids)
+    grp. cb_energy._v_attrs.z_min = z_[ 0]
+    grp. cb_energy._v_attrs.z_max = z_[-1]
+    grp.uhb_energy._v_attrs.z_min = z_[ 0]
+    grp.uhb_energy._v_attrs.z_max = z_[-1]
 
 
 def parse_segments(s):
@@ -1153,7 +1172,7 @@ def main():
             '/target and is never read by Upside.  The /target group may be useful for later analysis.')
     parser.add_argument('--no-backbone', dest='backbone', default=True, action='store_false',
             help='do not use rigid nonbonded for backbone N, CA, C, and CB')
-    parser.add_argument('--rotamer-placement', default=None, 
+    parser.add_argument('--rotamer-placement', default=None,
             help='rotameric sidechain library')
     parser.add_argument('--dynamic-rotamer-placement', default=False, action='store_true',
             help='Use dynamic rotamer placement (not recommended)')
@@ -1200,7 +1219,8 @@ def main():
 
     parser.add_argument('--hbond-exclude-residues', default=[], type=parse_segments,
             help='Residues to have neither hydrogen bond donors or acceptors')
-    parser.add_argument('--chain-break-from-file', default='', help='File with indices of chain first residues recorded during initial structure generation to automate --hbond-exclude-residues.')
+    parser.add_argument('--chain-break-from-file', default='',
+            help='File with indices of chain first residues recorded during initial structure generation to automate --hbond-exclude-residues.')
 
     parser.add_argument('--loose-hbond-criteria', default=False, action='store_true',
             help='Use far more permissive angles and distances to judge HBonding.  Do not use for simulation. '+
@@ -1231,8 +1251,8 @@ def main():
             'Multiple restraint groups may be specified by giving the --restraint-group flag multiple times '
             'with different residue lists.  The strength of the restraint is given by --restraint-spring-constant')
     parser.add_argument('--apply-restraint-group-to-each-chain', action='store_true',
-        help='Use indices of chain first residues recorded during PDB_to_initial_structure to automate'+
-        ' --restraint-group for chains. Requires --chain-break-from-file.')
+            help='Use indices of chain first residues recorded during PDB_to_initial_structure to automate'+
+            ' --restraint-group for chains. Requires --chain-break-from-file.')
 
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
@@ -1248,35 +1268,26 @@ def main():
             help='Path to many-body environment potential')
     parser.add_argument('--reference-state-rama', default='',
             help='Do not use this unless you know what you are doing.')
+
     parser.add_argument('--membrane-thickness', default=None, type=float,
             help='Thickness of the membrane in angstroms for use with --membrane-potential.')
     parser.add_argument('--membrane-potential', default='',
-            help='Parameter file (.h5 format) for membrane potential. User must also supply --membrane-thickness. '+
-                 'There are 2 categories of residue-specific types in the potential file now. ' +
-                 'Basic types: XXX; Derived types: XXX_UNH, XXX_UCO, XXX_UNH_UCO. (XXX is the three-letter code for an amino acid).')
-    parser.add_argument('--membrane-potential-exclude-residues', default=[], type=parse_segments,
-            help='Residues that do not participate in the --membrane-potential(same format as --restraint-group).' +
+            help='Parameter file (.h5 format) for membrane potential. User must also supply --membrane-thickness.')
+    parser.add_argument('--membrane-exclude-residues', default=[], type=parse_segments,
+            help='Residues that do not participate in the --membrane-potential (same format as --restraint-group).' +
                  'User must also supply --membrane-potential.')
-    parser.add_argument('--membrane-potential-unsatisfied-NH-hbond-residues',default=[], type=parse_segments,
-            help='Residues with unsatisfied NH hydrogen bond, which will be marked as XXX_UNH in --membrane-potential. ' +
-                 'Normally, this argument is only turned on when user wants to determine the burial orientation of ' +
-                 'a given membrane protein and the residues with unsatisfied hbonds are awared of (same format as --restraint-group). ' +
-                 'User must also supply --membrane-potential.')
-    parser.add_argument('--membrane-potential-unsatisfied-CO-hbond-residues',default=[], type=parse_segments,
-            help='Residues with unsatisfied CO hydrogen bonds, which will be marked as XXX_UCO in --membrane-potential. ' +
-                 'NOTE: residues with both unsatisfied NH and CO H-bonds will be inferred ' +
-                 'by --membrane-potential-unsatisfied-NH-hbond-residues and --membrane-potential-unsatisfied-CO-hbond-residues together, ' +
-                 'which will detonated as XXX_UNH_UCO in --membrane-potential.')
+
     parser_grp1 = parser.add_mutually_exclusive_group()
     parser_grp1.add_argument('--cavity-radius', default=0., type=float,
             help='Enclose the whole simulation in a radial cavity centered at the origin to achieve finite concentration '+
             'of protein.  Necessary for multichain simulation (though this mode is unsupported.')
-    parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true', 
-        help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
-    parser_grp1.add_argument('--cavity-radius-from-config', default='', help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
+    parser_grp1.add_argument('--debugging-only-heuristic-cavity-radius', action='store_true',
+            help='Set the cavity radius to 1.2x the max distance between com\'s and atoms of the chains.')
+    parser_grp1.add_argument('--cavity-radius-from-config', default='', 
+            help='Config file with cavity radius set. Useful for applying the same heuristic cavity of bound complex config to unbound counterpart')
 
-    parser.add_argument('--make-unbound', action='store_true', 
-        help='Separate chains into different corners of a cavity that you set with one of the cavity options.')
+    parser.add_argument('--make-unbound', action='store_true',
+            help='Separate chains into different corners of a cavity that you set with one of the cavity options.')
 
     parser.add_argument('--debugging-only-disable-basic-springs', default=False, action='store_true',
             help='Disable basic springs (like bond distance and angle).  Do not use this.')
@@ -1297,7 +1308,7 @@ def main():
     global n_atom, t, potential
     n_res = len(fasta_seq)
     n_atom = 3*n_res
-    
+
     t = tb.open_file(args.output,'w')
 
     input = t.create_group(t.root, 'input')
@@ -1319,7 +1330,7 @@ def main():
 
     pos = np.zeros((n_atom, 3, 1), dtype='f4')
     if args.initial_structure:
-        pos[:,:,0] = init_pos[...,0] 
+        pos[:,:,0] = init_pos[...,0]
     else:
         pos[:,:,0] = random_initial_config(len(fasta_seq))
     create_array(input, 'pos', obj=pos)
@@ -1368,7 +1379,7 @@ def main():
 
         if chain_first_residue.size:
             break_grp = t.create_group("/input","chain_break","Indicates that multi-chain simulation and removal of bonded potential terms accross chains requested")
-            t.create_array(break_grp, "chain_first_residue", chain_first_residue, "Contains array of chain first residues, apart from residue 0") 
+            t.create_array(break_grp, "chain_first_residue", chain_first_residue, "Contains array of chain first residues, apart from residue 0")
 
             required_hbond_exclude_res = [i+j for i in chain_first_residue for j in [-1,0]]
             if args.hbond_exclude_residues:
@@ -1528,9 +1539,9 @@ def main():
         write_membrane_potential(fasta_seq,
                                  args.membrane_potential,
                                  args.membrane_thickness,
-                                 args.membrane_potential_exclude_residues,
-                                 args.membrane_potential_unsatisfied_NH_hbond_residues,
-                                 args.membrane_potential_unsatisfied_CO_hbond_residues)
+                                 args.membrane_exclude_residues, 
+                                 args.hbond_exclude_residues)
+
 
     if args.contact_energies:
         require_backbone_point = True
@@ -1582,4 +1593,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

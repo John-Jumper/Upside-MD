@@ -10,63 +10,156 @@
 using namespace h5;
 using namespace std;
 
-
 struct MembranePotential : public PotentialNode
 {
     struct MembraneResidueParams {
-        index_t residue;
-        int restype; 
+        // Logically the two residues are the same, but they may have different
+        // indices in the CB and Env outputs respectively
+        index_t cb_index;
+        index_t env_index;
+        int restype;
+    };
+
+    struct MembranePotentialCBParams {
+        float cov_midpoint;
+        float cov_sharpness;
     };
 
     int n_elem;        // number of residues to process
-    CoordNode& sidechain_pos;
-    vector<MembraneResidueParams> params;
-    LayeredClampedSpline1D<1> membrane_energy_spline;
+    int n_restype;
+    int n_donor, n_acceptor;
+
+    CoordNode& res_pos;  // CB atom
+    CoordNode& environment_coverage;
+    CoordNode& protein_hbond;
+
+    vector<MembraneResidueParams> res_params;
+    vector<MembranePotentialCBParams> pot_params;
+
+    LayeredClampedSpline1D<1> membrane_energy_cb_spline;
+    LayeredClampedSpline1D<1> membrane_energy_uhb_spline;
 
     // shift and scale to convert z coordinates to spline coordinates
-    float z_shift;
-    float z_scale;
+    float cb_z_shift, cb_z_scale;
+    float uhb_z_shift, uhb_z_scale;
 
-    MembranePotential(hid_t grp, CoordNode& sidechain_pos_):
+    MembranePotential(hid_t grp, CoordNode& res_pos_,
+                                 CoordNode& environment_coverage_,
+                                 CoordNode& protein_hbond_):
         PotentialNode(),
-        n_elem(get_dset_size(1, grp, "residue_id")[0]), 
-        sidechain_pos(sidechain_pos_), 
-        params(n_elem),
-        membrane_energy_spline(
-                get_dset_size(2, grp, "energy")[0],
-                get_dset_size(2, grp, "energy")[1]),
 
-        z_shift(-read_attribute<float>(grp, "energy", "z_min")),
-        z_scale((membrane_energy_spline.nx-1)/(read_attribute<float>(grp, "energy", "z_max")+z_shift))
+        n_elem    (get_dset_size(1, grp,             "cb_index")[0]),
+        n_restype (get_dset_size(2, grp,            "cb_energy")[0]),
+        n_donor   (get_dset_size(1, grp,    "donor_residue_ids")[0]),
+        n_acceptor(get_dset_size(1, grp, "acceptor_residue_ids")[0]),
+
+        res_pos(res_pos_),
+        environment_coverage(environment_coverage_),
+        protein_hbond(protein_hbond_),
+
+        res_params(n_elem),
+        pot_params(n_restype),
+
+        membrane_energy_cb_spline(
+                get_dset_size(2, grp, "cb_energy")[0],
+                get_dset_size(2, grp, "cb_energy")[1]),
+
+        membrane_energy_uhb_spline(
+                get_dset_size(2, grp, "uhb_energy")[0],
+                get_dset_size(2, grp, "uhb_energy")[1]),
+
+        cb_z_shift(-read_attribute<float>(grp, "cb_energy", "z_min")),
+        cb_z_scale((membrane_energy_cb_spline.nx-1)/(read_attribute<float>(grp, "cb_energy", "z_max")+cb_z_shift)),
+
+        uhb_z_shift(-read_attribute<float>(grp, "uhb_energy", "z_min")),
+        uhb_z_scale((membrane_energy_uhb_spline.nx-1)/(read_attribute<float>(grp, "uhb_energy", "z_max")+uhb_z_shift))
     {
-        check_size(grp, "residue_id", n_elem);
-        check_size(grp, "restype",    n_elem);
+        check_elem_width_lower_bound(res_pos, 3);
+        check_elem_width_lower_bound(environment_coverage, 1);
 
-        traverse_dset<1,int>(grp, "residue_id", [&](size_t nda, int x ) {params[nda].residue = x;});
-        traverse_dset<1,int>(grp, "restype",    [&](size_t nr,  int rt) {params[nr].restype = rt;});
+        check_size(grp,      "cb_index",    n_elem);
+        check_size(grp,     "env_index",    n_elem);
+        check_size(grp,  "residue_type",    n_elem);
+        check_size(grp,  "cov_midpoint", n_restype);
+        check_size(grp, "cov_sharpness", n_restype);
+        check_size(grp,     "cb_energy", n_restype, membrane_energy_cb_spline.nx);
+        check_size(grp,    "uhb_energy",         2, membrane_energy_uhb_spline.nx); // type 0 for unpaird donor, type 1 for unpaird acceptor
 
-        vector<double> energy_data;
-        traverse_dset<2,double>(grp, "energy", [&](size_t rt, size_t z_index, double value) {
-                energy_data.push_back(value);});
-        membrane_energy_spline.fit_spline(energy_data.data());
+        traverse_dset<1,  int>(grp,      "cb_index", [&](size_t nr,   int  x) {res_params[nr].cb_index  = x;});
+        traverse_dset<1,  int>(grp,     "env_index", [&](size_t nr,   int  x) {res_params[nr].env_index = x;});
+        traverse_dset<1,  int>(grp,  "residue_type", [&](size_t nr,   int rt) {res_params[nr].restype   = rt;});
+        traverse_dset<1,float>(grp,  "cov_midpoint", [&](size_t rt, float bc) {pot_params[rt].cov_midpoint  = bc;});
+        traverse_dset<1,float>(grp, "cov_sharpness", [&](size_t rt, float bw) {pot_params[rt].cov_sharpness = bw;});
+
+        vector<double> cb_energy_data;
+        traverse_dset<2,double>(grp, "cb_energy", [&](size_t rt, size_t z_index, double value) {
+                cb_energy_data.push_back(value);});
+        membrane_energy_cb_spline.fit_spline(cb_energy_data.data());
+
+        vector<double> uhb_energy_data;
+        traverse_dset<2,double>(grp, "uhb_energy", [&](size_t rt, size_t z_index, double value) {
+                uhb_energy_data.push_back(value);});
+        membrane_energy_uhb_spline.fit_spline(uhb_energy_data.data());
     }
 
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("membrane_potential"));
 
-        VecArray pos      = sidechain_pos.output;
-        VecArray pos_sens = sidechain_pos.sens;
+        VecArray cb_pos       = res_pos.output;
+        VecArray cb_pos_sens  = res_pos.sens;
+        VecArray env_cov      = environment_coverage.output;
+        VecArray env_cov_sens = environment_coverage.sens;
+        VecArray hb_pos       = protein_hbond.output;
+        VecArray hb_sens      = protein_hbond.sens;
+
         potential = 0.f;
 
         for(int nr=0; nr<n_elem; ++nr) {
-            auto &p = params[nr];
-            float z = pos(2,p.residue);
+            auto &p = res_params[nr];
+            float cb_z = cb_pos(2, p.cb_index);
+
             float result[2];    // deriv then value
-            membrane_energy_spline.evaluate_value_and_deriv(result, p.restype, (z+z_shift)*z_scale);
-            pos_sens(2,p.residue) += result[0];
-            potential             += result[1];
+            membrane_energy_cb_spline.evaluate_value_and_deriv(result, p.restype, (cb_z+cb_z_shift)*cb_z_scale);
+            float spline_value = result[1];
+            float spline_deriv = result[0];
+
+            auto cover_sig = compact_sigmoid(
+              env_cov(0, p.env_index)-pot_params[p.restype].cov_midpoint,
+              pot_params[p.restype].cov_sharpness);
+
+            potential                    += spline_value*cover_sig.x();
+            cb_pos_sens (2, p.cb_index)  += spline_deriv*cover_sig.x();
+            env_cov_sens(0, p.env_index) += spline_value*cover_sig.y();
+        }
+
+        for(int nd=0; nd<n_donor; ++nd) {
+            float donor_z = hb_pos(2, nd);
+            float hb_prob = hb_pos(6, nd);  // probability of forming hbond
+
+            float result[2];
+            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, 0, (donor_z+uhb_z_shift)*uhb_z_scale);
+            float spline_value = result[1];
+            float spline_deriv = result[0];
+
+            potential      += spline_value*(1-hb_prob);
+            hb_sens(2, nd) += spline_deriv*(1-hb_prob);
+            hb_sens(6, nd) -= spline_value; 
+        }
+
+        for(int na=0; na<n_acceptor; ++na) {
+            float acceptor_z = hb_pos(2, na+n_donor);
+            float hb_prob    = hb_pos(6, na+n_donor);
+
+            float result[2];
+            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, 1, (acceptor_z+uhb_z_shift)*uhb_z_scale);
+            float spline_value = result[1];
+            float spline_deriv = result[0];
+
+            potential              += spline_value*(1-hb_prob);
+            hb_sens(2, na+n_donor) += spline_deriv*(1-hb_prob);
+            hb_sens(6, na+n_donor) -= spline_value;
         }
     }
 };
 
-static RegisterNodeType<MembranePotential,1> membrane_potential_node("membrane_potential");
+static RegisterNodeType<MembranePotential, 3> membrane_potential_node("membrane_potential");

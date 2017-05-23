@@ -70,8 +70,10 @@ def read_residues(chain):
         cg_list = [v for k,v in adict.items() if re.match("[^H]G1?$",k)]
         cd_list = [v for k,v in adict.items() if re.match("[^H]D1?$",k)]
         if len(cg_list) not in (0,1):
+            print res.getResindex()
             raise RuntimeError('CG-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]G1?$",k)],))
         if len(cd_list) not in (0,1):
+            print res.getResindex()
             raise RuntimeError('CD-list %s has too many items'%([k for k,v in adict.items() if re.match("[^H]D1?$",k)],))
 
         # note that you need to check the residue *before* to see if a proline is cis
