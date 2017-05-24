@@ -204,7 +204,6 @@ struct RegisterNodeType<NodeClass,2> {
     }
 };
 
-// Wang Zongan ----
 template <typename NodeClass>
 struct RegisterNodeType<NodeClass,3> {
     RegisterNodeType(std::string name_prefix){
@@ -214,7 +213,6 @@ struct RegisterNodeType<NodeClass,3> {
         add_node_creation_function(name_prefix, f);
     }
 };
-// ---- Wang Zongan
 
 enum ValueType {CARTESIAN_VALUE=0, ANGULAR_VALUE=1, BODY_VALUE=2};
 

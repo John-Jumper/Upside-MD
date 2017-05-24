@@ -119,9 +119,9 @@ struct MembranePotential : public PotentialNode
             float cb_z = cb_pos(2, p.cb_index);
 
             float result[2];    // deriv then value
-            membrane_energy_cb_spline.evaluate_value_and_deriv(result, p.restype, (cb_z+cb_z_shift)*cb_z_scale);
+            membrane_energy_cb_spline.evaluate_value_and_deriv(result, p.restype, (cb_z + cb_z_shift) * cb_z_scale);
             float spline_value = result[1];
-            float spline_deriv = result[0];
+            float spline_deriv = result[0]*cb_z_scale;
 
             auto cover_sig = compact_sigmoid(
               env_cov(0, p.env_index)-pot_params[p.restype].cov_midpoint,
@@ -132,32 +132,22 @@ struct MembranePotential : public PotentialNode
             env_cov_sens(0, p.env_index) += spline_value*cover_sig.y();
         }
 
-        for(int nd=0; nd<n_donor; ++nd) {
-            float donor_z = hb_pos(2, nd);
-            float hb_prob = hb_pos(6, nd);  // probability of forming hbond
+        int n_virtual = n_donor+n_acceptor;
+        for(int nv=0; nv<n_virtual; ++nv) {
+            float hb_z    = hb_pos(2, nv);
+            float hb_prob = hb_pos(6, nv);  // probability of forming hbond
 
             float result[2];
-            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, 0, (donor_z+uhb_z_shift)*uhb_z_scale);
+            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, int(nv>=n_donor), (hb_z + uhb_z_shift) * uhb_z_scale);
             float spline_value = result[1];
-            float spline_deriv = result[0];
+            float spline_deriv = result[0]*uhb_z_scale;
 
-            potential      += spline_value*(1-hb_prob);
-            hb_sens(2, nd) += spline_deriv*(1-hb_prob);
-            hb_sens(6, nd) -= spline_value; 
-        }
+            float uhb_prob  = 1-hb_prob;
+            float uhb_prob2 = uhb_prob*uhb_prob;
 
-        for(int na=0; na<n_acceptor; ++na) {
-            float acceptor_z = hb_pos(2, na+n_donor);
-            float hb_prob    = hb_pos(6, na+n_donor);
-
-            float result[2];
-            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, 1, (acceptor_z+uhb_z_shift)*uhb_z_scale);
-            float spline_value = result[1];
-            float spline_deriv = result[0];
-
-            potential              += spline_value*(1-hb_prob);
-            hb_sens(2, na+n_donor) += spline_deriv*(1-hb_prob);
-            hb_sens(6, na+n_donor) -= spline_value;
+            potential      += spline_value*uhb_prob2;
+            hb_sens(2, nv) += spline_deriv*uhb_prob2;
+            hb_sens(6, nv) += spline_value*(-2)*uhb_prob; 
         }
     }
 };

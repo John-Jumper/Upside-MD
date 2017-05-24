@@ -1023,7 +1023,7 @@ def write_membrane_potential(
 
     #<----- ----- ----- ----- make energy splines ----- ----- ----- ----->#
     import scipy.interpolate
-    def extrapolated_spline(x0,y0):
+    def extrapolated_spline(x0, y0):
         spline = scipy.interpolate.InterpolatedUnivariateSpline(x0,y0)
         def f(x, spline=spline):
             return np.select(
@@ -1541,7 +1541,6 @@ def main():
                                  args.membrane_thickness,
                                  args.membrane_exclude_residues, 
                                  args.hbond_exclude_residues)
-
 
     if args.contact_energies:
         require_backbone_point = True
