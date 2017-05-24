@@ -12,7 +12,7 @@ using namespace std;
 
 struct MembranePotential : public PotentialNode
 {
-    struct MembraneResidueParams {
+    struct ResidueParams {
         // Logically the two residues are the same, but they may have different
         // indices in the CB and Env outputs respectively
         index_t cb_index;
@@ -20,7 +20,7 @@ struct MembranePotential : public PotentialNode
         int restype;
     };
 
-    struct MembranePotentialCBParams {
+    struct PotentialCBParams {
         float cov_midpoint;
         float cov_sharpness;
     };
@@ -33,8 +33,8 @@ struct MembranePotential : public PotentialNode
     CoordNode& environment_coverage;
     CoordNode& protein_hbond;
 
-    vector<MembraneResidueParams> res_params;
-    vector<MembranePotentialCBParams> pot_params;
+    vector<ResidueParams>     res_params;
+    vector<PotentialCBParams> pot_params;
 
     LayeredClampedSpline1D<1> membrane_energy_cb_spline;
     LayeredClampedSpline1D<1> membrane_energy_uhb_spline;
@@ -83,7 +83,7 @@ struct MembranePotential : public PotentialNode
         check_size(grp,  "cov_midpoint", n_restype);
         check_size(grp, "cov_sharpness", n_restype);
         check_size(grp,     "cb_energy", n_restype, membrane_energy_cb_spline.nx);
-        check_size(grp,    "uhb_energy",         2, membrane_energy_uhb_spline.nx); // type 0 for unpaird donor, type 1 for unpaird acceptor
+        check_size(grp,    "uhb_energy",         2, membrane_energy_uhb_spline.nx); // type 0 for unpaired donor, type 1 for unpaired acceptor
 
         traverse_dset<1,  int>(grp,      "cb_index", [&](size_t nr,   int  x) {res_params[nr].cb_index  = x;});
         traverse_dset<1,  int>(grp,     "env_index", [&](size_t nr,   int  x) {res_params[nr].env_index = x;});
@@ -119,13 +119,13 @@ struct MembranePotential : public PotentialNode
             float cb_z = cb_pos(2, p.cb_index);
 
             float result[2];    // deriv then value
-            membrane_energy_cb_spline.evaluate_value_and_deriv(result, p.restype, (cb_z + cb_z_shift) * cb_z_scale);
+            membrane_energy_cb_spline.evaluate_value_and_deriv(result, p.restype,
+                    (cb_z + cb_z_shift) * cb_z_scale);
             float spline_value = result[1];
-            float spline_deriv = result[0]*cb_z_scale;
+            float spline_deriv = result[0]*cb_z_scale; // scale to get derivative in *unnormalized* coordinates
 
-            auto cover_sig = compact_sigmoid(
-              env_cov(0, p.env_index)-pot_params[p.restype].cov_midpoint,
-              pot_params[p.restype].cov_sharpness);
+            auto& pp = pot_params[p.restype];
+            auto cover_sig = compact_sigmoid(env_cov(0, p.env_index)-pp.cov_midpoint, pp.cov_sharpness);
 
             potential                    += spline_value*cover_sig.x();
             cb_pos_sens (2, p.cb_index)  += spline_deriv*cover_sig.x();
@@ -135,19 +135,19 @@ struct MembranePotential : public PotentialNode
         int n_virtual = n_donor+n_acceptor;
         for(int nv=0; nv<n_virtual; ++nv) {
             float hb_z    = hb_pos(2, nv);
-            float hb_prob = hb_pos(6, nv);  // probability of forming hbond
+            float hb_prob = hb_pos(6, nv);  // probability that his virtual participates in any HBond
 
             float result[2];
-            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, int(nv>=n_donor), (hb_z + uhb_z_shift) * uhb_z_scale);
+            membrane_energy_uhb_spline.evaluate_value_and_deriv(result, int(nv>=n_donor),
+                    (hb_z + uhb_z_shift) * uhb_z_scale);
             float spline_value = result[1];
             float spline_deriv = result[0]*uhb_z_scale;
 
-            float uhb_prob  = 1-hb_prob;
-            float uhb_prob2 = uhb_prob*uhb_prob;
+            float uhb_prob  = 1.f-hb_prob;
 
-            potential      += spline_value*uhb_prob2;
-            hb_sens(2, nv) += spline_deriv*uhb_prob2;
-            hb_sens(6, nv) += spline_value*(-2)*uhb_prob; 
+            potential      += spline_value*sqr(uhb_prob);
+            hb_sens(2, nv) += spline_deriv*sqr(uhb_prob);
+            hb_sens(6, nv) += -2.f*spline_value*uhb_prob; 
         }
     }
 };
