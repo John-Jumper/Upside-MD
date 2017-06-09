@@ -227,15 +227,18 @@ def kmeans_cluster(pc, rmsd, n_clusters):
     # label_rmsd = np.array([np.mean(r[labels==i]) for i in range(n_labels)])
     return labels
 
-
-def compute_upside_values(config_path, traj, outputs=dict(), named_values=dict()):
-    import upside_engine as ue
-
+def extract_bb_pos_angstroms(traj):
     # extract N,CA,C positions for measurements
     bb_atoms =  [(a.serial,a.index) for a in traj.topology.atoms if a.name in ('N','CA','C')]
     # Must convert distances to angstroms
     pos = 10.*traj.xyz[:,np.array([index for serial,index in sorted(bb_atoms)])]
     assert pos.shape[1] == traj.n_residues*3
+    return pos
+
+
+def compute_upside_values(config_path, traj, outputs=dict(), named_values=dict()):
+    import upside_engine as ue
+    pos = extract_bb_pos_angstrom(traj)
 
     # dists = np.sqrt(np.sum((pos[:,1:]-pos[:,:-1])**2, axis=-1))
     # print [(arr.mean(), np.std(arr)) for arr in (dists[:,0::3], dists[:,1::3], dists[:,2::3])]
