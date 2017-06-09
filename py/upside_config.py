@@ -4,7 +4,6 @@ import numpy as np
 import tables as tb
 import sys,os
 import cPickle
-import random
 
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
