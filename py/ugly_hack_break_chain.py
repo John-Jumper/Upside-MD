@@ -100,13 +100,16 @@ def main():
     # Need to add one atom past the last atom so that the last chain is processed
     chain_starts_plus = np.append(chain_starts, len(t.root.input.sequence)*3)
 
-    jump_atom_range = np.array([[chain_starts_plus[i], chain_starts_plus[i+1]] for i in xrange(n_chains)], dtype='int32')
-    # Add ranges of all chains in receptor and ligand for collective jumps
-    if rl_chains is not None:
-        if rl_chains[0] > 1:
-            jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[0], chain_starts_plus[rl_chains[0]]]], axis=0)
-        if rl_chains[1] > 1:
-            jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[rl_chains[0]], chain_starts_plus[-1]]], axis=0)
+    if rl_chains is None:
+        # range covers each individual chain
+        jump_atom_range = np.array([[chain_starts_plus[i], chain_starts_plus[i+1]] for i in xrange(n_chains)], dtype='int32')
+    else:
+        # Add ranges of all chains in receptor and ligand for collective jumps
+        # if rl_chains[0] > 1:
+            # jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[0], chain_starts_plus[rl_chains[0]]]], axis=0)
+        jump_atom_range = np.array([[chain_starts_plus[0], chain_starts_plus[rl_chains[0]]]])
+        # if rl_chains[1] > 1:
+        jump_atom_range = np.append(jump_atom_range, [[chain_starts_plus[rl_chains[0]], chain_starts_plus[-1]]], axis=0)
 
     jump_sigma_trans = np.array([args.jump_length_scale]*len(jump_atom_range), dtype='float32')
     jump_sigma_rot = np.array([args.jump_rotation_scale*np.pi/180.]*len(jump_atom_range), dtype='float32') # Converts to radians

@@ -110,7 +110,8 @@ def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
 
 
 @FormatRegistry.register_loader('.up')
-def load_upside_traj(fname, stride=1, target_pos_only=False):
+def load_upside_traj(fname, stride=1, atom_indices=None, target_pos_only=False):
+    assert atom_indices is None
     import tables as tb
     with tb.open_file(fname) as t:
         last_time = 0.
@@ -146,6 +147,60 @@ def load_upside_traj(fname, stride=1, target_pos_only=False):
 
     return traj_from_upside(seq, time, xyz, chain_first_residue=chain_first_residue)
 
+def load_upside_data(fname, output_names):
+    pass
+
+    # return dict from output_names to numpy array of values
+
+def load_upside_rep(fnames, rep_select, stride=1):
+    import tables as tb
+    for i, fn in enumerate(fnames):
+        if i == 0:
+            with tb.open_file(fn) as t:
+                last_time = 0.
+                start_frame = 0
+                total_frames_produced = 0
+                xyz = []
+                time = []
+                for g_no, g in enumerate(_output_groups(t)):
+                    # take into account that the first frame of each pos is the same as the last frame before restart
+                    # attempt to land on the stride
+                    sl = slice(start_frame,None,stride)
+                    xyz.append(g.pos[sl,0])
+                    time.append(g.time[sl]+last_time)
+                    last_time = g.time[-1]+last_time
+                    total_frames_produced += g.pos.shape[0]-(1 if g_no else 0)  # correct for first frame
+                    start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
+                xyz = np.concatenate(xyz,axis=0)
+                time = np.concatenate(time,axis=0)
+
+                seq = t.root.input.sequence[:]
+
+                # Check for chain breaks in config file
+                chain_first_residue = np.array([0], dtype='int32')
+                if 'chain_break' in t.root.input:
+                    chain_first_residue = np.append(chain_first_residue, t.root.input.chain_break.chain_first_residue[:])
+        else:
+            with tb.open_file(fn) as t:
+                start_frame = 0
+                total_frames_produced = 0
+                xyz2 = []
+                replica_idx = []
+                for g_no, g in enumerate(_output_groups(t)):
+                    # take into account that the first frame of each pos is the same as the last frame before restart
+                    # attempt to land on the stride
+                    sl = slice(start_frame,None,stride)
+                    xyz2.append(g.pos[sl,0])
+                    replica_idx.append(g.replica_index[sl,0])
+                    total_frames_produced += g.pos.shape[0]-(1 if g_no else 0)  # correct for first frame
+                    start_frame = 1 + stride*(total_frames_produced%stride>0) - total_frames_produced%stride
+            xyz2 = np.concatenate(xyz2, axis=0)
+            replica_idx = np.concatenate(replica_idx, axis=0)
+            replica_idx = (replica_idx == rep_select)
+            
+            xyz[replica_idx] = xyz2[replica_idx]
+        
+    return traj_from_upside(seq, time, xyz, chain_first_residue=chain_first_residue)        
 
 def ca_contact_pca(traj, n_pc, cutoff_angstroms=8., variance_scaled=True):
     from sklearn.decomposition import TruncatedSVD

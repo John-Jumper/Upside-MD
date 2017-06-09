@@ -1466,6 +1466,8 @@ def main():
                 for j in xrange(n_atom):
                         com_dist_list.append(vmag(com_list[i]-pos[j,:,0]))
 
+            # Max distance between all atoms
+
             args.cavity_radius = args.debugging_only_heuristic_cavity_radius*max(com_dist_list)
             print
             print "cavity_radius"
@@ -1568,9 +1570,20 @@ def main():
         write_affine_alignment(len(fasta_seq))
 
     if args.apply_restraint_group_to_each_chain and n_chains > 1:
-        for i in xrange(n_chains):
-            first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
+        if has_rl_info:
+            # receptor chains
+            first_res = chain_endpts(n_res, chain_first_residue, 0)[0]
+            next_first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0]-1)[1]
             args.restraint_group.append(np.arange(first_res, next_first_res))
+
+            # ligand chains
+            first_res = chain_endpts(n_res, chain_first_residue, rl_chains[0])[0]
+            next_first_res = chain_endpts(n_res, chain_first_residue, n_chains-1)[1]
+            args.restraint_group.append(np.arange(first_res, next_first_res))
+        else:
+            for i in xrange(n_chains):
+                first_res, next_first_res = chain_endpts(n_res, chain_first_residue, i)
+                args.restraint_group.append(np.arange(first_res, next_first_res))
 
         print
         print "restraint_group"
