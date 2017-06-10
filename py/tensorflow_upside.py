@@ -43,8 +43,13 @@ def numpy_reduce_inplace(comm, arrays, root=0):
 # Be careful that the MpiCollectiveObject class only holds a weakref on rank 0
 class MpiCollectiveObject(object):
     '''A special class for creating objects on all ranks, so that decorated methods are called collectively'''
-    def __init__(self, comm):
+    def __init__(self, comm, wait_granularity=0.2):
         self.comm = comm
+
+        # Wait granularity is the amount of time to wait between waking to check for new 
+        # messages.  This prevents the default busy-waiting behavior of MPI.
+        self.wait_granularity = float(wait_granularity)
+
         if not self.comm.rank:
             # Only the master needs protection with a lock
             # Locks are necessary because tensorflow using threading by default when evaluating 
@@ -55,13 +60,19 @@ class MpiCollectiveObject(object):
         self.classes = []
 
     def start_worker_loop(self):
+        import time
+
         # Rank 0 does not participate
         if not self.comm.rank: return
 
         while True:
-            # post bcast for all nodes to wait for rank 0
-            rpc = self.comm.bcast(None)
-            object_index, method_index, args, kwargs = rpc
+            # First we will use a non-blocking barrier to avoid busy-waiting for messages
+            barrier_request = self.comm.Ibarrier()
+            while not barrier_request.Get_status():
+                time.sleep(self.wait_granularity)
+
+            # post bcast for all nodes to receive message from rank 0
+            object_index, method_index, args, kwargs = self.comm.bcast(None)
             if object_index is None:  # special value to call constructor
                 class_index, object_index = method_index
                 assert len(self.objects) == object_index
@@ -84,6 +95,10 @@ class MpiCollectiveObject(object):
                 # we need to discard the self_from_call argument during the RPC because this is a self
                 # on rank 0 not the other ranks.  We use the object number as its replacement
                 with self.lock:
+                    # First send the wake-up from barrier message
+                    self.comm.Ibarrier().Wait()
+
+                    # Now send the RPC message to start the workers
                     self.comm.bcast((self_from_call.mpi_object_index, method_index, args, kwargs))
                     return f(self_from_call, *args, **kwargs)
             return wrap
@@ -108,6 +123,7 @@ class MpiCollectiveObject(object):
                     self_from_call.comm = self.comm
                     self.objects.append(weakref.proxy(self_from_call))
 
+                    self.comm.Ibarrier().Wait()
                     self.comm.bcast((None, (c.class_index,self_from_call.mpi_object_index), args, kwargs))
                     old_init(self_from_call, *args, **kwargs)
         c.__init__ = wrap_init
