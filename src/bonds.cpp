@@ -50,52 +50,44 @@ struct PosSpring : public PotentialNode
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
 
 
-// struct TensionPotential : public PotentialNode
-// {
-//     int n_elem;
-//     CoordNode& pos;
-//     struct Param {
-//         CoordPair atom;
-//         float3    tension_coeff;
-//     };
-//     vector<Param> params;
-// 
-//     TensionPotential(hid_t grp, CoordNode& pos_):
-//         PotentialNode(pos_.n_system),
-//         n_elem(get_dset_size(1, grp, "atom")[0]), pos(pos_), params(n_elem)
-//     {
-//         check_size(grp, "atom", n_elem);
-//         check_size(grp, "tension_coeff", n_elem, 3);
-// 
-//         traverse_dset<1,int>  (grp,"atom",         [&](size_t i,         int   x){params[i].atom.index = x;});
-//         traverse_dset<2,float>(grp,"tension_coeff",[&](size_t i,size_t d,float x){
-//                 component(params[i].tension_coeff,d) = x;});
-// 
-//         for(auto &p: params) pos.slot_machine.add_request(1, p.atom);
-//     }
-// 
-//     virtual void compute_value(ComputeMode mode) {
-//         Timer timer(string("tension")); 
-// 
-//         for(int ns=0; ns<n_system; ++ns) {
-//             auto pos_c = pos.coords();
-//             potential[ns] = 0.f;
-//             for(auto &p: params) {
-//                 auto x = Coord<3>(pos_c, ns, p.atom);
-//                 potential[ns] -= dot(x.f3(), p.tension_coeff);
-//                 x.set_deriv(-p.tension_coeff);
-//                 x.flush();
-//             }
-//         }
-//     }
-// 
-//     double test_value_deriv_agreement() {
-//         vector<vector<CoordPair>> coord_pairs(1);
-//         for(auto p: params) coord_pairs.back().push_back(p.atom);
-//         return compute_relative_deviation_for_node<3>(*this, pos, coord_pairs);
-//     }
-// };
-// static RegisterNodeType<TensionPotential,1> tension_node("tension");
+struct TensionPotential : public PotentialNode
+{
+    int n_elem;
+    CoordNode& pos;
+    struct Param {
+        index_t atom;
+        Vec<3>  tension_coeff;
+    };
+    vector<Param> params;
+
+    TensionPotential(hid_t grp, CoordNode& pos_):
+        PotentialNode(),
+        n_elem(get_dset_size(1, grp, "atom")[0]), pos(pos_), params(n_elem)
+    {
+        check_size(grp, "atom", n_elem);
+        check_size(grp, "tension_coeff", n_elem, 3);
+
+        auto &p = params;
+        traverse_dset<1,int>  (grp,"atom",         [&](size_t i,         int   x){p[i].atom = x;});
+        traverse_dset<2,float>(grp,"tension_coeff",[&](size_t i,size_t d,float x){p[i].tension_coeff[d] = x;});
+    }
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("tension"));
+
+        VecArray pos_c = pos.output;
+        VecArray pos_sens = pos.sens;
+
+        float pot = 0.f;
+        for(auto &p: params) {
+            auto x = load_vec<3>(pos_c, p.atom);
+            pot -= dot(x, p.tension_coeff);
+            update_vec(pos_sens, p.atom, -p.tension_coeff);
+        }
+        potential = pot;
+    }
+};
+static RegisterNodeType<TensionPotential,1> tension_node("tension");
 
 
 struct RamaCoord : public CoordNode
