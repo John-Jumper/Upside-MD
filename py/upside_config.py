@@ -1554,10 +1554,6 @@ def main():
         require_backbone_point = True
         write_contact_energies(parser, fasta_seq, args.contact_energies)
 
-    if args.contact_energies:
-        require_backbone_point = True
-        write_contact_energies(parser, fasta_seq, args.contact_energies)
-
     if require_backbone_point:
         require_affine = True
         write_CB(fasta_seq)
