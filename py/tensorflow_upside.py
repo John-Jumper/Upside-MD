@@ -174,7 +174,6 @@ class UpsideEnsemble(object):
         numpy_reduce_inplace(self.comm, param_sens.values())
         return [param_sens[pnm].astype('f4') for pnm in param_names]
 
-
     @mpi_collective_object
     def ensemble(self, system_names, param_names, *param_tensors):
         tstart = time.time()
