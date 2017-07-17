@@ -16,7 +16,7 @@ def find_multichain_terms(ids, chain_starts):
 def cut_out_rows(hdf_array, remove_row):
     assert remove_row.shape ==(hdf_array.shape[0],)
     assert remove_row.dtype == np.bool
-    keep_row = -remove_row
+    keep_row = np.logical_not(remove_row)
     n_keep   = keep_row.sum()
 
     hdf_array[:n_keep] = hdf_array[:][keep_row]
