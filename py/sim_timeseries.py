@@ -14,7 +14,7 @@ import pandas as pd
 from gzip import GzipFile
 import time
 
-upside_dir = os.expanduser('~/upside/')
+upside_dir = os.path.expanduser('~/upside/')
 
 if upside_dir + 'src' not in sys.path: sys.path = [upside_dir+'src'] + sys.path
 import run_upside as ru
@@ -57,7 +57,7 @@ def process_file(a):
                         energy=pot,
                         N_res = pos.shape[1]//3,
                         protein=protein,
-                        initial="init_"+t.root.input.args._v_attrs.initial_structures,
+                        initial="init_"+str(t.root.input.args._v_attrs.initial_structures),
                         T=T+np.zeros_like(pot),
                         Temp=np.array(['T=%.3f'%T]*len(sim_time)),
                         HBond=0.5*(n.hbond[sl]>0.05).sum(axis=1),  # 0.5 takes care of double counting
