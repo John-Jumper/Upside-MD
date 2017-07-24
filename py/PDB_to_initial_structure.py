@@ -20,6 +20,10 @@ three_letter_aa = dict(
         T='THR', V='VAL', W='TRP', Y='TYR')
 three_letter_aa["*P"] = "CPR"
 
+nonstandard_restype_conversion = dict(
+        MSE='MET',  # selenomethionine
+        )
+
 aa_num = dict([(k,i) for i,k in enumerate(sorted(three_letter_aa.values()))])
 
 one_letter_aa = dict([(v,k) for k,v in three_letter_aa.items()])
@@ -47,6 +51,10 @@ def read_residues(chain):
     residues = []
     for res in chain.iterResidues():
         restype = res.getResname()
+
+        if restype in nonstandard_restype_conversion:
+            restype = nonstandard_restype_conversion[restype]
+
         if restype not in one_letter_aa: 
             ignored_restypes[restype] = ignored_restypes.get(restype,0) + 1
             continue  # let's hope it is HOH or something
