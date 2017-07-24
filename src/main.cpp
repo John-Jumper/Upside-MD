@@ -464,7 +464,7 @@ try {
                 throw string("Unable to open configuration file at ") + config_paths[ns];
             }
 
-            if(h5_exists(sys->config.get(), "/output", false)) {
+            if(h5_exists(sys->config.get(), "output")) {
                 // Note that it is not possible in HDF5 1.8.x to reclaim space by deleting
                 // datasets or groups.  Subsequent h5repack will reclaim space, however.
                 h5_noerr(H5Ldelete(sys->config.get(), "/output", H5P_DEFAULT));

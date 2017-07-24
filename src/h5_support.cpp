@@ -41,8 +41,17 @@ try {
 }
 
 
-bool h5_exists(hid_t base, const char* nm, bool check_valid) {
-    return h5_noerr(H5LTpath_valid(base, nm, check_valid));
+bool h5_exists(hid_t base, const char* nm) {
+    // Note that this function does not do the full dance specified in 
+    // the documentation for H5Oexists_by_name.  I don't think this will cause
+    // false results but if there is a problem, consult the h5 docs.
+
+    // There is some special case problem with '.', so we 
+    // will always return true since base is assumed to exist
+    if(nm==std::string(".")) return true; 
+    
+    return h5_noerr(H5Lexists(base, nm, H5P_DEFAULT)) &&
+        h5_noerr(H5Oexists_by_name(base, nm, H5P_DEFAULT));
 }
 
 bool read_attribute(void* attr_value_output, hid_t h5, const char* path, const char* attr_name, hid_t predtype)
@@ -93,9 +102,30 @@ try {
     };
     traverse_dataset_iteraction_helper<1,char,decltype(g)>()(tmp.get(), dims, g, maxchars);
     return ret;
-}
-catch(const std::string &e) {
+} catch(const std::string &e) {
     throw "while reading attribute '" + std::string(attr_name) + "' of '" + std::string(path) + "', " + e;
+}
+
+
+void write_string_attribute(
+        hid_t h5, const char* path, const char* attr_name,
+        const std::string& value) 
+try {
+    // Create a string datatype of the appropriate size and null-terminated
+    auto attr_type = h5_obj(H5Tclose, H5Tcopy(H5T_C_S1));
+    h5_noerr(H5Tset_size(attr_type.get(), 1+value.size()));  // include 0 byte in size
+    h5_noerr(H5Tset_strpad(attr_type.get(), H5T_STR_NULLTERM));
+    auto attr_space = h5_obj(H5Sclose, H5Screate(H5S_SCALAR));
+
+    // Create and write attribute
+    auto attr = h5_obj(H5Aclose, H5Acreate_by_name(
+                h5, path, attr_name,
+                attr_type.get(), attr_space.get(), 
+                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
+    h5_noerr(H5Awrite(attr.get(), attr_type.get(), value.c_str()));
+} catch(const std::string &e) {
+    throw "while writing attribute '" + std::string(attr_name) + "' of '" +
+        std::string(path) + "', " + e;
 }
 
 void check_size(hid_t group, const char* name, std::vector<size_t> sz)

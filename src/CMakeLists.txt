@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 project(upside CXX C)
 
 set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
-find_package(HDF5 REQUIRED COMPONENTS C HL)
+find_package(HDF5 REQUIRED COMPONENTS C)
 find_package(OpenMP QUIET)
 
 set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler")
@@ -41,7 +41,7 @@ set (ENGINE_SRC
 add_executable (upside ${ENGINE_SRC})
 
 INCLUDE_DIRECTORIES (${HDF5_INCLUDE_DIRS})
-target_link_libraries(upside stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+target_link_libraries(upside stdc++ ${HDF5_LIBRARIES})
 
 find_package(Eigen3 REQUIRED)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -54,12 +54,12 @@ set_target_properties(upside_calculation PROPERTIES
     COMPILE_FLAGS "-DPARAM_DERIV"
     OUTPUT_NAME   "upside")
 
-target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+target_link_libraries(upside_calculation stdc++ ${HDF5_LIBRARIES})
 
 add_executable(compute_rotamer_centers generate_from_rotamer.cpp compute_rotamer_centers.cpp h5_support.cpp)
-target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+target_link_libraries(compute_rotamer_centers stdc++ m ${HDF5_LIBRARIES})
 set_target_properties(compute_rotamer_centers PROPERTIES EXCLUDE_FROM_ALL 1)
 
 add_executable(compute_rotamer_pos generate_from_rotamer.cpp compute_rotamer_pos.cpp h5_support.cpp)
-target_link_libraries(compute_rotamer_pos stdc++ m ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+target_link_libraries(compute_rotamer_pos stdc++ m ${HDF5_LIBRARIES})
 set_target_properties(compute_rotamer_pos PROPERTIES EXCLUDE_FROM_ALL 1)
