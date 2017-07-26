@@ -238,7 +238,7 @@ def extract_bb_pos_angstroms(traj):
 
 def compute_upside_values(config_path, traj, outputs=dict(), named_values=dict()):
     import upside_engine as ue
-    pos = extract_bb_pos_angstrom(traj)
+    pos = extract_bb_pos_angstroms(traj)
 
     # dists = np.sqrt(np.sum((pos[:,1:]-pos[:,:-1])**2, axis=-1))
     # print [(arr.mean(), np.std(arr)) for arr in (dists[:,0::3], dists[:,1::3], dists[:,2::3])]
