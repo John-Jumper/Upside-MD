@@ -82,7 +82,7 @@ struct BackbonePairs : public PotentialNode
         Timer timer(string("backbone_pairs"));
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
-        VecArrayStorage coords(3,n_residue);
+        VecArrayStorage coords(3,round_up(n_residue,4));
         vector<int>    ref_pos_atoms (n_residue);
         vector<float3> ref_pos_coords(n_residue*4);
 

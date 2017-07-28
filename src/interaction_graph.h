@@ -190,7 +190,13 @@ struct PairlistComputation {
             cache_edge_id1     (new_aligned<int32_t>(max_n_edge, 4)),
             cache_edge_id2     (new_aligned<int32_t>(max_n_edge, 4)),
             cache_n_edge(0)
-        {}
+        {
+            for(int i=0; i<n_elem1; i+=4)
+                for(int j=0; j<4; ++j) Float4(1e10f).store(cache_pos1+4*(i+j));
+            if(!symmetric)
+                for(int i=0; i<n_elem2; i+=4)
+                    for(int j=0; j<4; ++j) Float4(1e10f).store(cache_pos2+4*(i+j));
+        }
 
         template<acceptable_id_pair_t acceptable_id_pair>
         void find_edges(float cutoff,
@@ -214,10 +220,6 @@ struct PairlistComputation {
                 auto eid1 = Int4(cache_edge_id1+i_edge);
                 auto eid2 = Int4(cache_edge_id2+i_edge);
 
-                // auto x1 = aligned_gather_vec<3>(aligned_pos1,                         i1*Int4(pos1_stride));
-                // auto x2 = aligned_gather_vec<3>((symmetric?aligned_pos1:aligned_pos2),i2*Int4(pos2_stride));
-                // auto dist2 = mag2(x1-x2);
-                
                 Float4 x_diff[4];
                 #pragma unroll
                 for(int j=0; j<4; ++j)
