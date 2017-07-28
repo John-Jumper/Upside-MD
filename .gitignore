@@ -15,7 +15,6 @@ a.out
 .clang_complete
 CMakeCache.txt
 CMakeFiles/
-*.h5
 *.bak
 *.DS_Store
 ._*

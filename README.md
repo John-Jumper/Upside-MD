@@ -35,6 +35,8 @@ following paper tags have been created.
 
   * `sidechain_paper` -- "Maximum-likelihood, self-consistent side chain free
     energies with applications to protein molecular dynamics"
+  * `trajectory_training_paper` -- "Trajectory-Based Parameterization of a
+    Coarse-Grained Forcefield for High-Thoughput Protein Simulation"
 
 To get the precise version of Upside needed for the side chain free energy
 paper, just do `git checkout sidechain_paper`.  Note that you should ignore the
@@ -123,9 +125,7 @@ lists for the first time.
 #### Running molecular dynamics
 
 The following sections illustrate running simple molecular dynamics simulations
-with Upside.  These sections require the parameters directory which is not currently 
-available in this repository due to licensing issues.  Please contact the author
-at jumper at uchicago, which is an edu address, to request the parameters.
+with Upside.
 
 ### Converting a PDB file to Upside input
 
@@ -138,27 +138,29 @@ which will create `output_basename.fasta` containing the FASTA sequence,
 coordinates of the N, CA, and C atoms of the backbone, and
 `output_basename.chi` containing the chi1 and chi2 angles for the side chains.
 The .chi file is not needed for MD simulation, unless you want to run with
-fixed side chain rotamers.  `PDB_to_initial_structure.py` will fail if there
+inflexible side chain rotamers.  `PDB_to_initial_structure.py` will fail if there
 are breaks in the chain, as chain breaks will cause the MD to be invalid.  See
 `--help` for information on how to choose the PDB model or chains to include.
 
 From the output of `PDB_to_inital_structure.py`, we can create an Upside
-configuration, `simulation.up`.  
+configuration, `simulation.up`.  The following instructions are for a typical
+folding or conformational dynamics simulation.
 
-    upside/py/upside_config.py --output                simulation.up \
-                               --fasta                 output_basename.fasta \
-                               --initial-structure     output_basename.initial.pkl \
-                               --hbond-energy          -1.8 \
-                               --dynamic-rotamer-1body \
-                               --rotamer-placement     upside/parameters/sidechain.h5 \
-                               --rotamer-interaction   upside/parameters/sidechain.h5 \
-                               --rama-library          upside/parameters/rama_libraries.h5 \
-                               --reference-state-rama  upside/parameters/reference_state_rama.pkl
+    upside/py/upside_config.py --output                   simulation.up \
+                               --fasta                    output_basename.fasta \
+                               --initial-structure        output_basename.initial.pkl \
+                               --hbond-energy             $(cat upside/parameters/ff_1/hbond) \
+                               --dynamic-rotamer-1body    \
+                               --rotamer-placement        upside/parameters/ff_1/sidechain.h5 \
+                               --rotamer-interaction      upside/parameters/ff_1/sidechain.h5 \
+			       --environment              upside/parameters/ff_1/environment.h5 \
+                               --rama-library             upside/parameters/common/rama.dat \
+			       --rama-sheet-mixing-energy $(cat upside/parameters/ff_1/sheet) \
+                               --reference-state-rama     upside/parameters/common/rama_reference.pkl
 
-The `sidechain.h5` and `--hbond-energy` may be varied to reproduce the various
-simulations in the paper.  If `--initial-structure` is omitted, the simulation
-will be initialized with random (possibly-clashing) Ramachandran angles, which
-is useful for de novo structure prediction.
+If `--initial-structure` is omitted, the simulation will be initialized with
+random (possibly-clashing) Ramachandran angles, which is useful for de novo
+structure prediction.
 
 The output `simulation.up` is an HDF5 file, and the simulation configuration is
 written in the "/input" group within the `.up` file.  The `upside_config.py`
@@ -208,7 +210,7 @@ swaps that are attempted simultaneously.  For a linear chain of temperatures,
 there should always be two swap sets to ensure ergodicity of swaps without
 having any overlapping pairs.
 
-The `--monte-carlo-interval` controls the frequency at which pivot moves , a
+The `--monte-carlo-interval` controls the frequency at which pivot moves, a
 discrete change in the phi and psi angles of a single, randomly-chosen residue,
 are attempted.  These Monte Carlo pivot moves are accepted with a Metropolis
 criterion so that the Boltzmann ensemble of simulation is unchanged by pivot
