@@ -164,7 +164,7 @@ class Upside(object):
             self.n_atom = self.initial_pos.shape[0]
             self.sequence = t.root.input.sequence[:]
         self.engine = calc.construct_deriv_engine(self.n_atom, self.config_file_path, bool(quiet))
-        if self.engine is None: raise RuntimeError('Unable to initialize upside engine')
+        if self.engine is None: raise RuntimeError('Unable to initialize upside engine for %s'%(config_file_path,))
 
     def __repr__(self):
         return 'Upside(%r, %r)'%(self.n_atom, self.config_file_path)
