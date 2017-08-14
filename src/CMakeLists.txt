@@ -19,6 +19,7 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
+    nn.cpp
     main.cpp
     environment.cpp
     hbond.cpp 
