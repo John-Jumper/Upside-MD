@@ -476,7 +476,7 @@ struct ConstantCoord : public CoordNode
     ConstantCoord(hid_t grp):
         CoordNode(get_dset_size(2, grp, "value")[0], 
                   get_dset_size(2, grp, "value")[1]),
-        value(elem_width, n_elem)
+        value(elem_width, round_up(n_elem,4))
     {
         traverse_dset<2,float>(grp, "value", [&](size_t ne, size_t nd, float x) {
                 value(nd,ne) = x;});
