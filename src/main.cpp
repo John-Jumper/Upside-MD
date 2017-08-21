@@ -459,7 +459,8 @@ try {
             sys->random_seed = base_random_seed + ns;
 
             try {
-                sys->config = h5_obj(H5Fclose, H5Fopen(config_paths[ns].c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+                sys->config = h5_obj(H5Fclose,
+                        H5Fopen(config_paths[ns].c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
             } catch(string &s) {
                 throw string("Unable to open configuration file at ") + config_paths[ns];
             }

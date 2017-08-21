@@ -22,8 +22,8 @@ template<> inline hid_t select_predtype<long>  (){ return H5T_NATIVE_LONG;    }
 template<> inline hid_t select_predtype<unsigned>(){ return H5T_NATIVE_UINT;    }
 //! \endcond
 
-int h5_noerr(int i); //!< if i<0 (signalling failed H5 function), throw an error
-int h5_noerr(const char* nm, int i); //!< if i<0 (signalling failed H5 function), throw an error
+hid_t h5_noerr(hid_t i); //!< if i<0 (signalling failed H5 function), throw an error
+hid_t h5_noerr(const char* nm, hid_t i); //!< if i<0 (signalling failed H5 function), throw an error
 
 inline bool h5_bool_return(htri_t value) {
     if(value<0) throw std::string("hdf5 error");

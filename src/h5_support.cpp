@@ -3,7 +3,7 @@
 
 namespace h5 {
 
-int h5_noerr(int i) {
+hid_t h5_noerr(hid_t i) {
     if(i<0) {
         // H5Eprint2(H5E_DEFAULT, stderr);
         throw std::string("error " + std::to_string(i));
@@ -11,7 +11,7 @@ int h5_noerr(int i) {
     return i;
 }
 
-int h5_noerr(const char* nm, int i) {
+hid_t h5_noerr(const char* nm, hid_t i) {
     if(i<0) {
         // H5Eprint2(H5E_DEFAULT, stderr);
         throw std::string("error " + std::to_string(i) + " in " + nm);
