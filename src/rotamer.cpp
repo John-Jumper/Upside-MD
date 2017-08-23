@@ -206,26 +206,6 @@ struct EdgeLocator {
 };
 
 
-float softplus(float& deriv, float x) {
-    // softplus is defined as log(1+e^x) or equivalently x + log(1+e^-x)
-    // it has the property that softplus(x) is approximately x for x large but also softplus(x)>0
-    // we must avoid overflow for either very large or very small x
-    // the derivative is given by e^x/(1+e^x) or equivalently 1/(1+e^-x)
-
-    float value;
-    if(x<0.f) {
-        float y = expf(x);  // this number is < 1
-        deriv = y*rcp(1.f+y);
-        value = logf(1.f+y);
-    } else {
-        float z = expf(-x); // this number is < 1
-        deriv = rcp(1.f+z);
-        value = x + logf(1.f+z);
-    }
-    return value;
-}
-
-
 struct NodeHolder {
     const int n_rot;
     const int n_elem;
@@ -263,15 +243,7 @@ struct NodeHolder {
         // It might be more effective to l1 normalize the probabilities at the end,
         //   but then I would need an extra logf to add to the offset if we are in energy mode
 
-        // float inv_e_cap_width = rcp(e_cap_width);
         for(int ne: range(n_elem)) {
-            // for(int d=0; d<n_rot; ++d) {
-            //     // ensure that node energies are not too large
-            //     float deriv;
-            //     prob(d,ne) = e_cap + e_cap_width*softplus(deriv, inv_e_cap_width*(prob(d,ne)-e_cap));
-            //     energy_capping_deriv(d,ne) = deriv;
-            // }
-
             auto e_offset = prob(0,ne);
             for(int d=1; d<n_rot; ++d)
                 e_offset = min(e_offset, prob(d,ne));
@@ -529,7 +501,8 @@ struct EdgeHolder {
                 // Perform edge normalization for all edges
                 // We could perform it in the loop above, but it would insert a long dependency chain in the 
                 // middle of the algorithm.  The hope is that the processor will expose much more instruction
-                // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal adds.
+                // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal
+                // adds.
                 for(int ne=0; ne<n_edge; ne+=2) {
                     auto cb11 = read4vec<w1>(cur_belief.x + ne*4*ws + 0);
                     auto cb12 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*w1);
@@ -731,7 +704,9 @@ struct RotamerSidechain: public PotentialNode {
                 node_starts[n_rot] = nn;
                 for(int ne=0; ne<nodes.n_elem; ++ne, ++nn)  // increment both global and local counters
                     for(int nr=0; nr<6; ++nr)
-                        node_energy[nn*6+nr] = (nr<n_rot) ? nodes.energy_offset[ne]-logf(nodes.prob(nr,ne)) : 1e5f;
+                        node_energy[nn*6+nr] = (nr<n_rot)
+                            ? /*nodes.energy_offset[ne]*/-logf(nodes.prob(nr,ne))
+                            : 1e5f;
             }
             return node_energy;
         } else if(!strcmp(log_name, "edge_energy") || !strcmp(log_name, "edge_marginal_in_graph_order")) {
@@ -1016,6 +991,7 @@ struct RotamerSidechain: public PotentialNode {
         edges33.update_beliefs<3,3>();
         edges36.update_beliefs<3,6>();
         edges66.update_beliefs<6,6>();
+
         if(do_swap_for_initial) {
             // we want the "old" values here
             nodes3.swap_beliefs();
