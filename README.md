@@ -21,12 +21,6 @@ be clear enough to figure out.
   * Pandas (needed for `predict_chi1.py`)
   * MDTraj (optional but capable of loading and analyzing Upside trajectories)
 
-#### Obtaining the source code and parameter files
-
-The source code is obtained from this repository.  The parameter files must
-be obtained separately.  We are working on some licensing issues that currently
-prevent including the parameters with the source code.
-
 ## Acquiring specific versions of Upside to reproduce a paper
 
 Each paper that uses Upside should create a git tag that indicates the precise
