@@ -56,7 +56,7 @@ struct CoordNode : public DerivComputation
     int n_elem;
     int elem_width;
     VecArrayStorage output;
-    VecArrayStorage sens;
+    VecArrayAccum   sens;
 
     CoordNode(int n_elem_, int elem_width_):
         DerivComputation(false),

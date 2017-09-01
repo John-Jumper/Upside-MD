@@ -104,6 +104,7 @@ struct BackbonePairs : public PotentialNode
                 coords.x.get(), coords.row_width, id.get());
         int n_edge = pairlist.n_edge;
 
+        VecArray alignment_sens = alignment.sens.acquire();
         for(int ne=0; ne<n_edge; ne++) {
             int nr1 = pairlist.edge_indices1[ne];
             int nr2 = pairlist.edge_indices2[ne];
@@ -138,10 +139,11 @@ struct BackbonePairs : public PotentialNode
                 Vec<6> combine_deriv1; store<0,3>(combine_deriv1, d1); store<3,6>(combine_deriv1, torque1);
                 Vec<6> combine_deriv2; store<0,3>(combine_deriv2, d2); store<3,6>(combine_deriv2, torque2);
 
-                update_vec(alignment.sens, params[nr1].residue, combine_deriv1);
-                update_vec(alignment.sens, params[nr2].residue, combine_deriv2);
+                update_vec(alignment_sens, params[nr1].residue, combine_deriv1);
+                update_vec(alignment_sens, params[nr2].residue, combine_deriv2);
             }
         }
+        alignment.sens.release(alignment_sens);
     }
 };
 static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

@@ -387,7 +387,9 @@ struct AffineAlignment : public CoordNode
 
     virtual void propagate_deriv() {
         Timer timer(string("affine_alignment_deriv"));
-        float* pos_sens = pos.sens.x.get();
+        VecArray pos_sens_va = pos.sens.acquire();
+        float* pos_sens = pos_sens_va.x;
+        VecArray sns = sens.accum();  // avoid long lines when replacing sens
 
         for(int ng=0; ng<n_group; ++ng) {
             const auto& p = params[ng];
@@ -405,9 +407,9 @@ struct AffineAlignment : public CoordNode
             // this means a right multiply by the quaternion itself
 
             // evecs[0] is the rotation quaternion
-            S sens3  [3] = {Float4(&sens(0,4*ng+0)), Float4(&sens(0,4*ng+1)),Float4(&sens(0,4*ng+2))};
-            S torque [3] = {Float4(&sens(0,4*ng+3)), Float4(&sens(4,4*ng+0)),Float4(&sens(4,4*ng+1))};
-            S padding[2] = {Float4(&sens(4,4*ng+2)), Float4(&sens(4,4*ng+3))};
+            S sens3  [3] = {Float4(&sns(0,4*ng+0)), Float4(&sns(0,4*ng+1)),Float4(&sns(0,4*ng+2))};
+            S torque [3] = {Float4(&sns(0,4*ng+3)), Float4(&sns(4,4*ng+0)),Float4(&sns(4,4*ng+1))};
+            S padding[2] = {Float4(&sns(4,4*ng+2)), Float4(&sns(4,4*ng+3))};
 
             transpose4(sens3 [0],sens3 [1],sens3  [2],torque [0]);
             transpose4(torque[1],torque[2],padding[0],padding[1]);
@@ -467,6 +469,7 @@ struct AffineAlignment : public CoordNode
                 aligned_scatter_update_vec_destructive(pos_sens, Int4(p.atom_offsets[na]), deriv);
             }
         }
+        pos.sens.release(pos_sens_va);
     }
 };
 

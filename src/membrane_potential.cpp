@@ -106,11 +106,11 @@ struct MembranePotential : public PotentialNode
         Timer timer(string("membrane_potential"));
 
         VecArray cb_pos       = res_pos.output;
-        VecArray cb_pos_sens  = res_pos.sens;
+        VecArray cb_pos_sens  = res_pos.sens.acquire();
         VecArray env_cov      = environment_coverage.output;
-        VecArray env_cov_sens = environment_coverage.sens;
+        VecArray env_cov_sens = environment_coverage.sens.acquire();
         VecArray hb_pos       = protein_hbond.output;
-        VecArray hb_sens      = protein_hbond.sens;
+        VecArray hb_sens      = protein_hbond.sens.acquire();
 
         potential = 0.f;
 
@@ -149,6 +149,9 @@ struct MembranePotential : public PotentialNode
             hb_sens(2, nv) += spline_deriv*sqr(uhb_prob);
             hb_sens(6, nv) += -2.f*spline_value*uhb_prob; 
         }
+        res_pos.sens.release(cb_pos_sens);
+        environment_coverage.sens.release(env_cov_sens);
+        protein_hbond.sens.release(hb_sens);
     }
 };
 

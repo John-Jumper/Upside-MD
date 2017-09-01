@@ -968,7 +968,7 @@ struct RotamerSidechain: public PotentialNode {
         vector<VecArray> sens_1body;
         sens_1body.reserve(n_prob_nodes);
         for(int i: range(n_prob_nodes)) 
-            sens_1body.emplace_back(prob_nodes[i]->sens);
+            sens_1body.emplace_back(prob_nodes[i]->sens.acquire());
 
         for(int n: range(igraph.n_elem1)) {
             unsigned id = igraph.id1[n];
@@ -978,10 +978,11 @@ struct RotamerSidechain: public PotentialNode {
 
             for(int i: range(n_prob_nodes)) {
                 NodeHolder* nh = node_holders_matrix[n_rot];
-                // sens_1body[i](0,igraph.loc1[n]) += nh->energy_capping_deriv(rot,id) * nh->cur_belief(rot,id);
                 sens_1body[i](0,igraph.loc1[n]) += nh->cur_belief(rot,id);
             }
         }
+        for(int i: range(n_prob_nodes)) 
+            prob_nodes[i]->sens.release(sens_1body[i]);
     }
 
 

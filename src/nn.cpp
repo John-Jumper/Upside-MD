@@ -63,17 +63,20 @@ struct BackboneFeaturizer : public CoordNode
     }
 
     virtual void propagate_deriv() override {
-        VecArray rama_s = rama.sens;
-        VecArray hbond_s = hbond.sens;
+        VecArray rama_s = rama.sens.acquire();
+        VecArray hbond_s = hbond.sens.acquire();
+        VecArray sens_acc = sens.accum();
 
         for(int ne=0; ne<n_elem; ++ne) {
             auto& p = params[ne];
 
-            rama_s(0,p.rama_idx) += sens(1,ne)*(-output(0,ne)) + sens(0,ne)*output(1,ne);
-            rama_s(1,p.rama_idx) += sens(3,ne)*(-output(2,ne)) + sens(2,ne)*output(3,ne);
-            if(p.donor_idx   !=-1) hbond_s(6,p.donor_idx   ) += sens(4,ne);
-            if(p.acceptor_idx!=-1) hbond_s(6,p.acceptor_idx) += sens(5,ne);
+            rama_s(0,p.rama_idx) += sens_acc(1,ne)*(-output(0,ne)) + sens_acc(0,ne)*output(1,ne);
+            rama_s(1,p.rama_idx) += sens_acc(3,ne)*(-output(2,ne)) + sens_acc(2,ne)*output(3,ne);
+            if(p.donor_idx   !=-1) hbond_s(6,p.donor_idx   ) += sens_acc(4,ne);
+            if(p.acceptor_idx!=-1) hbond_s(6,p.acceptor_idx) += sens_acc(5,ne);
         }
+        rama.sens.release(rama_s);
+        hbond.sens.release(hbond_s);
     }
 };
 static RegisterNodeType<BackboneFeaturizer,2> backbone_featurizer_node("backbone_featurizer");
@@ -166,23 +169,24 @@ struct Conv1D : public CoordNode
 
     virtual void propagate_deriv() override {
         int n_elem_output = n_elem;
+        VecArray sens_acc = sens.accum();
 
         // Backpropagate activations
         switch(activation) {
             case Identity:
                 for(int nr=0; nr<n_elem_output; ++nr)
                     for(int nc=0; nc<out_channels; ++nc)
-                        matmul_output(nr,nc) = sens(nc,nr);
+                        matmul_output(nr,nc) = sens_acc(nc,nr);
                 break;
             case ReLU:
                 for(int nr=0; nr<n_elem_output; ++nr)
                     for(int nc=0; nc<out_channels; ++nc)
-                        matmul_output(nr,nc) = output(nc,nr)>0.f ? sens(nc,nr) : 0.f;
+                        matmul_output(nr,nc) = output(nc,nr)>0.f ? sens_acc(nc,nr) : 0.f;
                 break;
             case Tanh:
                 for(int nr=0; nr<n_elem_output; ++nr)
                     for(int nc=0; nc<out_channels; ++nc)
-                        matmul_output(nr,nc) = sens(nc,nr) * (1.f-sqr(output(nc,nr)));
+                        matmul_output(nr,nc) = sens_acc(nc,nr) * (1.f-sqr(output(nc,nr)));
                 break;
         }
 
@@ -190,11 +194,12 @@ struct Conv1D : public CoordNode
         input_conv_format.noalias() = matmul_output * weights.transpose();
 
         // Backpropagte into sens
-        VecArray inp_sens = input.sens;
+        VecArray inp_sens = input.sens.acquire();
         for(int nr=0; nr<n_elem_output; ++nr)
             for(int nw=0; nw<conv_width; ++nw)
                 for(int nc=0; nc<in_channels; ++nc)
                     inp_sens(nc,nr+nw) += input_conv_format(nr,nw*in_channels+nc);
+        input.sens.release(inp_sens);
     }
 };
 static RegisterNodeType<Conv1D,1> conv1d_node("conv1d");
@@ -217,7 +222,7 @@ struct ScaledSum: public PotentialNode
     virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("scaled_sum")); 
         VecArray value = input.output;
-        VecArray sens  = input.sens;
+        VecArray sens  = input.sens.acquire();
         int n_elem = input.n_elem;
 
         float pot = 0.f;
@@ -226,6 +231,7 @@ struct ScaledSum: public PotentialNode
         potential = pot;
 
         for(int i=0; i<n_elem; ++i) sens(0,i) += scale;
+        input.sens.release(sens);
     }
 };
 static RegisterNodeType<ScaledSum,1> scaled_sum_node("scaled_sum");

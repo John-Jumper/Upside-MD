@@ -544,14 +544,16 @@ struct InteractionGraph{
 
         // Push derivatives to slots
         {
-            VecArray pos1_sens = pos_node1->sens;
+            VecArray pos1_sens = pos_node1->sens.acquire();
             for(int i1=0; i1<n_elem1; ++i1)
                 update_vec(pos1_sens, loc1[i1], load_vec<n_dim1>(pos1_deriv+i1*n_dim1a));
+            pos_node1->sens.release(pos1_sens);
         }
         if(!symmetric) {
-            VecArray pos2_sens = pos_node2->sens;
+            VecArray pos2_sens = pos_node2->sens.acquire();
             for(int i2=0; i2<n_elem2; ++i2)
                 update_vec(pos2_sens, loc2[i2], load_vec<n_dim2>(pos2_deriv+i2*n_dim2a));
+            pos_node2->sens.release(pos2_sens);
         }
     }
 };

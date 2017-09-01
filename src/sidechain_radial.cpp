@@ -169,7 +169,7 @@ struct ContactEnergy : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("contact_energy"));
         VecArray pos  = bead_pos.output;
-        VecArray sens = bead_pos.sens;
+        VecArray sens = bead_pos.sens.acquire();
         potential = 0.f;
 
         for(int nc=0; nc<n_contact; ++nc) {
@@ -184,6 +184,7 @@ struct ContactEnergy : public PotentialNode
             update_vec(sens, p.loc[0],  deriv);
             update_vec(sens, p.loc[1], -deriv);
         }
+        bead_pos.sens.release(sens);
     }
 };
 }

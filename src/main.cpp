@@ -305,9 +305,10 @@ vector<float> potential_deriv_agreement(DerivEngine& engine) {
 
     auto central_diff_jac = central_difference_deriviative(do_compute, input, output, 1e-3);
     vector<float> deriv_array;
+    VecArray engine_sens = engine.pos->sens.accum();
     for(int na=0; na<n_atom; ++na)
         for(int d=0; d<3; ++d)
-            deriv_array.push_back(engine.pos->sens(d,na));
+            deriv_array.push_back(engine_sens(d,na));
 
     relative_error.push_back(
             relative_rms_deviation(central_diff_jac, deriv_array));

@@ -94,9 +94,10 @@ struct EnvironmentCoverage : public CoordNode {
 
     virtual void propagate_deriv() override {
         Timer timer(string("d_environment_coverage"));
+        VecArray sens_acc = sens.accum();
 
         for(int ne: range(igraph.n_edge))
-            igraph.edge_sensitivity[ne] = sens(0,igraph.edge_indices1[ne]);
+            igraph.edge_sensitivity[ne] = sens_acc(0,igraph.edge_indices1[ne]);
         igraph.propagate_derivatives();
     }
 
@@ -143,14 +144,19 @@ struct WeightedPos : public CoordNode {
 
     virtual void propagate_deriv() override {
         Timer timer("d_weighted_pos");
+        VecArray sens_acc = sens.accum();
+        VecArray pos_sens = pos.sens.acquire();
+        VecArray energy_sens = energy.sens.acquire();
 
         for(int ne=0; ne<n_elem; ++ne) {
             auto p = params[ne];
-            pos.sens(0,p.index_pos) += sens(0,ne);
-            pos.sens(1,p.index_pos) += sens(1,ne);
-            pos.sens(2,p.index_pos) += sens(2,ne);
-            energy.sens(0,p.index_weight) -= output(3,ne)*sens(3,ne); // exponential derivative
+            pos_sens(0,p.index_pos) += sens_acc(0,ne);
+            pos_sens(1,p.index_pos) += sens_acc(1,ne);
+            pos_sens(2,p.index_pos) += sens_acc(2,ne);
+            energy_sens(0,p.index_weight) -= output(3,ne)*sens_acc(3,ne); // exponential derivative
         }
+        pos.sens.release(pos_sens);
+        energy.sens.release(energy_sens);
     }
 };
 static RegisterNodeType<WeightedPos,2> weighted_pos_node("weighted_pos");
@@ -190,8 +196,11 @@ struct UniformTransform : public CoordNode {
 
     virtual void propagate_deriv() override {
         Timer timer("d_uniform_transform");
+        VecArray input_sens = input.sens.acquire();
+        VecArray sens_acc = sens.accum();
         for(int ne=0; ne<n_elem; ++ne)
-            input.sens(0,ne) += jac[ne]*sens(0,ne);
+            input_sens(0,ne) += jac[ne]*sens_acc(0,ne);
+        input.sens.release(input_sens);
     }
 
     virtual std::vector<float> get_param() const override{
@@ -281,6 +290,9 @@ struct LinearCoupling : public PotentialNode {
 
     virtual void compute_value(ComputeMode mode) override {
         Timer timer("linear_coupling");
+        VecArray input_sens = input.sens.acquire();
+        VecArray inactivation_sens;
+        if(inactivation) inactivation_sens = inactivation->sens.acquire();
         int n_elem = input.n_elem;
         float pot = 0.f;
         for(int ne=0; ne<n_elem; ++ne) {
@@ -288,10 +300,12 @@ struct LinearCoupling : public PotentialNode {
             float act = inactivation ? sqr(1.f-inactivation->output(inactivation_dim,ne)) : 1.f;
             float val = input.output(0,ne);
             pot += c * val * act;
-            input.sens(0,ne) += c*act;
-            if(inactivation) inactivation->sens(inactivation_dim,ne) -= c*val;
+            input_sens(0,ne) += c*act;
+            if(inactivation) inactivation_sens(inactivation_dim,ne) -= c*val;
         }
         potential = pot;
+        input.sens.release(input_sens);
+        if(inactivation) inactivation->sens.release(inactivation_sens);
     }
 
     virtual std::vector<float> get_param() const override {
@@ -357,15 +371,18 @@ struct NonlinearCoupling : public PotentialNode {
 
     virtual void compute_value(ComputeMode mode) override {
         Timer timer("nonlinear_coupling");
+        VecArray input_sens = input.sens.acquire();
         int n_elem = input.n_elem;
         float pot = 0.f;
         for(int ne=0; ne<n_elem; ++ne) {
             auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
-            auto v = clamped_deBoor_value_and_deriv(coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff);
+            auto v = clamped_deBoor_value_and_deriv(
+                    coeff.data() + coupling_types[ne]*n_coeff, coord, n_coeff);
             pot              += v[0];
-            input.sens(0,ne) += v[1]*spline_inv_dx;
+            input_sens(0,ne) += v[1]*spline_inv_dx;
         }
         potential = pot;
+        input.sens.release(input_sens);
     }
 
     virtual std::vector<float> get_param() const override {

@@ -36,7 +36,7 @@ struct PosSpring : public PotentialNode
         Timer timer(string("pos_spring")); 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         VecArray posc = pos.output;
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
 
         if(pot) *pot = 0.f;
         for(int nt=0; nt<n_elem; ++nt) {
@@ -45,6 +45,7 @@ struct PosSpring : public PotentialNode
             if(pot) *pot += 0.5f * p.spring_constant * mag2(disp);
             update_vec(pos_sens, p.atom, p.spring_constant * disp);
         }
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
@@ -76,7 +77,7 @@ struct TensionPotential : public PotentialNode
         Timer timer(string("tension"));
 
         VecArray pos_c = pos.output;
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
 
         float pot = 0.f;
         for(auto &p: params) {
@@ -85,6 +86,7 @@ struct TensionPotential : public PotentialNode
             update_vec(pos_sens, p.atom, -p.tension_coeff);
         }
         potential = pot;
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<TensionPotential,1> tension_node("tension");
@@ -150,11 +152,13 @@ struct RamaCoord : public CoordNode
 
     virtual void propagate_deriv() {
         Timer timer(string("rama_coord_deriv"));
-        float* pos_sens = pos.sens.x.get();
+        auto pos_sens_va = pos.sens.acquire();
+        float* pos_sens = pos_sens_va.x;
+        VecArray sens_accum = sens.accum();
 
         for(int nt=0; nt<n_elem; ++nt) {
             const auto& p = params[nt];
-            Float4 s[2] = {Float4(sens(0,nt)), Float4(sens(1,nt))};
+            Float4 s[2] = {Float4(sens_accum(0,nt)), Float4(sens_accum(1,nt))};
 
             Float4 ps[5];
             for(int na: range(5))
@@ -166,6 +170,7 @@ struct RamaCoord : public CoordNode
             for(int na: range(5))
                 ps[na].store(pos_sens + 4*p.atom[na]);  // value was added above
         }
+        pos.sens.release(pos_sens_va);
     }
 };
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
@@ -220,7 +225,7 @@ struct DistSpring : public PotentialNode
         Timer timer(string("dist_spring"));
 
         VecArray posc = pos.output;
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
@@ -237,6 +242,7 @@ struct DistSpring : public PotentialNode
             update_vec(pos_sens, p.atom[0],  deriv);
             update_vec(pos_sens, p.atom[1], -deriv);
         }
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
@@ -273,7 +279,7 @@ struct CavityRadial : public PotentialNode
         Timer timer(string("cavity_radial"));
 
         VecArray posc = pos.output;
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
@@ -291,6 +297,7 @@ struct CavityRadial : public PotentialNode
                 update_vec(pos_sens, p.id, (p.spring_constant*excess*inv_r)*x);
             }
         }
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
@@ -330,7 +337,7 @@ struct ZFlatBottom : public PotentialNode
         Timer timer(string("z_flat_bottom"));
 
         VecArray posc = pos.output;
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
@@ -344,6 +351,7 @@ struct ZFlatBottom : public PotentialNode
 
             if(pot) *pot += 0.5f*p.spring_constant * sqr(excess);
         }
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
@@ -380,7 +388,8 @@ struct AngleSpring : public PotentialNode
         Timer timer(string("angle_spring"));
 
         float* posc = pos.output.x.get();
-        float* pos_sens = pos.sens.x.get();
+        VecArray pos_sens_va = pos.sens.acquire();
+        float* pos_sens = pos_sens_va.x;
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
@@ -406,6 +415,7 @@ struct AngleSpring : public PotentialNode
 
             if(pot) *pot += 0.5f * p.spring_constant * sqr(dp.x()-p.equil_dp);
         }
+        pos.sens.release(pos_sens_va);
     }
 };
 static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
@@ -442,7 +452,8 @@ struct DihedralSpring : public PotentialNode
         Timer timer(string("dihedral_spring"));
 
         float* posc = pos.output.x.get();
-        float* pos_sens = pos.sens.x.get();
+        VecArray pos_sens_va = pos.sens.acquire();
+        float* pos_sens = pos_sens_va.x;
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         if(pot) *pot = 0.f;
 
@@ -464,6 +475,7 @@ struct DihedralSpring : public PotentialNode
 
             if(pot) *pot += 0.5f * p.spring_constant * sqr(displacement);
         }
+        pos.sens.release(pos_sens_va);
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");

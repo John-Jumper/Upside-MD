@@ -6,8 +6,11 @@
 #include <memory>
 #include <cstdio>
 #include <cassert>
+#include <vector>
 #include <algorithm>
 #include "Float4.h"
+#include <mutex>
+
 
 static constexpr int default_alignment=4; // suitable for SSE
 
@@ -113,6 +116,121 @@ static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
         for(int ne=0; ne<n_elem; ++ne) 
             v(d,ne) = fill_value;
 }
+
+
+struct VecArrayAccum {
+    // Class representing accumulation of vectors
+    // For thread-safety, it provides multiple copies that are further accumulated
+    // the entire public API is thread-safe
+
+    protected:
+        std::mutex mut;
+        constexpr static bool deterministic = false;
+
+        enum class ActiveState {
+            Never,
+            Previous,
+            Current};
+
+        int n_store;
+        std::vector<ActiveState> state;
+        std::vector<VecArrayStorage> store;
+
+        void push_back_store() {
+            ++n_store;
+            state.push_back(ActiveState::Never);
+            store.emplace_back(elem_width, n_elem);
+        }
+
+        void zero_store(int ns) {
+            // reset for later accumulation
+            fill(store[ns], 0.f);
+            state[ns] = ActiveState::Never;
+        }
+
+
+    public:
+        int n_elem;
+        int elem_width;
+
+        VecArrayAccum(int elem_width_, int n_elem_):
+            n_store(0),
+            n_elem(n_elem_),
+            elem_width(elem_width_)
+        {
+            push_back_store();  // always have at least one store
+        }
+
+        VecArray acquire() {
+            std::lock_guard<std::mutex> g(mut);
+
+            for(int i=0; i<n_store; ++i) {
+                if(state[i]!=ActiveState::Current) {
+                    // We cannot accumulate multiple threads into previously released
+                    // arrays when we want deterministic results because random 
+                    // associativity may occur.
+                    if(deterministic && state[i] == ActiveState::Previous) continue;
+
+                    state[i] = ActiveState::Current;
+                    return store[i];
+                }
+            }
+
+            // if we reach here then we have no inactive store
+            push_back_store();
+            state.back() = ActiveState::Current;
+            return store.back();
+        }
+
+        void release(VecArray va) {
+            std::lock_guard<std::mutex> g(mut);
+            // I will figure out which to release from the pointer
+            // It would be better but more annoying to make the user keep the index
+
+            for(int i=0; i<n_store; ++i) {
+                if(va.x == store[i].x.get()) {
+                    state[i] = ActiveState::Previous;
+                    return;
+                }
+            }
+
+            // We cannot reach here on a proper release;
+            throw std::string("VecArrayAccum release does not match any acquire");
+        }
+
+        VecArray accum() {
+            // accumulate all arrays into the zeroth array
+            std::lock_guard<std::mutex> g(mut);
+
+            float* base = store[0].x.get();
+            int n_entry = store[0].n_elem*store[0].row_width;
+
+            for(int ns=1; ns<n_store; ++ns) {
+                switch(state[ns]) {
+                    case ActiveState::Never:
+                        continue;
+
+                    case ActiveState::Current:
+                        throw std::string("VecArrayAccum missing release before accum");
+
+                    case ActiveState::Previous:
+                        float* acc = store[ns].x.get();
+                        for(int i=0; i<n_entry; ++i)
+                            base[i] += acc[i];
+                        zero_store(ns);
+                }
+            }
+            
+            return store[0];
+        }
+
+        void zero_accum() {
+            std::lock_guard<std::mutex> g(mut);
+            for(int ns=0; ns<n_store; ++ns)
+                if(ns==0 || state[ns] != ActiveState::Never)
+                    zero_store(ns);
+        }
+};
 
 
 struct range {

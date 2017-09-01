@@ -59,7 +59,7 @@ struct RamaMapPot : public PotentialNode
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         VecArray ramac     = rama.output;
-        VecArray rama_sens = rama.sens;
+        VecArray rama_sens = rama.sens.acquire();
         if(pot) *pot = 0.f;
 
         // add a litte paranoia to make sure there are no rounding problems
@@ -79,6 +79,7 @@ struct RamaMapPot : public PotentialNode
             rama_sens(0,p.residue) += dx * scale;
             rama_sens(1,p.residue) += dy * scale;
         }
+        rama.sens.release(rama_sens);
     }
 
 #ifdef PARAM_DERIV

@@ -54,7 +54,7 @@ int evaluate_deriv(float* deriv, DerivEngine* engine, const float* pos) try {
 
     engine->compute(PotentialAndDerivMode);
 
-    VecArray b = engine->pos->sens;
+    VecArray b = engine->pos->sens.accum();
     for(int na: range(engine->pos->n_atom))
         for(int d: range(3))
             deriv[na*3+d] = b(d,na);
@@ -119,7 +119,7 @@ int get_sens(int n_output, float* sens, DerivEngine* engine, const char* node_na
     } else {
         auto& c = dynamic_cast<CoordNode&>(dc);
         if(n_output != c.n_elem*c.elem_width) throw string("wrong size for CoordNode");
-        VecArray a = c.sens;
+        VecArray a = c.sens.accum();
         for(int ne: range(c.n_elem))
             for(int d: range(c.elem_width))
                 sens[ne*c.elem_width + d] = a(d,ne);

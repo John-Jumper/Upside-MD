@@ -147,7 +147,7 @@ void DerivEngine::compute(ComputeMode mode) {
                     if(!n.computation->potential_term) {
                         // ensure zero sensitivity for later derivative writing
                         CoordNode* coord_node = static_cast<CoordNode*>(n.computation.get());
-                        fill(coord_node->sens, 0.f);
+                        coord_node->sens.zero_accum();
                     }
                 }
             }
@@ -185,7 +185,7 @@ void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, Int
         integration_stage( 
                 mom,
                 pos->output,
-                pos->sens,
+                pos->sens.accum(),
                 dt*mom_update[stage], dt*pos_update[stage], max_force, 
                 pos->n_atom);
     }

@@ -29,6 +29,7 @@ struct RamaPlacement {
     vector<Params> params;
     LayeredPeriodicSpline2D<n_pos_dim> spline;
     VecArrayStorage rama_deriv;
+    VecArray r_sens;
 
     RamaPlacement(hid_t grp, CoordNode& rama_):
         rama(rama_),
@@ -77,11 +78,13 @@ struct RamaPlacement {
         return value;
     }
 
+    void acquire_sens() {
+        r_sens = rama.sens.acquire();
+    }
+
     void propagate_deriv(const Vec<n_pos_dim> &sens, int ne) {
         const float scale_x = spline.nx * (0.5f/M_PI_F - 1e-7f);
         const float scale_y = spline.ny * (0.5f/M_PI_F - 1e-7f);
-
-        VecArray r_sens = rama.sens;
 
         auto my_rama_deriv = load_vec<2*n_pos_dim>(rama_deriv, ne);
         auto rd = make_vec2(
@@ -89,6 +92,11 @@ struct RamaPlacement {
                 scale_y*dot(sens, extract<n_pos_dim,2*n_pos_dim>(my_rama_deriv)));
 
         update_vec(r_sens, params[ne].rama_residue, rd);
+    }
+
+    void release_sens() {
+        rama.sens.release(r_sens);
+        r_sens.x = nullptr;
     }
 
     virtual std::vector<float> get_param() const {return {};}
@@ -140,11 +148,13 @@ struct FixedPlacement {
         return load_vec<n_pos_dim>(data, params[ne].layer_idx);
     }
 
+    void acquire_sens() {}
     void propagate_deriv(const Vec<n_pos_dim> &sens, int ne) {
         #ifdef PARAM_DERIV
         update_vec(param_deriv, params[ne].layer_idx, sens);
         #endif
     }
+    void release_sens() {}
 
     virtual std::vector<float> get_param() const {
         auto ret = std::vector<float>(n_layer*n_pos_dim);
@@ -283,11 +293,13 @@ struct PlacementNode: public CoordNode
     virtual void propagate_deriv() {
       Timer timer(string("placement_deriv"));
 
-      VecArray a_sens = alignment.sens;
+      VecArray a_sens = alignment.sens.acquire();
       VecArray affine_pos = alignment.output;
+      VecArray sens_acc = sens.accum();
 
+      placement_data.acquire_sens();
       for(int ne: range(n_elem)) {
-          auto d = load_vec<n_pos_dim>(sens, ne);
+          auto d = load_vec<n_pos_dim>(sens_acc, ne);
           float* x = &output(0,ne);
 
           auto aff = load_vec<7>(affine_pos, affine_residue[ne]);
@@ -304,6 +316,8 @@ struct PlacementNode: public CoordNode
           update_vec(&a_sens(0,affine_residue[ne]), com_deriv);
           update_vec(&a_sens(3,affine_residue[ne]), torque);
       }
+      placement_data.release_sens();
+      alignment.sens.release(a_sens);
     }
 
     virtual std::vector<float> get_param() const {return placement_data.get_param();}

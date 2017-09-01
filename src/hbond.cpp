@@ -92,13 +92,14 @@ struct Infer_H_O : public CoordNode
 
     virtual void propagate_deriv() override {
         Timer timer(string("infer_H_O_deriv"));
-        VecArray pos_sens = pos.sens;
+        VecArray pos_sens = pos.sens.acquire();
+        VecArray sens_acc = sens.accum();
 
         for(int nv=0; nv<n_virtual; ++nv) {
             const auto& p = params[nv];
 
-            auto sens_pos = Float4(&sens(0,nv)).zero_entries<0,0,0,1>(); // last entry should be zero
-            auto sens_dir = Float4(&sens(3,nv), Alignment::unaligned);
+            auto sens_pos = Float4(&sens_acc(0,nv)).zero_entries<0,0,0,1>(); // last entry should be 0
+            auto sens_dir = Float4(&sens_acc(3,nv), Alignment::unaligned);
 
             auto sens_neg_unitdisp = sens_dir + Float4(p.bond_length)*sens_pos;
 
@@ -116,6 +117,7 @@ struct Infer_H_O : public CoordNode
             (sens_pos - sens_nonunit_prev - sens_nonunit_next).update(&pos_sens(0,p.atom[1]));
             sens_nonunit_next                                 .update(&pos_sens(0,p.atom[2]));
         }
+        pos.sens.release(pos_sens);
     }
 };
 static RegisterNodeType<Infer_H_O,1> infer_node("infer_H_O");
@@ -337,11 +339,12 @@ struct ProteinHBond : public CoordNode
 
     virtual void propagate_deriv() override {
         Timer timer(string("protein_hbond_deriv"));
+        VecArray sens_acc = sens.accum();
 
         // we accumulated derivatives for z = 1-exp(-log(no_hb))
         // so we need to convert back with z_sens*(1.f-hb)
         for(int nv=0; nv<n_virtual; ++nv)
-            sens_scaled[nv] = sens(6,nv) * (1.f-output(6,nv));
+            sens_scaled[nv] = sens_acc(6,nv) * (1.f-output(6,nv));
 
         // Push protein HBond derivatives
         for(int ne: range(igraph.n_edge)) {
@@ -353,16 +356,19 @@ struct ProteinHBond : public CoordNode
         igraph.propagate_derivatives();
 
         // pass through derivatives on all other components
-        VecArray pd1 = igraph.pos_node1->sens;
+        VecArray pd1 = igraph.pos_node1->sens.acquire();
         for(int nd=0; nd<n_donor; ++nd) {
             // the last component is taken care of by the edge loop
-            update_vec(pd1, igraph.loc1[nd], load_vec<6>(sens, nd));
+            update_vec(pd1, igraph.loc1[nd], load_vec<6>(sens_acc, nd));
         }
-        VecArray pd2 = igraph.pos_node2->sens;
+        igraph.pos_node1->sens.release(pd1);
+
+        VecArray pd2 = igraph.pos_node2->sens.acquire();
         for(int na=0; na<n_acceptor; ++na) {  // acceptor loop
             // the last component is taken care of by the edge loop
-            update_vec(pd2, igraph.loc2[na], load_vec<6>(sens, na+n_donor));
+            update_vec(pd2, igraph.loc2[na], load_vec<6>(sens_acc, na+n_donor));
         }
+        igraph.pos_node2->sens.release(pd2);
     }
 };
 static RegisterNodeType<ProteinHBond,1> hbond_node("protein_hbond");
@@ -391,9 +397,10 @@ struct HBondCoverage : public CoordNode {
 
     virtual void propagate_deriv() override {
         Timer timer(string("hbond_coverage_deriv"));
+        VecArray sens_acc = sens.accum();
 
         for(int ne: range(igraph.n_edge))
-            igraph.edge_sensitivity[ne] = sens(0,igraph.edge_indices2[ne]);
+            igraph.edge_sensitivity[ne] = sens_acc(0,igraph.edge_indices2[ne]);
         igraph.propagate_derivatives();
     }
 
@@ -431,7 +438,7 @@ struct HBondEnergy : public HBondCounter
         Timer timer(string("hbond_energy"));
         float tot_hb = 0.f;
         VecArray pp      = protein_hbond.output;
-        VecArray pp_sens = protein_hbond.sens;
+        VecArray pp_sens = protein_hbond.sens.acquire();
         float Ep = E_protein;
 
         // Compute probabilities of P and S states
@@ -441,6 +448,7 @@ struct HBondEnergy : public HBondCounter
         }
         potential = tot_hb*Ep;
         n_hbond = tot_hb;
+        protein_hbond.sens.release(pp_sens);
     }
 
     virtual std::vector<float> get_param() const override {return vector<float>(1,E_protein);}
