@@ -1262,7 +1262,7 @@ def main():
             'lines should contain space separated values.  The form of the interaction is approximately '+
             'sigmoidal but the potential is constant outside (distance-transition_width,distance+transition_width).'+
             '  This potential is approximately twice as sharp as a standard sigmoid with the same width as the '+
-            'specified transition_width.  The location x_residue is approximately the C_alpha position of the '+
+            'specified transition_width.  The location x_residue is approximately the CB position of the '+
             'residue.')
     parser.add_argument('--environment-potential', default='',
             help='Path to many-body environment potential')
