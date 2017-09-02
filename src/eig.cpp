@@ -314,7 +314,7 @@ struct AffineAlignment : public CoordNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("affine_alignment"));
 
         VecArray rigid_body = output;
@@ -383,9 +383,10 @@ struct AffineAlignment : public CoordNode
             transpose4(body[4],body[5],body[6],body[7]);
             for(int i=0; i<4; ++i) body[4+i].store(&rigid_body(4,4*ng+i));
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() {
+    virtual int propagate_deriv(int round) {
         Timer timer(string("affine_alignment_deriv"));
         VecArray pos_sens_va = pos.sens.acquire();
         float* pos_sens = pos_sens_va.x;
@@ -470,6 +471,7 @@ struct AffineAlignment : public CoordNode
             }
         }
         pos.sens.release(pos_sens_va);
+        return 0;
     }
 };
 

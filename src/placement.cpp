@@ -271,7 +271,7 @@ struct PlacementNode: public CoordNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("placement"));
 
         VecArray affine_pos = alignment.output;
@@ -288,9 +288,10 @@ struct PlacementNode: public CoordNode
 
             do_transformations<0, signature...>(U,t, val.v, &pos(0,ne));
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() {
+    virtual int propagate_deriv(int round) {
       Timer timer(string("placement_deriv"));
 
       VecArray a_sens = alignment.sens.acquire();
@@ -318,6 +319,7 @@ struct PlacementNode: public CoordNode
       }
       placement_data.release_sens();
       alignment.sens.release(a_sens);
+      return 0;
     }
 
     virtual std::vector<float> get_param() const {return placement_data.get_param();}

@@ -78,7 +78,7 @@ struct BackbonePairs : public PotentialNode
         dist_cutoff = 2*max_atom_dev + sqrtf(nonbonded_atom_cutoff2);
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("backbone_pairs"));
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
@@ -144,6 +144,7 @@ struct BackbonePairs : public PotentialNode
             }
         }
         alignment.sens.release(alignment_sens);
+        return 0;
     }
 };
 static RegisterNodeType<BackbonePairs,1> backbone_pairs_node("backbone_pairs");

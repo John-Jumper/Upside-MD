@@ -102,7 +102,7 @@ struct MembranePotential : public PotentialNode
         membrane_energy_uhb_spline.fit_spline(uhb_energy_data.data());
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("membrane_potential"));
 
         VecArray cb_pos       = res_pos.output;
@@ -152,6 +152,7 @@ struct MembranePotential : public PotentialNode
         res_pos.sens.release(cb_pos_sens);
         environment_coverage.sens.release(env_cov_sens);
         protein_hbond.sens.release(hb_sens);
+        return 0;
     }
 };
 

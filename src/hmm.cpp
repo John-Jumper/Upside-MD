@@ -103,7 +103,7 @@ struct FixedHMM : public PotentialNode
                     });
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("hmm"));
         VecArray n1b = node_1body.output;
 
@@ -202,6 +202,7 @@ struct FixedHMM : public PotentialNode
 
         }
         // tback.stop();
+        return 0;
     }
 
     virtual vector<float> get_param() const override {return copy_eigen_to_stl(transition_energy);}
@@ -293,7 +294,7 @@ struct TorusDBN_Emission : public CoordNode {
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("torus_dbn"));
         VecArray rpos = rama.output;
         for(int nr=0; nr<n_residue; ++nr) {
@@ -312,9 +313,10 @@ struct TorusDBN_Emission : public CoordNode {
 
         Map<Matrix<float,Dynamic,Dynamic,RowMajor>> output_matrix(output.x.get(), n_residue, ru(n_state));
         output_matrix = prior_offset.transpose() + cs*cs_to_emission;
+        return 0;
     }
 
-    virtual void propagate_deriv() {
+    virtual int propagate_deriv(int round) {
         Timer timer(string("torus_dbn_deriv"));
         Map<Matrix<float,Dynamic,Dynamic,RowMajor>> state_sens(sens.x.get(), n_residue, ru(n_state));
         cs_sens = cs_to_emission*state_sens.transpose();
@@ -330,6 +332,7 @@ struct TorusDBN_Emission : public CoordNode {
             rsens(0,i) += phi_sens;
             rsens(1,i) += psi_sens;
         }
+        return 0;
     }
 
     virtual vector<float> get_param() const {

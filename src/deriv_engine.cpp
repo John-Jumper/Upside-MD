@@ -138,7 +138,7 @@ void DerivEngine::compute(ComputeMode mode) {
                         });
 
                 if(all_parents) {
-                    n.computation->compute_value(mode);
+                    n.computation->compute_value(0,mode);
                     n.germ_exec_level = lvl;
                     if(mode == PotentialAndDerivMode && n.computation->potential_term) {
                         auto pot_node = static_cast<PotentialNode*>(n.computation.get());
@@ -159,7 +159,7 @@ void DerivEngine::compute(ComputeMode mode) {
                         return exec_lvl!=-1 && exec_lvl!=lvl; // do not execute at same level as your children
                         });
                 if(all_children) {
-                    n.computation->propagate_deriv();
+                    n.computation->propagate_deriv(0);
                     n.deriv_exec_level = lvl;
                 }
             }

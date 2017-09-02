@@ -38,14 +38,20 @@ struct DerivComputation
     DerivComputation(bool potential_term_):
         potential_term(potential_term_) {}
     virtual ~DerivComputation() {}
-    virtual void compute_value(ComputeMode mode)=0;
-    virtual void propagate_deriv() =0;
+
+    virtual int  compute_value(int round, ComputeMode mode)=0;
+    virtual void compute_value_subtask(int round, int task_num, int n_subtask){}
+
+    virtual int  propagate_deriv(int round)=0;
+    virtual void propagate_deriv_subtask(int round, int task_num, int n_subtask) {}
 
     virtual std::vector<float> get_param() const {return std::vector<float>();}
     virtual void set_param(const std::vector<float>& new_params) {}
-#ifdef PARAM_DERIV
+
+    #ifdef PARAM_DERIV
     virtual std::vector<float> get_param_deriv() {return std::vector<float>();}
-#endif
+    #endif
+
     virtual std::vector<float> get_value_by_name(const char* log_name) {
         throw std::string("No values implemented");
     }
@@ -71,7 +77,7 @@ struct PotentialNode : public DerivComputation
     float potential;
     PotentialNode():
         DerivComputation(true) {}
-    virtual void propagate_deriv() {};
+    virtual int  propagate_deriv(int round){return 0;}
 };
 
 
@@ -90,8 +96,8 @@ struct Pos : public CoordNode
         n_atom(n_atom_)
     {}
 
-    virtual void compute_value(ComputeMode mode) {};
-    virtual void propagate_deriv() {};
+    virtual int compute_value(int round, ComputeMode mode) {return 0;};
+    virtual int propagate_deriv(int round) {return 0;};
 };
 
 

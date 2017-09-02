@@ -32,7 +32,7 @@ struct PosSpring : public PotentialNode
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("pos_spring")); 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
         VecArray posc = pos.output;
@@ -46,6 +46,7 @@ struct PosSpring : public PotentialNode
             update_vec(pos_sens, p.atom, p.spring_constant * disp);
         }
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<PosSpring,1> pos_spring_node("atom_pos_spring");
@@ -73,7 +74,7 @@ struct TensionPotential : public PotentialNode
         traverse_dset<2,float>(grp,"tension_coeff",[&](size_t i,size_t d,float x){p[i].tension_coeff[d] = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("tension"));
 
         VecArray pos_c = pos.output;
@@ -87,6 +88,7 @@ struct TensionPotential : public PotentialNode
         }
         potential = pot;
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<TensionPotential,1> tension_node("tension");
@@ -126,7 +128,7 @@ struct RamaCoord : public CoordNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("rama_coord"));
 
         VecArray rama_pos = output;
@@ -148,9 +150,10 @@ struct RamaCoord : public CoordNode
                 for(int na: range(5)) d[na].store(jac[nt].j[phipsi][na]);
             }
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() {
+    virtual int propagate_deriv(int round) {
         Timer timer(string("rama_coord_deriv"));
         auto pos_sens_va = pos.sens.acquire();
         float* pos_sens = pos_sens_va.x;
@@ -171,6 +174,7 @@ struct RamaCoord : public CoordNode
                 ps[na].store(pos_sens + 4*p.atom[na]);  // value was added above
         }
         pos.sens.release(pos_sens_va);
+        return 0;
     }
 };
 static RegisterNodeType<RamaCoord,1> rama_coord_node("rama_coord");
@@ -221,7 +225,7 @@ struct DistSpring : public PotentialNode
                     });
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("dist_spring"));
 
         VecArray posc = pos.output;
@@ -243,6 +247,7 @@ struct DistSpring : public PotentialNode
             update_vec(pos_sens, p.atom[1], -deriv);
         }
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<DistSpring,1> dist_spring_node("dist_spring");
@@ -275,7 +280,7 @@ struct CavityRadial : public PotentialNode
                 params[nt].spring_constant = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("cavity_radial"));
 
         VecArray posc = pos.output;
@@ -298,6 +303,7 @@ struct CavityRadial : public PotentialNode
             }
         }
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<CavityRadial,1> cavity_radial_node("cavity_radial");
@@ -333,7 +339,7 @@ struct ZFlatBottom : public PotentialNode
                 params[nt].spring_constant = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("z_flat_bottom"));
 
         VecArray posc = pos.output;
@@ -352,6 +358,7 @@ struct ZFlatBottom : public PotentialNode
             if(pot) *pot += 0.5f*p.spring_constant * sqr(excess);
         }
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<ZFlatBottom,1> z_flat_bottom_node("z_flat_bottom");
@@ -384,7 +391,7 @@ struct AngleSpring : public PotentialNode
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) { p[i].spring_constant = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("angle_spring"));
 
         float* posc = pos.output.x.get();
@@ -416,6 +423,7 @@ struct AngleSpring : public PotentialNode
             if(pot) *pot += 0.5f * p.spring_constant * sqr(dp.x()-p.equil_dp);
         }
         pos.sens.release(pos_sens_va);
+        return 0;
     }
 };
 static RegisterNodeType<AngleSpring,1> angle_spring_node("angle_spring");
@@ -448,7 +456,7 @@ struct DihedralSpring : public PotentialNode
         traverse_dset<1,float>(grp, "spring_const", [&](size_t i,           float x) {p[i].spring_constant=x;});
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("dihedral_spring"));
 
         float* posc = pos.output.x.get();
@@ -476,6 +484,7 @@ struct DihedralSpring : public PotentialNode
             if(pot) *pot += 0.5f * p.spring_constant * sqr(displacement);
         }
         pos.sens.release(pos_sens_va);
+        return 0;
     }
 };
 static RegisterNodeType<DihedralSpring,1> dihedral_spring_node("dihedral_spring");
@@ -494,11 +503,12 @@ struct ConstantCoord : public CoordNode
                 value(nd,ne) = x;});
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         copy(value, output);
+        return 0;
     }
 
-    virtual void propagate_deriv() override {}
+    virtual int propagate_deriv(int round) override {return 0;}
 
 #ifdef PARAM_DERIV
     virtual std::vector<float> get_param() const override {

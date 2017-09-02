@@ -77,7 +77,7 @@ struct SidechainRadialPairs : public PotentialNode
         igraph(grp, &bb_point_)
     {};
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("radial_pairs"));
 
         igraph.compute_edges();
@@ -89,6 +89,7 @@ struct SidechainRadialPairs : public PotentialNode
             for(int ne=0; ne<igraph.n_edge; ++ne) 
                 potential += igraph.edge_value[ne];
         }
+        return 0;
     }
 };
 
@@ -103,7 +104,7 @@ struct HBondSidechainRadialPairs : public PotentialNode
         igraph(grp, &hb_point_, &bb_point_)
     {};
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("hbond_sc_radial_pairs"));
 
         igraph.compute_edges();
@@ -115,6 +116,7 @@ struct HBondSidechainRadialPairs : public PotentialNode
             for(int ne=0; ne<igraph.n_edge; ++ne) 
                 potential += igraph.edge_value[ne];
         }
+        return 0;
     }
 };
 
@@ -166,7 +168,7 @@ struct ContactEnergy : public PotentialNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual int compute_value(int round, ComputeMode mode) {
         Timer timer(string("contact_energy"));
         VecArray pos  = bead_pos.output;
         VecArray sens = bead_pos.sens.acquire();
@@ -185,6 +187,7 @@ struct ContactEnergy : public PotentialNode
             update_vec(sens, p.loc[1], -deriv);
         }
         bead_pos.sens.release(sens);
+        return 0;
     }
 };
 }

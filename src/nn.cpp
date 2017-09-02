@@ -41,7 +41,7 @@ struct BackboneFeaturizer : public CoordNode
                 else            params[ne].donor_idx   =x;});
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         VecArray ramac = rama.output;
         VecArray hbondc = hbond.output;
 
@@ -60,9 +60,10 @@ struct BackboneFeaturizer : public CoordNode
             output(4,ne) = don_hb;
             output(5,ne) = acc_hb;
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         VecArray rama_s = rama.sens.acquire();
         VecArray hbond_s = hbond.sens.acquire();
         VecArray sens_acc = sens.accum();
@@ -77,6 +78,7 @@ struct BackboneFeaturizer : public CoordNode
         }
         rama.sens.release(rama_s);
         hbond.sens.release(hbond_s);
+        return 0;
     }
 };
 static RegisterNodeType<BackboneFeaturizer,2> backbone_featurizer_node("backbone_featurizer");
@@ -130,7 +132,7 @@ struct Conv1D : public CoordNode
         else throw string("Invalid activation name");
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("conv1d")); 
         VecArray inputc = input.output;
         
@@ -165,9 +167,10 @@ struct Conv1D : public CoordNode
                         output(nc,nr) = tanh(matmul_output(nr,nc));
                 break;
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         int n_elem_output = n_elem;
         VecArray sens_acc = sens.accum();
 
@@ -200,6 +203,7 @@ struct Conv1D : public CoordNode
                 for(int nc=0; nc<in_channels; ++nc)
                     inp_sens(nc,nr+nw) += input_conv_format(nr,nw*in_channels+nc);
         input.sens.release(inp_sens);
+        return 0;
     }
 };
 static RegisterNodeType<Conv1D,1> conv1d_node("conv1d");
@@ -219,7 +223,7 @@ struct ScaledSum: public PotentialNode
         if(input.elem_width != 1u) throw string("Sum only works on elem width 1");
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("scaled_sum")); 
         VecArray value = input.output;
         VecArray sens  = input.sens.acquire();
@@ -232,6 +236,7 @@ struct ScaledSum: public PotentialNode
 
         for(int i=0; i<n_elem; ++i) sens(0,i) += scale;
         input.sens.release(sens);
+        return 0;
     }
 };
 static RegisterNodeType<ScaledSum,1> scaled_sum_node("scaled_sum");

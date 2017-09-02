@@ -56,7 +56,7 @@ struct Infer_H_O : public CoordNode
     }
 
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("infer_H_O"));
 
         VecArray posc  = pos.output;
@@ -88,9 +88,10 @@ struct Infer_H_O : public CoordNode
             hbond_pos.store(&output(0,nv));
             hbond_dir.store(&output(3,nv), Alignment::unaligned);
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer(string("infer_H_O_deriv"));
         VecArray pos_sens = pos.sens.acquire();
         VecArray sens_acc = sens.accum();
@@ -118,6 +119,7 @@ struct Infer_H_O : public CoordNode
             sens_nonunit_next                                 .update(&pos_sens(0,p.atom[2]));
         }
         pos.sens.release(pos_sens);
+        return 0;
     }
 };
 static RegisterNodeType<Infer_H_O,1> infer_node("infer_H_O");
@@ -312,7 +314,7 @@ struct ProteinHBond : public CoordNode
         }
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("protein_hbond"));
 
         int n_virtual = n_donor + n_acceptor;
@@ -335,9 +337,10 @@ struct ProteinHBond : public CoordNode
         }
 
         for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer(string("protein_hbond_deriv"));
         VecArray sens_acc = sens.accum();
 
@@ -369,6 +372,7 @@ struct ProteinHBond : public CoordNode
             update_vec(pd2, igraph.loc2[na], load_vec<6>(sens_acc, na+n_donor));
         }
         igraph.pos_node2->sens.release(pd2);
+        return 0;
     }
 };
 static RegisterNodeType<ProteinHBond,1> hbond_node("protein_hbond");
@@ -383,7 +387,7 @@ struct HBondCoverage : public CoordNode {
         igraph(grp, &infer_, &sidechains_),
         n_sc(igraph.n_elem2) {}
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("hbond_coverage"));
 
         // Compute coverage and its derivative
@@ -393,15 +397,17 @@ struct HBondCoverage : public CoordNode {
         for(int ne=0; ne<igraph.n_edge; ++ne) {
             output(0, igraph.edge_indices2[ne]) += igraph.edge_value[ne];
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer(string("hbond_coverage_deriv"));
         VecArray sens_acc = sens.accum();
 
         for(int ne: range(igraph.n_edge))
             igraph.edge_sensitivity[ne] = sens_acc(0,igraph.edge_indices2[ne]);
         igraph.propagate_derivatives();
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
@@ -434,7 +440,7 @@ struct HBondEnergy : public HBondCounter
         E_protein(read_attribute<float>(grp, ".", "protein_hbond_energy"))
     {}
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("hbond_energy"));
         float tot_hb = 0.f;
         VecArray pp      = protein_hbond.output;
@@ -449,6 +455,7 @@ struct HBondEnergy : public HBondCounter
         potential = tot_hb*Ep;
         n_hbond = tot_hb;
         protein_hbond.sens.release(pp_sens);
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override {return vector<float>(1,E_protein);}

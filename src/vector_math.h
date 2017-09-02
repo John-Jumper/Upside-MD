@@ -125,6 +125,9 @@ struct VecArrayAccum {
 
     protected:
         std::mutex mut;
+        // FIXME for reasons that make no sense to me, code is consistently
+        // 5% *faster* on ubiquitin when deterministic is true, even on a single core
+        // where deterministic should be strictly more work.  I do not understand.
         constexpr static bool deterministic = false;
 
         enum class ActiveState {

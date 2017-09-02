@@ -773,10 +773,11 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     void ensure_fresh_energy() {
-        if(!energy_fresh_relative_to_derivative) compute_value(PotentialAndDerivMode);
+        // FIXME this won't be correct if there are subtasks
+        if(!energy_fresh_relative_to_derivative) compute_value(0, PotentialAndDerivMode);
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
 
         fill_holders();
@@ -786,6 +787,7 @@ struct RotamerSidechain: public PotentialNode {
 
         propagate_derivatives();
         if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
+        return 0;
     }
 
     virtual double test_value_deriv_agreement() {return -1.;}

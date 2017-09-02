@@ -82,7 +82,7 @@ struct EnvironmentCoverage : public CoordNode {
         }
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("environment_coverage"));
 
         igraph.compute_edges();
@@ -90,15 +90,17 @@ struct EnvironmentCoverage : public CoordNode {
         fill(output, 0.f);
         for(int ne=0; ne<igraph.n_edge; ++ne)  // accumulate for each cb
             output(0, igraph.edge_indices1[ne]) += igraph.edge_value[ne];
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer(string("d_environment_coverage"));
         VecArray sens_acc = sens.accum();
 
         for(int ne: range(igraph.n_edge))
             igraph.edge_sensitivity[ne] = sens_acc(0,igraph.edge_indices1[ne]);
         igraph.propagate_derivatives();
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override {return igraph.get_param();}
@@ -130,7 +132,7 @@ struct WeightedPos : public CoordNode {
         traverse_dset<1,int>(grp,"index_weight",[&](size_t ne, int x){params[ne].index_weight=x;});
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer("weighted_pos");
 
         for(int ne=0; ne<n_elem; ++ne) {
@@ -140,9 +142,10 @@ struct WeightedPos : public CoordNode {
             output(2,ne) = pos.output(2,p.index_pos);
             output(3,ne) = expf(-energy.output(0,p.index_weight));
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer("d_weighted_pos");
         VecArray sens_acc = sens.accum();
         VecArray pos_sens = pos.sens.acquire();
@@ -157,6 +160,7 @@ struct WeightedPos : public CoordNode {
         }
         pos.sens.release(pos_sens);
         energy.sens.release(energy_sens);
+        return 0;
     }
 };
 static RegisterNodeType<WeightedPos,2> weighted_pos_node("weighted_pos");
@@ -184,7 +188,7 @@ struct UniformTransform : public CoordNode {
         traverse_dset<1,float>(grp,"bspline_coeff",[&](size_t ne, float x){bspline_coeff[ne]=x;});
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer("uniform_transform");
         for(int ne=0; ne<n_elem; ++ne) {
             auto coord = (input.output(0,ne)-spline_offset)*spline_inv_dx;
@@ -192,15 +196,17 @@ struct UniformTransform : public CoordNode {
             output(0,ne) = v[0];
             jac[ne]      = v[1]*spline_inv_dx;
         }
+        return 0;
     }
 
-    virtual void propagate_deriv() override {
+    virtual int propagate_deriv(int round) override {
         Timer timer("d_uniform_transform");
         VecArray input_sens = input.sens.acquire();
         VecArray sens_acc = sens.accum();
         for(int ne=0; ne<n_elem; ++ne)
             input_sens(0,ne) += jac[ne]*sens_acc(0,ne);
         input.sens.release(input_sens);
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override{
@@ -288,7 +294,7 @@ struct LinearCoupling : public PotentialNode {
         }
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer("linear_coupling");
         VecArray input_sens = input.sens.acquire();
         VecArray inactivation_sens;
@@ -306,6 +312,7 @@ struct LinearCoupling : public PotentialNode {
         potential = pot;
         input.sens.release(input_sens);
         if(inactivation) inactivation->sens.release(inactivation_sens);
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override {
@@ -369,7 +376,7 @@ struct NonlinearCoupling : public PotentialNode {
         }
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer("nonlinear_coupling");
         VecArray input_sens = input.sens.acquire();
         int n_elem = input.n_elem;
@@ -383,6 +390,7 @@ struct NonlinearCoupling : public PotentialNode {
         }
         potential = pot;
         input.sens.release(input_sens);
+        return 0;
     }
 
     virtual std::vector<float> get_param() const override {

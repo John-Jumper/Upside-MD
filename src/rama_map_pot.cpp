@@ -54,7 +54,7 @@ struct RamaMapPot : public PotentialNode
                     });
     }
 
-    virtual void compute_value(ComputeMode mode) override {
+    virtual int compute_value(int round, ComputeMode mode) override {
         Timer timer(string("rama_map_pot"));
 
         float* pot = mode==PotentialAndDerivMode ? &potential : nullptr;
@@ -80,6 +80,7 @@ struct RamaMapPot : public PotentialNode
             rama_sens(1,p.residue) += dy * scale;
         }
         rama.sens.release(rama_sens);
+        return 0;
     }
 
 #ifdef PARAM_DERIV
