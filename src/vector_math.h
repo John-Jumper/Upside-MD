@@ -71,9 +71,7 @@ struct VecArrayStorage {
     VecArrayStorage(VecArrayStorage&& o):
         n_elem(o.n_elem), row_width(o.row_width),
         x(std::move(o.x))
-    {
-        std::copy_n(o.x.get(), n_elem*row_width, x.get());
-    }
+    {}
 
     VecArrayStorage(const VecArrayStorage& o):
         n_elem(o.n_elem), row_width(o.row_width),
