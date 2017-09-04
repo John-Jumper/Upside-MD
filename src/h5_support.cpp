@@ -2,6 +2,7 @@
 
 
 namespace h5 {
+std::mutex h5_mutex;
 
 hid_t h5_noerr(hid_t i) {
     if(i<0) {

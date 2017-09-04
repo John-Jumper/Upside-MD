@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <memory>
 #include "timing.h"
+#include <mutex>
 
 struct SingleLogger {
     virtual void collect_samples() = 0;
@@ -34,6 +35,7 @@ struct SpecializedSingleLogger: public SingleLogger {
             chunk_shape.push_back(i);
             row_size *= i;
         }
+        std::lock_guard<std::mutex> g(h5::h5_mutex);
         data_set = h5::create_earray(logging_group, loc, h5::select_predtype<T>(), dims, chunk_shape);
     }
 
@@ -91,15 +93,14 @@ struct H5Logger {
     }
 
     void flush() {
-        // HDF5 is often built non-thread-safe, so we must serialize access with a OpenMP critical section
-        #pragma omp critical (hdf5_write_access)
-        {
-            if(n_samples_buffered) {
-                for(auto &sl: state_loggers) 
-                    sl->dump_samples();
-                n_samples_buffered = 0u;
-                H5Fflush(config.get(), H5F_SCOPE_LOCAL);
-            }
+        // HDF5 is often built non-thread-safe, so we must serialize access
+        // with a OpenMP critical section
+        std::lock_guard<std::mutex> g(h5::h5_mutex);
+        if(n_samples_buffered) {
+            for(auto &sl: state_loggers) 
+                sl->dump_samples();
+            n_samples_buffered = 0u;
+            H5Fflush(config.get(), H5F_SCOPE_LOCAL);
         }
     }
 
@@ -109,7 +110,8 @@ struct H5Logger {
             const std::initializer_list<int>& data_shape, 
             const F&& sample_function) {
         auto logger = std::unique_ptr<SingleLogger>(
-                new SpecializedSingleLogger<T,F>(logging_group.get(), relative_path, sample_function, data_shape));
+                new SpecializedSingleLogger<T,F>(
+                    logging_group.get(), relative_path, sample_function, data_shape));
         state_loggers.emplace_back(std::move(logger));
     }
 
@@ -130,7 +132,9 @@ struct H5Logger {
         std::vector<T> data_buffer(data_size);
         sample_function(data_buffer.data());
 
-        auto data_set = h5::create_earray(logging_group.get(), relative_path, h5::select_predtype<T>(), 
+        std::lock_guard<std::mutex> g(h5::h5_mutex);
+        auto data_set = h5::create_earray(
+                logging_group.get(), relative_path, h5::select_predtype<T>(), 
                 fake_dims, dims);
         h5::append_to_dset(data_set.get(), data_buffer, 0);
     }

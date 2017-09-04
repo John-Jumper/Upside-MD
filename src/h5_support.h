@@ -6,11 +6,13 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <mutex>
 
 #include <hdf5.h>
 
 namespace h5 {
 // NB this library is not threadsafe.  It is up to the user to deal with this fact
+extern std::mutex h5_mutex;
 
 //! \cond
 template <typename T> // DO NOT ADD BOOL TO THIS TYPE -- unwitting users might hit vector<bool>

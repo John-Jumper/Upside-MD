@@ -13,13 +13,6 @@
 #include <csignal>
 #include <map>
 
-// FIXME remove OpenMP
-#if defined(_OPENMP)
-#include <omp.h>
-#endif
-
-constexpr const int n_worker_threads_per_engine = 0;
-
 using namespace std;
 using namespace h5;
 
@@ -369,6 +362,7 @@ try {
             "Use this option to control which arrays are stored in /output.  Available levels are basic, detailed, "
             "or extensive.  Default is detailed.",
             false, "", "basic, detailed, extensive", cmd);
+    ValueArg<int> n_threads_arg("", "n-threads", "(developer use only)", false, 1, "int", cmd);
     SwitchArg potential_deriv_agreement_arg("", "potential-deriv-agreement",
             "(developer use only) check the agreement of the derivative with finite differences "
             "of the potential for the initial structure.  This may give strange answers for native structures "
@@ -456,9 +450,11 @@ try {
         // We are not allowed to exit an OpenMP critical section early.  For this reason, we must trap
         // all exceptions.  To avoid crashing callers, we simply record the presence of an exception
         // then exit immediately after the block.
+        std::mutex init_system_mutex;
         bool error_exit_omp = false;
-        #pragma omp critical
+
         for(int ns=0; ns<n_system; ++ns) try {
+            std::lock_guard<std::mutex> g(init_system_mutex);
             System* sys = &systems[ns];  // a pointer here makes later lambda's more natural
             sys->random_seed = base_random_seed + ns;
 
@@ -497,7 +493,7 @@ try {
 
             auto potential_group = open_group(sys->config.get(), "/input/potential");
             sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get(),
-                    n_worker_threads_per_engine);
+                    n_threads_arg.getValue()-1);
 
             // Override parameters as instructed by users
             for(const auto& p: set_param_map)
@@ -620,7 +616,6 @@ try {
         auto tstart = chrono::high_resolution_clock::now();
         while(systems[0].round_num < n_round && received_signal==NO_SIGNAL) {
             int last_start = systems[0].round_num;
-            #pragma omp parallel for schedule(static,1)
             for(int ns=0; ns<int(systems.size()); ++ns) {
                 System& sys = systems[ns];
                 for(bool do_break=false; (!do_break) && (sys.round_num<n_round); ++sys.round_num) {
