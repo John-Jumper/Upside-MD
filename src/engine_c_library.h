@@ -9,7 +9,8 @@ extern "C" {
     // defined in main.h
     // int upside_main(int argc, const char* const char*)
 
-    DerivEngine* construct_deriv_engine(int n_atom, const char* potential_file, bool quiet);
+    DerivEngine* construct_deriv_engine(int n_atom, const char* potential_file,
+            int n_worker_threads, bool quiet);
     void free_deriv_engine(DerivEngine* engine);
 
     int evaluate_energy(float* energy, DerivEngine* engine, const float* pos);

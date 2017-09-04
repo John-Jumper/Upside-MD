@@ -13,9 +13,12 @@
 #include <csignal>
 #include <map>
 
+// FIXME remove OpenMP
 #if defined(_OPENMP)
 #include <omp.h>
 #endif
+
+constexpr const int n_worker_threads_per_engine = 0;
 
 using namespace std;
 using namespace h5;
@@ -97,7 +100,7 @@ struct System {
     float temperature;
     H5Obj config;
     shared_ptr<H5Logger> logger;
-    DerivEngine engine;
+    unique_ptr<DerivEngine> engine;
     MultipleMonteCarloSampler mc_samplers;
     VecArrayStorage mom; // momentum
     OrnsteinUhlenbeckThermostat thermostat;
@@ -234,15 +237,15 @@ struct ReplicaExchange {
         auto compute_log_boltzmann = [&]() {
             vector<float> result(n_system);
             for(int i=0; i<n_system; ++i) {
-                systems[i].engine.compute(PotentialAndDerivMode);
-                result[i] = -beta[i]*systems[i].engine.potential;
+                systems[i].engine->compute(PotentialAndDerivMode);
+                result[i] = -beta[i]*systems[i].engine->potential;
             }
             return result;
         };
 
         // swap coordinates and the associated system indices
         auto coord_swap = [&](int ns1, int ns2) {
-            swap(systems[ns1].engine.pos->output, systems[ns2].engine.pos->output);
+            swap(systems[ns1].engine->pos->output, systems[ns2].engine->pos->output);
             swap(replica_indices[ns1], replica_indices[ns2]);
         };
 
@@ -493,21 +496,22 @@ try {
             if(pos_shape[2]!=1) throw string("must have n_system 1 from config");
 
             auto potential_group = open_group(sys->config.get(), "/input/potential");
-            sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get());
+            sys->engine = initialize_engine_from_hdf5(sys->n_atom, potential_group.get(),
+                    n_worker_threads_per_engine);
 
             // Override parameters as instructed by users
             for(const auto& p: set_param_map)
-                sys->engine.get(p.first).computation->set_param(p.second);
+                sys->engine->get(p.first).computation->set_param(p.second);
 
             traverse_dset<3,float>(sys->config.get(), "/input/pos", [&](size_t na, size_t d, size_t ns, float x) { 
-                    sys->engine.pos->output(d,na) = x;});
+                    sys->engine->pos->output(d,na) = x;});
 
             if(verbose) printf("%s\nn_atom %i\n\n", config_paths[ns].c_str(), sys->n_atom);
 
             if(potential_deriv_agreement_arg.getValue()){
-                sys->engine.compute(PotentialAndDerivMode);
+                sys->engine->compute(PotentialAndDerivMode);
                 if(verbose) printf("Initial potential:\n");
-                auto relative_error = potential_deriv_agreement(sys->engine);
+                auto relative_error = potential_deriv_agreement(*sys->engine);
                 if(verbose) printf("overall potential relative error: ");
                 for(auto r: relative_error) printf(" %.5f", r);
                 if(verbose) printf("\n");
@@ -525,7 +529,7 @@ try {
 
             // we must capture the sys pointer by value here so that it is available later
             sys->logger->add_logger<float>("pos", {1, sys->n_atom, 3}, [sys](float* pos_buffer) {
-                    VecArray pos_array = sys->engine.pos->output;
+                    VecArray pos_array = sys->engine->pos->output;
                     for(int na=0; na<sys->n_atom; ++na) 
                     for(int d=0; d<3; ++d) 
                     pos_buffer[na*3 + d] = pos_array(d,na);
@@ -536,8 +540,8 @@ try {
                     kin_buffer[0] = (0.5/sys->n_atom)*sum_kin;  // kinetic_energy = (1/2) * <mom^2>
                     });
             sys->logger->add_logger<double>("potential", {1}, [sys](double* pot_buffer) {
-                    sys->engine.compute(PotentialAndDerivMode);
-                    pot_buffer[0] = sys->engine.potential;});
+                    sys->engine->compute(PotentialAndDerivMode);
+                    pot_buffer[0] = sys->engine->potential;});
             sys->logger->add_logger<double>("time", {}, [sys,dt](double* time_buffer) {
                     *time_buffer=3*dt*sys->round_num;});
 
@@ -548,7 +552,7 @@ try {
 
             // quick hack of a check for z-centering and membrane potential
             if(do_recenter && !xy_recenter_only) {
-                for(auto &n: sys->engine.nodes) {
+                for(auto &n: sys->engine->nodes) {
                     if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom") || is_prefix(n.name, "tension"))
                         throw string("You have z-centering and a z-dependent potential turned on.  "
                                 "This is not what you want.  Consider --disable-z-recentering "
@@ -557,7 +561,7 @@ try {
             }
 
             if(do_recenter) {
-                for(auto &n: sys->engine.nodes) {
+                for(auto &n: sys->engine->nodes) {
                     if(is_prefix(n.name, "cavity_radial"))
                         throw string("You have re-centering and a radial potential turned on.  "
                                 "This is not what you want.  Consider --disable-recentering.");
@@ -600,8 +604,8 @@ try {
 
         if(verbose) printf("Initial potential energy:");
         for(System& sys: systems) {
-            sys.engine.compute(PotentialAndDerivMode);
-            if(verbose) printf(" %.2f", sys.engine.potential);
+            sys.engine->compute(PotentialAndDerivMode);
+            if(verbose) printf(" %.2f", sys.engine->potential);
         }
         if(verbose) printf("\n");
 
@@ -629,21 +633,21 @@ try {
                     // Don't pivot at t=0 so that a partially strained system may relax before the
                     // first pivot
                     if(nr && mc_interval && !(nr%mc_interval)) 
-                        sys.mc_samplers.execute(sys.random_seed, nr, sys.temperature, sys.engine);
+                        sys.mc_samplers.execute(sys.random_seed, nr, sys.temperature, *sys.engine);
 
                     if(!frame_interval || !(nr%frame_interval)) {
-                        if(do_recenter) recenter(sys.engine.pos->output, xy_recenter_only, sys.n_atom);
-                        sys.engine.compute(PotentialAndDerivMode);
+                        if(do_recenter) recenter(sys.engine->pos->output, xy_recenter_only, sys.n_atom);
+                        sys.engine->compute(PotentialAndDerivMode);
                         sys.logger->collect_samples();
 
                         double Rg = 0.f;
                         float3 com = make_vec3(0.f, 0.f, 0.f);
                         for(int na=0; na<sys.n_atom; ++na)
-                            com += load_vec<3>(sys.engine.pos->output, na);
+                            com += load_vec<3>(sys.engine->pos->output, na);
                         com *= 1.f/sys.n_atom;
 
                         for(int na=0; na<sys.n_atom; ++na) 
-                            Rg += mag2(load_vec<3>(sys.engine.pos->output,na)-com);
+                            Rg += mag2(load_vec<3>(sys.engine->pos->output,na)-com);
                         Rg = sqrtf(Rg/sys.n_atom);
 
                         if(verbose) printf(
@@ -651,7 +655,7 @@ try {
                                 duration_print_width, nr*3*double(dt), 
                                 duration_print_width, duration, 
                                 ns, sys.temperature,
-                                get_n_hbond(sys.engine), Rg, sys.engine.potential);
+                                get_n_hbond(*sys.engine), Rg, sys.engine->potential);
                         fflush(stdout);
                     }
 
@@ -661,7 +665,7 @@ try {
                             sys.set_temperature(anneal_temp(sys.initial_temperature, 3*dt*(sys.round_num+1)));
                         sys.thermostat.apply(sys.mom, sys.n_atom);
                     }
-                    sys.engine.integration_cycle(sys.mom, dt, 0.f, DerivEngine::Verlet);
+                    sys.engine->integration_cycle(sys.mom, dt, 0.f, DerivEngine::Verlet);
 
                     do_break = nr>last_start && replica_interval && !((nr+1)%replica_interval);
                 }

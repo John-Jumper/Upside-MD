@@ -10,8 +10,9 @@ DerivEngine* construct_deriv_engine(int n_atom, const char* potential_file, bool
     H5Obj config = h5_obj(H5Fclose, H5Fopen(potential_file, H5F_ACC_RDONLY, H5P_DEFAULT));
     auto potential_group = open_group(config.get(), "/input/potential");
     
-    auto engine = new DerivEngine(initialize_engine_from_hdf5(n_atom, potential_group.get(), quiet));
-    return engine;
+    // get a unique_ptr, which doesn't work for a C API
+    auto engine_unique = initialize_engine_from_hdf5(n_atom, potential_group.get(), quiet);
+    return engine_unique.release(); // acquire raw pointer
 } catch(const string& e) {
     fprintf(stderr, "\n\nERROR: %s\n", e.c_str());
     return 0;

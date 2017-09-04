@@ -126,9 +126,9 @@ struct VecArrayAccum {
     protected:
         std::mutex mut;
         // FIXME for reasons that make no sense to me, code is consistently
-        // 5% *faster* on ubiquitin when deterministic is true, even on a single core
-        // where deterministic should be strictly more work.  I do not understand.
-        constexpr static bool deterministic = false;
+        // 5% *faster* on ubiquitin when reclaim is false, even on a single core
+        // where reclaim should be strictly less work.  I do not understand.
+        constexpr static bool reclaim = true;
 
         enum class ActiveState {
             Never,
@@ -172,7 +172,7 @@ struct VecArrayAccum {
                     // We cannot accumulate multiple threads into previously released
                     // arrays when we want deterministic results because random 
                     // associativity may occur.
-                    if(deterministic && state[i] == ActiveState::Previous) continue;
+                    if(!reclaim && state[i] == ActiveState::Previous) continue;
 
                     state[i] = ActiveState::Current;
                     return store[i];

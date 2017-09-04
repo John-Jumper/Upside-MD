@@ -13,6 +13,9 @@ def gdb_int(i):
 def gdb_float(i):
     return float(gdb_eval(i))
 
+def gdb_string(i):
+    return str(gdb_eval(i))
+
 def vec_array(vec, n_row, n_col):
     vec   = gdb_eval(vec)
     n_row = gdb_eval(n_row)
@@ -101,4 +104,17 @@ def read_edges(edge_holder):
     d['cur_belief2'] /= d['cur_belief2'].sum(axis=1,keepdims=1)
     return d
     # ei2 = read_array(unique_to_ptr(edge_holder['edge_indices1'], gdb_int_t), n_edge, 'i4')
+
+# def read_tasks(tasks_ptr_to_first, n_tasks):
+#     tasks_ptr_to_first = gdb_eval(tasks_ptr_to_first)
+#     n_tasks = gdb_int(n_tasks)
+# 
+#     tasks = []
+#     for i in range(n_tasks):
+#         t = tasks_ptr_to_first[i]
+#         # complete = bool(t['complete']['_M_base']['_M_i'])
+#         n_d = bool(t['complete']['_M_base']['_M_i'])
+#         tasks.append((complete,))
+# 
+#     return tasks
 

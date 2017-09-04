@@ -24,7 +24,8 @@ integration_stage(
         auto d = load_vec<3>(deriv, na);
         if(max_force) {
             float f_mag = mag(d)+1e-6f;  // ensure no NaN when mag(deriv)==0.
-            float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) * (max_force/f_mag * (2.f/M_PI_F));
+            float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) *
+                (max_force/f_mag * (2.f/M_PI_F));
             d *= scale_factor;
         }
 
@@ -55,12 +56,14 @@ void add_node_creation_function(std::string name_prefix, NodeCreationFunction fc
     //   the function node to call is determined by checking string prefixes
     for(const auto& kv : m) {
         if(is_prefix(kv.first, name_prefix)) {
-            auto s = std::string("Internal error.  Type name ") + kv.first + " is a prefix of " + name_prefix + ".";
+            auto s = std::string("Internal error.  Type name ") + kv.first +
+                " is a prefix of " + name_prefix + ".";
             fprintf(stderr, "%s\n", s.c_str());
             throw s;
         }
         if(is_prefix(name_prefix, kv.first)) {
-            auto s = std::string("Internal error.  Type name ") + name_prefix + " is a prefix of " + kv.first + ".";
+            auto s = std::string("Internal error.  Type name ") + name_prefix +
+                " is a prefix of " + kv.first + ".";
             fprintf(stderr, "%s\n", s.c_str());
             throw s;
         }
@@ -93,20 +96,13 @@ void check_arguments_length(const ArgList& arguments, int n_expected) {
 
 void DerivEngine::add_node(
         const string& name, 
-        unique_ptr<DerivComputation> fcn, 
+        unique_ptr<DerivComputation>&& fcn, 
         vector<string> argument_names) 
 {
     if(any_of(nodes.begin(), nodes.end(), [&](const Node& n) {return n.name==name;})) 
         throw string("name conflict in DerivEngine");
 
-    nodes.emplace_back(name, move(fcn));
-    auto& node = nodes.back();
-
-    for(auto& nm: argument_names) { 
-        int parent_idx = get_idx(nm);
-        node.parents.push_back(parent_idx);
-        nodes[parent_idx].children.push_back(nodes.size()-1);
-    }
+    nodes.emplace_back(name, move(fcn), argument_names);
 }
 
 DerivEngine::Node& DerivEngine::get(const string& name) {
@@ -121,51 +117,29 @@ int DerivEngine::get_idx(const string& name, bool must_exist) {
     return loc != nodes.end() ? loc-begin(nodes) : -1;
 }
 
-void DerivEngine::compute(ComputeMode mode) {
-    // FIXME depth-first traversal would be simpler and more cache-friendly
-    for(auto& n: nodes) n.germ_exec_level = n.deriv_exec_level = -1;
+void DerivEngine::compute(ComputeMode mode_) {
+    last_compute_mode = mode_;  // so nodes can see it in the lambdas
 
-    if(mode == PotentialAndDerivMode) potential = 0.f;
+    // Reset derivative accumulators
+    for(auto& n: nodes) {
+        if(!n.computation->potential_term) {
+            CoordNode* coord_node = static_cast<CoordNode*>(n.computation.get());
+            coord_node->sens.zero_accum();
+        }
+    }
 
-    // BFS traversal
-    for(int lvl=0, not_finished=1; ; ++lvl, not_finished=0) {
+    task_graph.execute();
+
+    float pot = 0.f; // Regardless of mode, avoid stale potential
+    if(mode_==PotentialAndDerivMode) {
         for(auto& n: nodes) {
-            if(n.germ_exec_level == -1) {
-                not_finished = 1;
-                bool all_parents = all_of(begin(n.parents), end(n.parents), [&] (int ip) {
-                        int exec_lvl = nodes[ip].germ_exec_level;
-                        return exec_lvl!=-1 && exec_lvl!=lvl; // do not execute at same level as your parents
-                        });
-
-                if(all_parents) {
-                    n.computation->compute_value(0,mode);
-                    n.germ_exec_level = lvl;
-                    if(mode == PotentialAndDerivMode && n.computation->potential_term) {
-                        auto pot_node = static_cast<PotentialNode*>(n.computation.get());
-                        potential += pot_node->potential;
-                    }
-                    if(!n.computation->potential_term) {
-                        // ensure zero sensitivity for later derivative writing
-                        CoordNode* coord_node = static_cast<CoordNode*>(n.computation.get());
-                        coord_node->sens.zero_accum();
-                    }
-                }
-            }
-
-            if(n.deriv_exec_level == -1 && n.germ_exec_level != -1) {
-                not_finished = 1;
-                bool all_children = all_of(begin(n.children), end(n.children), [&] (int ip) {
-                        int exec_lvl = nodes[ip].deriv_exec_level;
-                        return exec_lvl!=-1 && exec_lvl!=lvl; // do not execute at same level as your children
-                        });
-                if(all_children) {
-                    n.computation->propagate_deriv(0);
-                    n.deriv_exec_level = lvl;
-                }
+            if(n.computation->potential_term) {
+                PotentialNode* pot_node = static_cast<PotentialNode*>(n.computation.get());
+                pot += pot_node->potential;
             }
         }
-        if(!not_finished) break;
     }
+    potential = pot;
 }
 
 
@@ -192,15 +166,18 @@ void DerivEngine::integration_cycle(VecArray mom, float dt, float max_force, Int
 }
 
 
-DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool quiet)
+unique_ptr<DerivEngine> initialize_engine_from_hdf5(
+        int n_atom, hid_t potential_group, int n_worker_threads, bool quiet)
 {
-    DerivEngine engine(n_atom);
+    auto engine_unique = unique_ptr<DerivEngine>(new DerivEngine(n_atom, n_worker_threads));
+    auto& engine = *engine_unique;
     auto& m = node_creation_map();
 
     map<string, pair<bool,vector<string>>> dep_graph;  // bool indicates node is active
     dep_graph["pos"] = make_pair(true, vector<string>());
     for(const auto &name : node_names_in_group(potential_group, "."))
-        dep_graph[name] = make_pair(true, read_attribute<vector<string>>(potential_group, name.c_str(), "arguments"));
+        dep_graph[name] = make_pair(true,
+                read_attribute<vector<string>>(potential_group, name.c_str(), "arguments"));
 
     for(auto &kv : dep_graph) {
         for(auto& dep_name : kv.second.second) {
@@ -229,7 +206,6 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool 
 
     // using topo_order here ensures that a node is only parsed after all its arguments
     for(auto &nm : topo_order) {
-        // if(!quiet)  printf("initializing %-27s%s", nm.c_str(), nm=="pos" ? "\n" : ""); 
         if(nm=="pos") continue;  // pos node is added specially
         // some name in the node_creation_map must be a prefix of this name
         string node_type_name = "";
@@ -248,14 +224,6 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool 
             if(!arguments.back()) 
                 throw arg_name + " is not an intermediate value, but it is an argument of " + nm;
         }
-        // if(!quiet) {
-        //     printf(" with %sargument%s ", 
-        //             argument_names.size() == 0 ? "no " : "",
-        //             argument_names.size() == 1 ? " "   : "s");
-        //     for(size_t na=0; na<argument_names.size(); ++na) 
-        //         printf("%s%s", na ? " and " : "", argument_names[na].c_str());
-        //     printf("\n");
-        // }
 
         try {
             auto grp = open_group(potential_group,nm.c_str());
@@ -266,7 +234,59 @@ DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool 
         }
     }
 
-    return engine;
+    auto& tasks = engine.task_graph.tasks;
+    struct TaskIdx {int value_idx; int deriv_idx;};
+    map<string,TaskIdx> name_to_task;
+
+    for(auto kv: dep_graph) {
+        const string& nm = kv.first;
+        DerivComputation& dc = *engine.get(nm).computation;
+
+        int compute_value_idx = tasks.size();
+        tasks.emplace_back(
+                nm,
+                [&dc,&engine](int n_round) {
+                     return dc.compute_value(0,engine.last_compute_mode);},
+                [&dc](int nr, int tn, int ns) {
+                     return dc.compute_value_subtask(nr,tn,ns);});
+
+        int propagate_deriv_idx = dc.potential_term ? -1 : tasks.size();
+        if(!dc.potential_term) {
+            tasks.emplace_back(
+                    nm+"_deriv",
+                    [&dc](int n_round) {
+                        return dc.propagate_deriv(0);},
+                    [&dc](int nr, int tn, int ns) {
+                        return dc.propagate_deriv_subtask(nr,tn,ns);});
+
+            // I propagate_deriv always consumes its value function
+            tasks[compute_value_idx].consumers.push_back(propagate_deriv_idx);
+        }
+
+        name_to_task[nm] = TaskIdx{compute_value_idx, propagate_deriv_idx};
+    }
+
+    for(auto kv: dep_graph) {
+        const string& nm = kv.first;
+        bool is_pot = engine.get(nm).computation->potential_term;
+        auto& deps = kv.second.second;
+
+        // printf("\n%s:\n", nm.c_str());
+        // for(auto& d: deps) printf("    %s\n", d.c_str());
+
+        for(auto& dep_nm: deps) {
+            // value dependency
+            tasks[name_to_task[dep_nm].value_idx].consumers.push_back(
+                    name_to_task[nm].value_idx);
+
+            // deriv dependency is in reversed order
+            // if nm is for a potential term then depend on value else deriv
+            int deriv_dep = is_pot ? name_to_task[nm].value_idx : name_to_task[nm].deriv_idx;
+            tasks[deriv_dep].consumers.push_back(name_to_task[dep_nm].deriv_idx);
+        }
+    }
+
+    return engine_unique;
 }
 
 NodeCreationMap& node_creation_map() 

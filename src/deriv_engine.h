@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <map>
 #include "vector_math.h"
+#include "task_graph.h"
 
 inline void copy_vec_array_to_buffer(VecArray arr, int n_elem, int n_dim, float* buffer) {
         for(int i=0; i<n_elem; ++i)
@@ -103,57 +104,63 @@ struct Pos : public CoordNode
 
 struct DerivEngine
 {
+    // Make this class non-copyable and non-moveable because of the use of 
+    // pointers in the task graph lambda functions.
+    DerivEngine(const DerivEngine&) = delete;
+    DerivEngine& operator=(const DerivEngine&) = delete;
+    DerivEngine(const DerivEngine&&) = delete;
+    DerivEngine& operator=(const DerivEngine&&) = delete;
+
     struct Node 
     {
         std::string name;
         std::unique_ptr<DerivComputation> computation;
-        std::vector<size_t> parents;  // cannot hold pointer to vector contents, so just store index
-        std::vector<size_t> children;
+        std::vector<std::string> argument_names;
 
-        int germ_exec_level;
-        int deriv_exec_level;
+        Node(const std::string& name_,
+                std::unique_ptr<DerivComputation>&& computation_, 
+                std::vector<std::string> argument_names_):
+            name(name_),
+            computation(std::move(computation_)),
+            argument_names(argument_names_)
+        {};
 
-        Node(std::string name_, std::unique_ptr<DerivComputation> computation_):
-            name(name_), computation(std::move(computation_)) {};
-        Node(std::string name_, DerivComputation* computation_):
-            name(name_), computation(computation_) {};
-        Node(const Node& other) = delete;
         Node(Node&& other):
             name(std::move(other.name)),
             computation(std::move(other.computation)),
-            parents(std::move(other.parents)),
-            children(std::move(other.children)),
-            germ_exec_level(other.germ_exec_level),
-            deriv_exec_level(other.deriv_exec_level)
-        {}
+            argument_names(std::move(other.argument_names))
+        {};
     };
 
+    TaskGraphExecutor task_graph;
     std::vector<Node> nodes;  // nodes[0] is the pos node
     Pos* pos;
     float potential;
+    ComputeMode last_compute_mode;
 
-    DerivEngine() {}
-    DerivEngine(int n_atom): 
+    // DerivEngine() {}
+    DerivEngine(int n_atom, int n_worker_threads): 
+        task_graph(n_worker_threads),
         potential(0.f)
     {
-        nodes.emplace_back("pos", new Pos(n_atom));
+        nodes.emplace_back("pos", std::unique_ptr<Pos>(new Pos(n_atom)), std::vector<std::string>());
         pos = dynamic_cast<Pos*>(nodes[0].computation.get());
     }
 
     void add_node(
             const std::string& name, 
-            std::unique_ptr<DerivComputation> fcn, 
+            std::unique_ptr<DerivComputation>&& fcn, 
             std::vector<std::string> argument_names);
 
     Node& get(const std::string& name);
     int get_idx(const std::string& name, bool must_exist=true);
 
     template <typename T>
-    T& get_computation(const std::string& name) {
-        auto computation = get(name).computation.get();
-        if(!computation) throw std::string("impossible pointer value");
-        return dynamic_cast<T&>(*computation);
-    }
+        T& get_computation(const std::string& name) {
+            auto computation = get(name).computation.get();
+            if(!computation) throw std::string("impossible pointer value");
+            return dynamic_cast<T&>(*computation);
+        }
 
     void compute(ComputeMode mode);
     enum IntegratorType {Verlet=0, Predescu=1};
@@ -161,7 +168,8 @@ struct DerivEngine
 };
 
 double get_n_hbond(DerivEngine &engine);
-DerivEngine initialize_engine_from_hdf5(int n_atom, hid_t potential_group, bool quiet=false);
+std::unique_ptr<DerivEngine> initialize_engine_from_hdf5(
+        int n_atom, hid_t potential_group, int n_worker_threads, bool quiet=false);
 
 // note that there are no null points in the vector of CoordNode*
 typedef std::vector<CoordNode*> ArgList;

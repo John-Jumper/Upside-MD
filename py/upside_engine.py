@@ -19,7 +19,7 @@ obj_dir = os.path.join(py_source_dir, '..', 'obj')
 calc = ct.cdll.LoadLibrary(os.path.join(obj_dir, 'libupside.so'))
 
 calc.construct_deriv_engine.restype  = ct.c_void_p
-calc.construct_deriv_engine.argtypes = [ct.c_int, ct.c_char_p, ct.c_bool]
+calc.construct_deriv_engine.argtypes = [ct.c_int, ct.c_char_p, ct.c_int, ct.c_bool]
 
 calc.free_deriv_engine.restype  = None
 calc.free_deriv_engine.argtypes = [ct.c_void_p]
@@ -157,13 +157,14 @@ def clamped_coeff_deriv(bspline_coeff, x):
 
 
 class Upside(object):
-    def __init__(self, config_file_path, quiet=True):
+    def __init__(self, config_file_path, n_worker_threads=0, quiet=True):
         self.config_file_path = str(config_file_path)
         with tb.open_file(self.config_file_path) as t:
             self.initial_pos = t.root.input.pos[:,:,0]
             self.n_atom = self.initial_pos.shape[0]
             self.sequence = t.root.input.sequence[:]
-        self.engine = calc.construct_deriv_engine(self.n_atom, self.config_file_path, bool(quiet))
+        self.engine = calc.construct_deriv_engine(
+                self.n_atom, self.config_file_path, n_worker_threads, bool(quiet))
         if self.engine is None: raise RuntimeError('Unable to initialize upside engine for %s'%(config_file_path,))
 
     def __repr__(self):

@@ -9,7 +9,7 @@ set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler"
 
 set(DEBUG_FLAGS "-g")
 
-set (OMP_FLAGS "${OpenMP_CXX_FLAGS}") # "-fsanitize=address") #
+set (OMP_FLAGS "") # "-fsanitize=address") #${OpenMP_CXX_FLAGS}
 set (DEFINES "-DR123_NO_SINCOS -Drestrict=__restrict__ -DNDEBUG")
 set (OPT     "-O3 -ffast-math -fno-omit-frame-pointer -march=${ARCH}")
 set (WARN    "-pedantic -Wall -Wno-strict-overflow -Wno-unused-function -Wno-unknown-pragmas")
@@ -19,7 +19,8 @@ set (CMAKE_LD_FLAGS  "${OMP_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
-    thread_task.cpp
+    deriv_engine.cpp 
+    task_graph.cpp
     nn.cpp
     main.cpp
     environment.cpp
@@ -28,7 +29,6 @@ set (ENGINE_SRC
     placement.cpp
     rama_map_pot.cpp
     spline.cpp
-    deriv_engine.cpp 
     sidechain_radial.cpp
     backbone_steric.cpp 
     bonds.cpp 
