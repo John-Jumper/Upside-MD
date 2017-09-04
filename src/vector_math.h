@@ -68,6 +68,13 @@ struct VecArrayStorage {
             std::fill_n(x.get(), n_elem*row_width, 0.f);
         }
 
+    VecArrayStorage(VecArrayStorage&& o):
+        n_elem(o.n_elem), row_width(o.row_width),
+        x(std::move(o.x))
+    {
+        std::copy_n(o.x.get(), n_elem*row_width, x.get());
+    }
+
     VecArrayStorage(const VecArrayStorage& o):
         n_elem(o.n_elem), row_width(o.row_width),
         x(new_aligned<float>(n_elem*row_width))
@@ -137,17 +144,21 @@ struct VecArrayAccum {
 
         int n_store;
         std::vector<ActiveState> state;
-        std::vector<VecArrayStorage> store;
+        // We must store unique_ptr's because we hand out the indices of the stores
+        // and a vector resize would perform a dangerous move.  
+        std::vector<std::unique_ptr<VecArrayStorage>> store;
 
         void push_back_store() {
             ++n_store;
             state.push_back(ActiveState::Never);
-            store.emplace_back(elem_width, n_elem);
+            store.emplace_back(
+                    std::unique_ptr<VecArrayStorage>(
+                        new VecArrayStorage(elem_width, n_elem)));
         }
 
         void zero_store(int ns) {
             // reset for later accumulation
-            fill(store[ns], 0.f);
+            fill(*store[ns], 0.f);
             state[ns] = ActiveState::Never;
         }
 
@@ -175,14 +186,14 @@ struct VecArrayAccum {
                     if(!reclaim && state[i] == ActiveState::Previous) continue;
 
                     state[i] = ActiveState::Current;
-                    return store[i];
+                    return *store[i];
                 }
             }
 
             // if we reach here then we have no inactive store
             push_back_store();
             state.back() = ActiveState::Current;
-            return store.back();
+            return *store.back();
         }
 
         void release(VecArray va) {
@@ -191,7 +202,7 @@ struct VecArrayAccum {
             // It would be better but more annoying to make the user keep the index
 
             for(int i=0; i<n_store; ++i) {
-                if(va.x == store[i].x.get()) {
+                if(va.x == store[i]->x.get()) {
                     state[i] = ActiveState::Previous;
                     return;
                 }
@@ -205,8 +216,8 @@ struct VecArrayAccum {
             // accumulate all arrays into the zeroth array
             std::lock_guard<std::mutex> g(mut);
 
-            float* base = store[0].x.get();
-            int n_entry = store[0].n_elem*store[0].row_width;
+            float* base = store[0]->x.get();
+            int n_entry = store[0]->n_elem*store[0]->row_width;
 
             for(int ns=1; ns<n_store; ++ns) {
                 switch(state[ns]) {
@@ -217,14 +228,14 @@ struct VecArrayAccum {
                         throw std::string("VecArrayAccum missing release before accum");
 
                     case ActiveState::Previous:
-                        float* acc = store[ns].x.get();
+                        float* acc = store[ns]->x.get();
                         for(int i=0; i<n_entry; ++i)
                             base[i] += acc[i];
                         zero_store(ns);
                 }
             }
             
-            return store[0];
+            return *store[0];
         }
 
         void zero_accum() {

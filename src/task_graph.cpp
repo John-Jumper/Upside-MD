@@ -93,7 +93,7 @@ void TaskGraphExecutor::worker_loop() {
                 std::unique_lock<std::mutex> g(mut);
                 cv.wait(g); // wait for notify
             }
-        } while(!main_ready.load());
+        } while(!main_ready.load() && !do_shutdown);
 
         process_graph();
         ++n_workers_complete;
