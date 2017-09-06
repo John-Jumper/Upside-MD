@@ -828,13 +828,18 @@ struct RotamerSidechain: public PotentialNode {
                 node_holders_matrix[n_rot]->convert_energy_to_prob(energy_cap, energy_cap_width);
 
         // Fill edge probabilities
+        {Timer timer(std::string("rotamer_edges"));
         igraph.compute_edges();
-
+        for(int ne=0; ne<igraph.n_edge; ++ne) 
+            igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
+        }
+Timer timer2(std::string("rotamer_distribute"));
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
         for(int ne=0; ne<igraph.n_edge; ++ne) {
             int   id1  = igraph.edge_id1[ne];
             int   id2  = igraph.edge_id2[ne];
-            float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
+            float prob = igraph.edge_value[ne];  // value of edge is potential
+            // float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
 
             if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
 

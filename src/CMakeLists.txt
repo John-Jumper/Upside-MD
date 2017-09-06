@@ -19,8 +19,8 @@ set (CMAKE_LD_FLAGS  "${ALL_PHASE_FLAGS} ${CMAKE_LD_FLAGS}" )
 include_directories(SYSTEM "include")
 
 set (ENGINE_SRC 
-    deriv_engine.cpp 
     task_graph.cpp
+    deriv_engine.cpp 
     nn.cpp
     main.cpp
     environment.cpp

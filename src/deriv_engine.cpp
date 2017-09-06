@@ -244,7 +244,7 @@ unique_ptr<DerivEngine> initialize_engine_from_hdf5(
 
         int compute_value_idx = tasks.size();
         tasks.emplace_back(
-                nm,
+                nm, 1,
                 [&dc,&engine](int n_round) {
                      return dc.compute_value(0,engine.last_compute_mode);},
                 [&dc](int nr, int tn, int ns) {
@@ -253,7 +253,7 @@ unique_ptr<DerivEngine> initialize_engine_from_hdf5(
         int propagate_deriv_idx = dc.potential_term ? -1 : tasks.size();
         if(!dc.potential_term) {
             tasks.emplace_back(
-                    nm+"_deriv",
+                    nm+"_deriv", 1,
                     [&dc](int n_round) {
                         return dc.propagate_deriv(0);},
                     [&dc](int nr, int tn, int ns) {
