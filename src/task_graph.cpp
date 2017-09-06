@@ -50,9 +50,7 @@ void TaskGraphExecutor::process_graph() {
         // A simple loop to reduce stress on the mutex
         // when no work is available
 
-        while(pq_threads_needed.load(relax)<=0)
-            if(!n_incomplete_tasks.load(relax))
-                return;
+        while(pq_threads_needed.load(relax)<=0);
 
         int thread_num = relaxed_dec(pq_threads_needed);
 
@@ -62,7 +60,7 @@ void TaskGraphExecutor::process_graph() {
         if(thread_num>=0) {
             // now we should check
             lock_guard<mutex> g(pq_mutex);
-            if(!(n_incomplete_tasks.load(relax))) return;
+            if(n_incomplete_tasks.load(relax)<=0) return;
 
             if(pq.size()) {  // there should be work, but could be a race condition
                 const auto& top_rt = pq.top();
@@ -110,7 +108,9 @@ void TaskGraphExecutor::process_graph() {
                             t.priority, uint16_t(task_idx), uint16_t(n_new_subtasks)});
                     n_new_threads_needed += n_new_subtasks;
                 } else {
-                    n_incomplete_tasks.fetch_sub(1, relax);
+                    int tasks_remaining = relaxed_dec(n_incomplete_tasks);
+                    // Make sure everyone gets a chance to see it
+                    if(!tasks_remaining) pq_threads_needed.fetch_add(1+n_workers, relax);
 
                     // Handle consumers outside the pq_mutex for efficiency
                     for(int i: t.consumers) {
@@ -238,6 +238,8 @@ void TaskGraphExecutor::start_threads()
 
 
 TaskGraphExecutor::~TaskGraphExecutor() {
+    n_incomplete_tasks.store(0);
+    pq_threads_needed.store(1+n_workers);
     do_shutdown.store(true);
     for(auto& t: worker_threads) t.join();
 }
