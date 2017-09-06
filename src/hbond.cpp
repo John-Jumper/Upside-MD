@@ -387,17 +387,23 @@ struct HBondCoverage : public CoordNode {
         igraph(grp, &infer_, &sidechains_),
         n_sc(igraph.n_elem2) {}
 
+
+    virtual void compute_value_subtask(int round, int task_idx, int n_subtasks) override {
+        igraph.compute_edges_run(task_idx, n_subtasks);
+    }
+
     virtual int compute_value(int round, ComputeMode mode) override {
-        Timer timer(string("hbond_coverage"));
-
-        // Compute coverage and its derivative
-        igraph.compute_edges();
-
-        fill(output, 0.f);
-        for(int ne=0; ne<igraph.n_edge; ++ne) {
-            output(0, igraph.edge_indices2[ne]) += igraph.edge_value[ne];
+        if(round==0) {
+            igraph.compute_edges_init();
+            return 1;
+        } else if(round==1) {
+            fill(output, 0.f);
+            for(int ne=0; ne<igraph.n_edge; ++ne) {
+                output(0, igraph.edge_indices2[ne]) += igraph.edge_value[ne];
+            }
+            return 0;
         }
-        return 0;
+        return -1;
     }
 
     virtual int propagate_deriv(int round) override {

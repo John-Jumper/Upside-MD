@@ -99,6 +99,8 @@ void TaskGraphExecutor::process_graph() {
                 // so we don't have to take the task mutex
                 my_n_round = ++t.n_round;
                 auto n_new_subtasks = t.controller_fcn(my_n_round);
+                // printf("finished round %i for %s with %i subtasks needed\n",
+                //         my_n_round, t.name.c_str(), n_new_subtasks);
                 int n_new_threads_needed = 0;
 
                 if(n_new_subtasks) {
@@ -141,7 +143,9 @@ void TaskGraphExecutor::process_graph() {
                 }
                 runtasks_to_add.clear();
 
-            }  // do_controller
+            } else { // do_controller
+                task_idx = -1;
+            }
         } // task_idx != -1
     } // infinite loop
 }

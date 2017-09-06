@@ -244,9 +244,9 @@ unique_ptr<DerivEngine> initialize_engine_from_hdf5(
 
         int compute_value_idx = tasks.size();
         tasks.emplace_back(
-                nm, 1,
+                nm, (nm==std::string("rotamer") ? 10 : 1),
                 [&dc,&engine](int n_round) {
-                     return dc.compute_value(0,engine.last_compute_mode);},
+                     return dc.compute_value(n_round,engine.last_compute_mode);},
                 [&dc](int nr, int tn, int ns) {
                      return dc.compute_value_subtask(nr,tn,ns);});
 
@@ -255,7 +255,7 @@ unique_ptr<DerivEngine> initialize_engine_from_hdf5(
             tasks.emplace_back(
                     nm+"_deriv", 1,
                     [&dc](int n_round) {
-                        return dc.propagate_deriv(0);},
+                        return dc.propagate_deriv(n_round);},
                     [&dc](int nr, int tn, int ns) {
                         return dc.propagate_deriv_subtask(nr,tn,ns);});
 

@@ -777,23 +777,48 @@ struct RotamerSidechain: public PotentialNode {
         if(!energy_fresh_relative_to_derivative) compute_value(0, PotentialAndDerivMode);
     }
 
-    virtual int compute_value(int round, ComputeMode mode) override {
-        energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
+    virtual void compute_value_subtask(int n_round, int task_idx, int n_subtask) override {
+        if(n_round==0) {
+            // printf("starting parallel %i\n", task_idx);
+            fill_holders_subtask(task_idx, n_subtask);
+            // printf("finishing parallel %i\n", task_idx);
+        }
+    }
+    virtual int compute_value(int n_round, ComputeMode mode) override {
+        if(n_round==0) {
+            energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
+            fill_holders_init();
+            return 3; // number of threads
+        } else if(n_round==1) {
+            fill_holders_finish();
+            auto solve_results = solve_for_marginals();
+            if(solve_results.first >= max_iter - iteration_chunk_size - 1)
+                n_bad_solve++;
 
-        fill_holders();
-        auto solve_results = solve_for_marginals();
-        if(solve_results.first >= max_iter - iteration_chunk_size - 1)
-            n_bad_solve++;
+            propagate_derivatives();
+            if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
+            return 0; // node is finished
+        } else {
+            return -1;
+        }
+        // if(n_round==0) {
+        //     energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
+        //     fill_holders_init();
+        //     fill_holders_subtask(0,1);
+        //     fill_holders_finish();
+        //     auto solve_results = solve_for_marginals();
+        //     if(solve_results.first >= max_iter - iteration_chunk_size - 1)
+        //         n_bad_solve++;
 
-        propagate_derivatives();
-        if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
-        return 0;
+        //     propagate_derivatives();
+        //     if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
+        //     return 0; // node is finished
+        // } else {
+        //     return -1;
+        // }
     }
 
-    virtual double test_value_deriv_agreement() {return -1.;}
-
-    void fill_holders()
-    {
+    void fill_holders_init() {
         Timer timer(std::string("rotamer_fill"));
         edges11.reset();
         for(int n_rot1: range(UPPER_ROT))
@@ -826,14 +851,18 @@ struct RotamerSidechain: public PotentialNode {
         for(int n_rot: range(1,UPPER_ROT))
             if(node_holders_matrix[n_rot])
                 node_holders_matrix[n_rot]->convert_energy_to_prob(energy_cap, energy_cap_width);
+        igraph.compute_edges_init();
+    }
 
-        // Fill edge probabilities
-        {Timer timer(std::string("rotamer_edges"));
-        igraph.compute_edges();
+    void fill_holders_subtask(int task_idx, int n_subtasks) {
+        igraph.compute_edges_run(task_idx, n_subtasks);
+    }
+
+    void fill_holders_finish()
+    {
         for(int ne=0; ne<igraph.n_edge; ++ne) 
             igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
-        }
-Timer timer2(std::string("rotamer_distribute"));
+
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
         for(int ne=0; ne<igraph.n_edge; ++ne) {
             int   id1  = igraph.edge_id1[ne];

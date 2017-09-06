@@ -268,39 +268,33 @@ struct InteractionGraph{
     constexpr static const int  n_dim2     = IType::n_dim2, n_dim2a = round_up(n_dim2, align);
     constexpr static const int  n_param    = IType::n_param;
 
+    // Read-only data (const after constructor)
     CoordNode* pos_node1;
     CoordNode* pos_node2;
-    std::vector<index_t> loc1, loc2;
-
     int   n_elem1, n_elem2;
     int   n_type1, n_type2;
     int   max_n_edge;
-    float cutoff;
-
-    int n_edge;
-
+    std::vector<index_t> loc1, loc2;
     std::unique_ptr<int32_t[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
     std::unique_ptr<int32_t[]>  id1,    id2;    // used to avoid self-interaction
+    float cutoff;
 
-    // buffers to copy position data to ensure contiguity
-    std::unique_ptr<float[]> pos1, pos2;
-
-    // per edge data
+    // Pairlist-related
     PairlistComputation<IType::symmetric> pairlist;
-    int32_t* edge_indices1; // pointers to pairlist-maintained arrays
-    int32_t* edge_indices2;  
-    int32_t* edge_id1;
-    int32_t* edge_id2;
-    std::unique_ptr<float[]>    edge_value;
-    std::unique_ptr<float[]>    edge_deriv;  // this may become a SIMD-type vector
-    std::unique_ptr<float[]>    edge_sensitivity; // must be filled by user of this class
+    int32_t *edge_indices1, *edge_indices2, *edge_id1, *edge_id2; // pointers to pairlist arrays
+    std::unique_ptr<float[]> pos1, pos2; // buffers to copy data to ensure contiguity
+    int n_edge;
 
+    // Computed edge values
+    std::unique_ptr<float[]> edge_value;
+    std::unique_ptr<float[]> edge_deriv;  // this may become a SIMD-type vector
+    std::unique_ptr<float[]> edge_sensitivity; // must be filled by user of this class
     std::unique_ptr<float[]> interaction_param;
-
     std::unique_ptr<float[]> pos1_deriv, pos2_deriv;
-
     std::vector<Vec<n_param>> edge_param_deriv;
-    VecArrayStorage           interaction_param_deriv;
+
+    // Accumulators
+    VecArrayStorage interaction_param_deriv;
 
     InteractionGraph(hid_t grp, CoordNode* pos_node1_, CoordNode* pos_node2_ = nullptr):
         pos_node1(pos_node1_), pos_node2(pos_node2_),
@@ -319,14 +313,14 @@ struct InteractionGraph{
         types1(new_aligned<int32_t>(n_elem1,16)), types2(new_aligned<int32_t>(n_elem2,16)),
         id1   (new_aligned<int32_t>(n_elem1,16)), id2   (new_aligned<int32_t>(n_elem2,16)),
 
-        pos1(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             align_bytes)),
-        pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, align_bytes)),
-
         pairlist(n_elem1,n_elem2,max_n_edge),
         edge_indices1(pairlist.edge_indices1.get()),
         edge_indices2(pairlist.edge_indices2.get()),
         edge_id1      (pairlist.edge_id1.get()),
         edge_id2      (pairlist.edge_id2.get()),
+
+        pos1(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             align_bytes)),
+        pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, align_bytes)),
 
         edge_value      (new_aligned<float>  (max_n_edge,                 align_bytes)),
         edge_deriv      (new_aligned<float>  (max_n_edge*(n_dim1+n_dim2), align_bytes)),
@@ -441,7 +435,7 @@ struct InteractionGraph{
     }
 
     template<bool param_deriv=false>
-    void compute_edges() {
+    void compute_edges_init() {
         // Copy in the data to packed arrays to ensure contiguity
         {
             VecArray posv = pos_node1->output;
@@ -466,8 +460,17 @@ struct InteractionGraph{
         // Compute edge values
         if(param_deriv)
             edge_param_deriv.clear();
+    }
 
-        for(int ne=0; ne<n_edge; ne+=4) {
+    template<bool param_deriv=false>
+    void compute_edges_run(int task_num, int n_subtasks) {
+        int n_chunk = round_up(n_edge,4)/4;
+        int edge_per_subtask = 4*(n_chunk/n_subtasks);
+        int my_start = task_num*edge_per_subtask;
+        // make sure the last subtask covers exactly the number of edges
+        int my_stop  = task_num==n_subtasks-1 ? n_edge : (task_num+1)*edge_per_subtask;
+
+        for(int ne=my_start; ne<my_stop; ne+=4) {
             auto i1 = Int4(edge_indices1+ne);
             auto i2 = Int4(edge_indices2+ne);
 
@@ -501,6 +504,14 @@ struct InteractionGraph{
                 }
             }
         }
+    }
+
+
+    template<bool param_deriv=false>
+    void compute_edges() {
+        // serial version if you don't want parallelism
+        compute_edges_init<param_deriv>();
+        compute_edges_run<param_deriv>(0,1);
     }
 
 
