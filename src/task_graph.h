@@ -25,6 +25,15 @@ struct Task {
 
     //! input is n_round and subtask and n_subtasks
     std::function<void(int,int,int)> subtask_fcn;
+
+    struct Timing {
+        int64_t n_task_invocation = 0l;
+        int64_t n_controller_invocation = 0l;
+        int64_t n_subtask_invocation = 0l;
+        double  controller_total_time = 0.;
+        double  subtask_total_time = 0.;
+    };
+    Timing timing;
     
     //! Vector of every task index that depends on this task
     std::vector<size_t> consumers;
@@ -77,6 +86,7 @@ struct TaskGraphExecutor {
         void set_n_subtasks_with_controller(int task_idx, int controller_round);
 
     public:
+        int64_t n_invocations;
         std::vector<Task> tasks;
         const int n_workers; // does not include main thread
 

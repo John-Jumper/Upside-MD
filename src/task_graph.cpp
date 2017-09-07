@@ -87,9 +87,18 @@ void TaskGraphExecutor::process_graph() {
 
             bool do_controller = my_n_round==-1;
             if(!do_controller) {
+                auto tstart = chrono::high_resolution_clock::now();
+
                 t.subtask_fcn(my_n_round, subtask_idx, my_n_subtasks);
+
+                auto tstop  = chrono::high_resolution_clock::now();
+                auto elapsed = chrono::duration<double>(tstop-tstart).count();
+                
                 {
                     lock_guard<mutex> g(t.mut);
+                    t.timing.subtask_total_time += elapsed;
+                    t.timing.n_subtask_invocation += 1l;
+
                     do_controller = ++t.n_subtasks_completed == my_n_subtasks;
                 }
             }
@@ -97,8 +106,17 @@ void TaskGraphExecutor::process_graph() {
             if(do_controller) {
                 // At the controller stage, only as single thread can be executing
                 // so we don't have to take the task mutex
+
+                t.timing.n_task_invocation += my_n_round==-1;
+                auto tstart = chrono::high_resolution_clock::now();
+
                 my_n_round = ++t.n_round;
                 auto n_new_subtasks = t.controller_fcn(my_n_round);
+
+                auto tstop  = chrono::high_resolution_clock::now();
+                t.timing.controller_total_time += chrono::duration<double>(tstop-tstart).count();
+                t.timing.n_controller_invocation += 1l;
+
                 // printf("finished round %i for %s with %i subtasks needed\n",
                 //         my_n_round, t.name.c_str(), n_new_subtasks);
                 int n_new_threads_needed = 0;
@@ -179,6 +197,8 @@ void TaskGraphExecutor::execute() {
     if(n_workers!=int(worker_threads.size())) start_threads();
     while(n_workers_ready.load() != n_workers && !do_shutdown.load());
 
+    n_invocations++;
+
     // let's reset all the tasks now
     for(auto& t: tasks) {
         t.n_round = -1;
@@ -230,6 +250,7 @@ TaskGraphExecutor::TaskGraphExecutor(int n_workers_):
     do_shutdown(false),
     
     spin_wait_between_graphs(true),
+    n_invocations(0),
     n_workers(n_workers_)
 {}
 
@@ -246,4 +267,23 @@ TaskGraphExecutor::~TaskGraphExecutor() {
     pq_threads_needed.store(1+n_workers);
     do_shutdown.store(true);
     for(auto& t: worker_threads) t.join();
+
+    printf("digraph G{\n");
+    auto total_time = 0.;
+    printf("\"op\",\"n_thread\",\"time\",\"aff\"\n");
+    for(int nt=0; nt<int(tasks.size()); ++nt) {
+        double t1 = 1e6*tasks[nt].timing.controller_total_time/n_invocations;
+        double t2 = 1e6*tasks[nt].timing.subtask_total_time/n_invocations;
+        total_time += t1+t2;
+        printf("\"%s\",%i,%f,\"serial\"\n", tasks[nt].name.c_str(), 1+n_workers, t1+t2);
+        // printf("    n%02i[label=\"%s\\n%.1f tot %.1f ctrl %.1f sub\"];\n",
+        //         nt, tasks[nt].name.c_str(), t1+t2, t1,t2);
+    }
+    printf("\"%s\",%i,%f,\"serial\"\n", "total", 1+n_workers, total_time);
+    printf("\n    ");
+    for(int nt=0; nt<int(tasks.size()); ++nt)
+        for(int i: tasks[nt].consumers)
+            printf("n%02i -> n%02i[dir=back]; ", i, nt);
+
+    printf("label=\"%f total\";}\n", total_time);
 }

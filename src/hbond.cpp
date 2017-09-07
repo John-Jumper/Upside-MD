@@ -314,30 +314,37 @@ struct ProteinHBond : public CoordNode
         }
     }
 
-    virtual int compute_value(int round, ComputeMode mode) override {
-        Timer timer(string("protein_hbond"));
+    // virtual void compute_value_subtask(int round, int task_idx, int n_subtasks) override {
+    //     // Compute protein hbonding score and its derivative
+    //     igraph.compute_edges_run(task_idx, n_subtasks);
+    // }
 
+    virtual int compute_value(int round, ComputeMode mode) override {
         int n_virtual = n_donor + n_acceptor;
         VecArray vs = output;
         VecArray ho = infer.output;
 
-        for(int nv: range(n_virtual)) {
-            Float4(&ho(0,nv)).store(&vs(0,nv));
-            Float4(&ho(4,nv)).store(&vs(4,nv)); // result is already zero padded
-        }
+        //if// (round==0) {
+            for(int nv: range(n_virtual)) {
+                Float4(&ho(0,nv)).store(&vs(0,nv));
+                Float4(&ho(4,nv)).store(&vs(4,nv)); // result is already zero padded
+            }
 
-        // Compute protein hbonding score and its derivative
-        igraph.compute_edges();
-        for(int ne=0; ne<igraph.n_edge; ++ne) {
-            int nd = igraph.edge_indices1[ne];
-            int na = igraph.edge_indices2[ne];
-            float hb_log = igraph.edge_value[ne];
-            vs(6,nd)         += hb_log;
-            vs(6,na+n_donor) += hb_log;
-        }
+            igraph.compute_edges_init();
+            // return 1;
+        igraph.compute_edges_run(0, 1);
+        // } else {
+            for(int ne=0; ne<igraph.n_edge; ++ne) {
+                int nd = igraph.edge_indices1[ne];
+                int na = igraph.edge_indices2[ne];
+                float hb_log = igraph.edge_value[ne];
+                vs(6,nd)         += hb_log;
+                vs(6,na+n_donor) += hb_log;
+            }
 
-        for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
-        return 0;
+            for(int nv: range(n_virtual)) vs(6,nv) = 1.f-expf(-vs(6,nv));
+            return 0;
+        // }
     }
 
     virtual int propagate_deriv(int round) override {

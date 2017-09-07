@@ -314,12 +314,16 @@ struct AffineAlignment : public CoordNode
         }
     }
 
-    virtual int compute_value(int round, ComputeMode mode) {
-        Timer timer(string("affine_alignment"));
+    virtual int compute_value(int round, ComputeMode mode) override {
+    // virtual void compute_value_subtask(int round, int task_idx, int n_subtask) {
+    //    int chunk = n_group/n_subtask;
+    //    int my_start = task_idx*chunk;
+    //    int my_end   = task_idx<n_subtask-1 ? (task_idx+1)*chunk : n_group;
 
         VecArray rigid_body = output;
         float* posc = pos.output.x.get();
 
+        // for(int ng=my_start; ng<my_end; ++ng) {
         for(int ng=0; ng<n_group; ++ng) {
             const auto& p = params[ng];
 
@@ -385,6 +389,11 @@ struct AffineAlignment : public CoordNode
         }
         return 0;
     }
+
+
+    // virtual int compute_value(int round, ComputeMode mode) {
+    //     return round==0 ? 3 : 0;
+    // }
 
     virtual int propagate_deriv(int round) {
         Timer timer(string("affine_alignment_deriv"));
