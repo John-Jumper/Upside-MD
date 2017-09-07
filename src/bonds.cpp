@@ -507,3 +507,88 @@ struct ConstantCoord : public CoordNode
 
 };
 static RegisterNodeType<ConstantCoord,0> constant_coord_node("constant");
+
+struct Slice : public CoordNode
+{
+    int n_atom;
+    vector<int> id;
+    CoordNode& pos;
+
+    Slice(hid_t grp, CoordNode& pos_):
+        CoordNode(get_dset_size(1, grp, "id")[0], pos_.elem_width),
+        n_atom(n_elem),
+        id(n_atom),
+        pos(pos_)
+    {
+        check_size(grp, "id", n_atom);
+        traverse_dset<1,int> (grp, "id", [&](size_t i, int x) {id[i] = x;});
+    }
+
+    virtual void compute_value(ComputeMode mode) override {
+        for (int na = 0; na < n_atom; na++) {
+            for (int d = 0; d < elem_width; d++) {
+                output(d, na) = pos.output(d, id[na]);
+            }
+        }
+    }
+
+    virtual void propagate_deriv() override {
+        for (int na = 0; na < n_atom; na++) {
+            for (int d = 0; d < elem_width; d++) {
+                pos.sens(d, id[na]) += sens(d, na);
+            }
+        }
+    }
+ };
+static RegisterNodeType<Slice,1> slice_node("slice");
+
+struct Concat : public CoordNode
+{
+    vector<CoordNode*> coord_nodes;
+
+    static int sum_n_elem(const vector<CoordNode*>& coord_nodes_) {
+        int ne = 0;
+        for(auto& cn: coord_nodes_) ne += cn->n_elem;
+        return ne;
+    }
+
+    Concat(hid_t grp, const std::vector<CoordNode*> &coord_nodes_):
+        CoordNode(sum_n_elem(coord_nodes_), coord_nodes[0]->elem_width),
+        coord_nodes(coord_nodes_)
+    {
+        for(auto cn: coord_nodes)
+            if(cn->n_elem != coord_nodes[0]->n_elem)
+                throw string("Coord node n_elem mismatch");
+    }
+
+    virtual void compute_value(ComputeMode mode) override {
+        int loc = 0;
+        for(auto cn: coord_nodes) {
+            int n_elem_cn = cn->n_elem;
+            VecArray cn_output = cn->output;
+            
+            for(int ne=0; ne<n_elem_cn; ++ne){
+                for(int nw=0; nw<elem_width; ++nw)
+                    output(nw,loc) = cn_output(nw,ne);
+                loc++;
+            }
+        }
+        assert(loc==n_elem);
+    } 
+
+    virtual void propagate_deriv() override {
+        int loc = 0;
+        for(auto cn: coord_nodes) {
+            int n_elem_cn = cn->n_elem;
+            VecArray cn_sens = cn->sens;
+            
+            for(int ne=0; ne<n_elem_cn; ++ne){
+                for(int nw=0; nw<elem_width; ++nw)
+                    cn_sens(nw,loc) += sens(nw,ne);
+                loc++;
+            }
+        }
+        assert(loc==n_elem);
+    }  
+}; 
+static RegisterNodeType<Concat,-1> concat_node("concat");

@@ -202,6 +202,19 @@ struct RegisterNodeType {
     RegisterNodeType(std::string name_prefix);
 };
 
+
+template <typename NodeClass>
+struct RegisterNodeType<NodeClass,-1> {
+    // n_args of -1 indicates that args should be passed as a vector<CoordNode*> for
+    //   variadic nodes
+    RegisterNodeType(std::string name_prefix){
+        NodeCreationFunction f = [](hid_t grp, const ArgList& args) {
+            if(!args.size()) throw std::string("Expected at least 1 arg");
+            return new NodeClass(grp, args);};
+        add_node_creation_function(name_prefix, f);
+    }
+};
+
 template <typename NodeClass>
 struct RegisterNodeType<NodeClass,0> {
     RegisterNodeType(std::string name_prefix){

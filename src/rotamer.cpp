@@ -654,7 +654,7 @@ struct RotamerSidechain: public PotentialNode {
                         " elements but the " + to_string(i) + "-th (0-indexed) probability node has only " +
                         to_string(prob_nodes[i]->n_elem) + " elements.");
 
-        if(logging(LOG_BASIC))
+        if(logging(LOG_DETAILED))
             default_logger->add_logger<long>("rotamer_bad_solves_cumulative", {1},
                     [&](long* buffer) {buffer[0]=n_bad_solve;});
 
