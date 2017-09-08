@@ -11,6 +11,7 @@ enum class Alignment {unaligned, aligned};
 
 struct Int4;
 struct Float4;
+struct Double4;
 
 static void print_vector(const char* nm, const Float4& val);
 
@@ -128,7 +129,6 @@ struct alignas(16) Int4
         Int4 srl(int shift_count) const {return Int4(_mm_srli_epi32(vec,shift_count));} // right logical shift
         Int4 sll(int shift_count) const {return Int4(_mm_slli_epi32(vec,shift_count));} // left  logical shift
 };
-
 
 
 
@@ -277,6 +277,8 @@ struct alignas(16) Float4
         template <int round_mode = _MM_FROUND_TO_NEAREST_INT>
         Float4 round() const {return Float4(_mm_round_ps(vec, round_mode));}
 
+        Double4 double4() const; 
+
         Int4 truncate_to_int() const {
             return Int4(_mm_cvttps_epi32(vec));
         }
@@ -307,6 +309,8 @@ struct alignas(16) Float4
         float w() const { float val; _MM_EXTRACT_FLOAT(val, vec, 3); return val;}
 
         friend Int4;
+        friend Double4;
+
         friend void transpose4(Float4&, Float4&, Float4&, Float4&);
         template <int i3, int i2, int i1, int i0> friend Float4 shuffle(Float4 m1, Float4 m2);
 
@@ -320,6 +324,190 @@ struct alignas(16) Float4
         friend inline Float4 min(const Float4& a, const Float4& b);
         friend inline Float4 max(const Float4& a, const Float4& b);
         friend inline Float4 horizontal_add(const Float4& x1, const Float4& x2);
+};
+
+
+struct alignas(16) Double4 
+{
+    protected:
+        __m256d vec;
+        Double4(__m256d vec_):
+            vec(vec_)
+        {};
+
+    public:
+        typedef Double4 scalar_t; // functions that return scalars (like dot) give constant Float4's
+        Double4(): vec(_mm256_setzero_pd()) {}
+
+        // constructor from aligned storage
+        explicit Double4(const double* vec_, Alignment align = Alignment::aligned):
+            vec(align==Alignment::aligned ? _mm256_load_pd(vec_) : _mm256_loadu_pd(vec_)) {}
+
+        // broadcast constructor
+        // Double4(const float& val):   
+        //     vec(_mm256_broadcast_ss(&val)) {}
+        Double4(const double val):   
+            vec(_mm256_set1_pd(val)) {}
+
+        // // gather constructor from offsets
+        // // Not particularly efficient
+        // Double4(const float* base, const Int4& offsets) {
+        //     alignas(16) float data[4] = {
+        //         base[offsets.x()], base[offsets.y()], base[offsets.z()], base[offsets.w()]};
+        //     vec = _mm256_load_pd(data);
+        // }
+
+        // template <int i>
+        // Double4 broadcast() const {
+        //     return Double4(_mm256_shuffle_pd(vec,vec, _MM_SHUFFLE(i,i,i,i)));
+        // }
+
+        Double4 operator+ (const Double4 &o) const {return Double4(_mm256_add_pd  (vec, o.vec));}
+        Double4 operator- (const Double4 &o) const {return Double4(_mm256_sub_pd  (vec, o.vec));}
+        Double4 operator- ()                const {return _mm256_sub_pd(_mm256_setzero_pd(), vec);}
+        Double4 operator* (const Double4 &o) const {return Double4(_mm256_mul_pd  (vec, o.vec));}
+        // Double4 operator< (const Double4 &o) const {return Double4(_mm256_cmplt_pd(vec,o.vec));}
+        // Double4 operator<=(const Double4 &o) const {return Double4(_mm256_cmple_pd(vec,o.vec));}
+        // Double4 operator!=(const Double4 &o) const {return Double4(_mm256_cmpneq_pd(vec,o.vec));}
+        // Double4 operator==(const Double4 &o) const {return Double4(_mm256_cmpeq_pd(vec,o.vec));}
+        Double4 operator& (const Double4 &o) const {return Double4(_mm256_and_pd(vec,o.vec));}
+        Double4 operator| (const Double4 &o) const {return Double4(_mm256_or_pd(vec,o.vec));}
+
+        // Double4 approx_rsqrt() const { 
+        //     // 12-bit accuracy (about to about 0.02%)
+        //     return _mm256_rsqrt_pd(vec);
+        // }
+        // Double4 approx_rcp() const { 
+        //     // 12-bit accuracy (about to about 0.02%)
+        //     return _mm256_rcp_pd(vec);
+        // }
+        // Double4 rsqrt() const { 
+        //     // one round of newton-raphson, see online documentation for _mm256_rsqrt_pd for details
+        //     Double4 a = _mm256_rsqrt_pd(vec);   // 12-bit approximation
+        //     return Double4(1.5f)*a - (Double4(0.5f)*(*this)) * a * (a*a);
+        // }
+        // Double4 rcp() const {
+        //     // one round of newton-raphson, see online documentation for _mm256_rcp_pd for details
+        //     auto x = approx_rcp();
+        //     return x*(Double4(2.f) - (*this)*x);
+        // }
+        // Double4 sqrt() const {return (*this) * this->rsqrt();}  // faster than _mm256_sqrt_pd but NaN for vec==0.
+        // // Double4 sqrt() const {return _mm256_sqrt_pd(vec);}
+
+        // Double4 abs()  const {
+        //     // this function assumes well-behaved, finite floats
+        //     // I am not sure if it works sanely for denormals, inf, and NaN
+        //     return _mm256_and_pd(vec, _mm256_load_pd((const float*)abs_mask));
+        // }
+
+        // Double4 copysign(const Double4 &o)  const {
+        //     // this function assumes well-behaved, finite floats
+        //     // I am not sure if it works sanely for denormals, inf, and NaN
+        //     return _mm256_or_pd(
+        //             _mm256_and_pd(  vec, _mm256_load_pd((const float*) abs_mask)),
+        //             _mm256_and_pd(o.vec, _mm256_load_pd((const float*)sign_mask)));
+        // }
+
+        Double4 operator+=(const Double4 &o) {return vec = _mm256_add_pd(vec, o.vec);}
+        Double4 operator-=(const Double4 &o) {return vec = _mm256_sub_pd(vec, o.vec);}
+        Double4 operator*=(const Double4 &o) {return vec = _mm256_mul_pd(vec, o.vec);}
+        Double4 operator|=(const Double4 &o) {return vec = _mm256_or_pd(vec,o.vec);}
+
+        int movemask() const {return _mm256_movemask_pd(vec);}
+        // bool none() const {__m128i v = _mm256_castpd_si128(vec); return  _mm256_testz_si128(v,v);}
+        // bool any() const  {return !none();}
+
+        // const Double4 right_rotate() const { return Double4(_mm256_shuffle_pd(vec,vec, _MM_SHUFFLE(2,1,0,3))); }
+        // const Double4 left_rotate()  const { return Double4(_mm256_shuffle_pd(vec,vec, _MM_SHUFFLE(0,3,2,1))); }
+
+        void store(double* vec_, Alignment align=Alignment::aligned) const { 
+            if(align==Alignment::aligned) 
+                _mm256_store_pd(vec_, vec); 
+            else 
+                _mm256_storeu_pd(vec_,vec);
+        }
+
+        // void store_scalar(double* x) {
+        //     _mm256_store_sd(x,vec);
+
+        // }
+
+        Double4 update(double* vec_, Alignment align=Alignment::aligned) const { 
+            Double4 new_val = *this + Double4(vec_,align);
+            new_val.store(vec_,align);
+            return new_val;
+        }
+        Double4 scale_update(Double4& scale_val, double* vec_,
+                Alignment align=Alignment::aligned) const { 
+            Double4 new_val = fmadd(scale_val,*this, Double4(vec_,align));
+            new_val.store(vec_,align);
+            return new_val;
+        }
+
+        // Double4 sum_in_all_entries() const {
+        //     // the sum of the vector is now in all entries
+        //     __m128 vec2 = _mm256_hadd_pd(vec,vec);
+        //     return _mm256_hadd_pd(vec2,vec2);
+        // }
+
+        // choose from values whenever the equivalent element of mask is true
+        // *this is the mask 
+        //   c.ternary(a,b)  ==  c ? a : b;
+        Double4 ternary(const Double4& a, const Double4& b) const {
+            return Double4(_mm256_blendv_pd(b.vec, a.vec, vec));
+        }
+
+        template <int round_mode = _MM_FROUND_TO_NEAREST_INT>
+        Double4 round() const {return Double4(_mm256_round_pd(vec, round_mode));}
+
+        Float4 float4() const {
+            return _mm256_cvtpd_ps(vec);
+        }
+
+        // Int4 truncate_to_int() const {
+        //     return Int4(_mm256_cvttpd_epi32(vec));
+        // }
+
+        template <int m0, int m1, int m2, int m3>
+        Double4 blend(const Double4& o) const {
+            constexpr int mask = (m0<<0) + (m1<<1) + (m2<<2) + (m3<<3);
+            return _mm256_blend_pd(vec, o.vec, mask);
+        }
+
+        template <int m0, int m1, int m2, int m3>
+        Double4 zero_entries() const {
+            return this->blend<m0,m1,m2,m3>(Double4());
+        }
+
+        // Double4 horizontal_max() const {
+        //     // FIXME improve this implementation
+        //     return max(max(broadcast<0>(), broadcast<1>()), max(broadcast<2>(),broadcast<3>()));
+        // }
+        // Double4 horizontal_min() const {
+        //     // FIXME improve this implementation
+        //     return min(min(broadcast<0>(), broadcast<1>()), min(broadcast<2>(),broadcast<3>()));
+        // }
+
+        // float x() const { float val; _MM_EXTRACT_FLOAT(val, vec, 0); return val;}
+        // float y() const { float val; _MM_EXTRACT_FLOAT(val, vec, 1); return val;}
+        // float z() const { float val; _MM_EXTRACT_FLOAT(val, vec, 2); return val;}
+        // float w() const { float val; _MM_EXTRACT_FLOAT(val, vec, 3); return val;}
+
+        // friend Int4;
+        // friend void transpose4(Double4&, Double4&, Double4&, Double4&);
+        // template <int i3, int i2, int i1, int i0> friend Double4 shuffle(Double4 m1, Double4 m2);
+
+        // Int4 cast_int() const {
+        //     // bit-equivalent cast to int
+        //     return Int4(_mm256_castpd_si128(vec));
+        // } 
+
+        friend inline Double4 fmadd(const Double4& a1, const Double4& a2, const Double4& b);
+        friend inline Double4 fmsub(const Double4& a1, const Double4& a2, const Double4& b);
+        friend inline Double4 min(const Double4& a, const Double4& b);
+        friend inline Double4 max(const Double4& a, const Double4& b);
+        friend Float4;
+        // friend inline Double4 horizontal_add(const Double4& x1, const Double4& x2);
 };
 
 /*
@@ -430,6 +618,22 @@ inline Float4 fmsub(const Float4& a1, const Float4& a2, const Float4& b) {
 #endif
 }
 
+inline Double4 fmadd(const Double4& a1, const Double4& a2, const Double4& b) {
+#ifdef __AVX2__
+    return Double4(_mm256_fmadd_pd(a1.vec,a2.vec, b.vec));
+#else
+    return Double4(_mm256_add_pd(_mm256_mul_pd(a1.vec,a2.vec), b.vec));
+#endif
+}
+
+inline Double4 fmsub(const Double4& a1, const Double4& a2, const Double4& b) {
+#ifdef __AVX2__
+    return Double4(_mm256_fmsub_pd(a1.vec,a2.vec, b.vec));
+#else
+    return Double4(_mm256_sub_pd(_mm256_mul_pd(a1.vec,a2.vec), b.vec));
+#endif
+}
+
 // FIXME I should put in an efficient, approximate SSE expf
 //   but for now I will just make it work
 inline Float4 expf(const Float4& x) {
@@ -447,18 +651,13 @@ inline Float4 logf(const Float4& x) {
 inline bool any(const Float4& x) {return x.any();}
 inline bool none(const Float4& x) {return x.none();}
 
-inline Float4 ternary(const Float4& which, const Float4& a, const Float4& b) {
-    // compatibility with float version
-    return which.ternary(a,b);
-}
+inline Float4 ternary(const Float4& which, const Float4& a, const Float4& b) { return which.ternary(a,b); }
+inline Double4 ternary(const Double4& which, const Double4& a, const Double4& b) { return which.ternary(a,b); }
 
-inline Float4 min(const Float4& a, const Float4& b) {
-    return _mm_min_ps(a.vec, b.vec);
-}
-
-inline Float4 max(const Float4& a, const Float4& b) {
-    return _mm_max_ps(a.vec, b.vec);
-}
+inline Float4 min(const Float4& a, const Float4& b) { return _mm_min_ps(a.vec, b.vec); }
+inline Float4 max(const Float4& a, const Float4& b) { return _mm_max_ps(a.vec, b.vec); }
+inline Double4 min(const Double4& a, const Double4& b) { return _mm256_min_pd(a.vec, b.vec); }
+inline Double4 max(const Double4& a, const Double4& b) { return _mm256_max_pd(a.vec, b.vec); }
 
 inline Float4 approx_rsqrt(const Float4& x) {return x.approx_rsqrt();}
 inline Float4 approx_rcp  (const Float4& x) {return x.approx_rcp  ();}
@@ -525,5 +724,9 @@ inline Float4 approx_max_normalize3(const Float4& o) {
 }
 
 inline Float4 isnan(const Float4& o) {return o!=o;}
+
+inline Double4 Float4::double4() const {
+    return _mm256_cvtps_pd(vec);
+}
 
 #endif

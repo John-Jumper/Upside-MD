@@ -478,6 +478,18 @@ struct EdgeHolder {
                 auto v1 = old_node_belief1 * vec_rcp(Float4(1e-10f) + old_edge_belief1);
                 auto v2 = old_node_belief2 * vec_rcp(Float4(1e-10f) + old_edge_belief2);
 
+                // store v1 and v2 onto old edge beliefs
+                store4vec<w1>(old_belief.x + ne*4*ws + 0,    v1);
+                store4vec<w2>(old_belief.x + ne*4*ws + 4*w1, v2);
+            }
+
+            for(int ne=0; ne<n_edge; ++ne) {
+                int i1 = edge_indices1[ne]*4*w1;
+                int i2 = edge_indices2[ne]*4*w2;
+
+                auto v1 = read4vec<w1>(old_belief.x + ne*4*ws + 0);
+                auto v2 = read4vec<w2>(old_belief.x + ne*4*ws + 4*w1);
+
                 // load the edge probability matrix
                 auto eprob = PaddedMatrix<N_ROT1,N_ROT2>(prob.x + ne*N_ROT1*4*w2);
                 auto cur_edge_belief1 = eprob.apply_left (v2);
@@ -486,11 +498,11 @@ struct EdgeHolder {
                 auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
                 auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
                 
-                // node normalization is needed for avoid NaN
-                // FIXME investigate edge scalings that could obviate this
-                // FIXME investigate scaling the edges only every N somethings to reduce expense
-                cur_node_belief1 *= rcp(sum(cur_node_belief1).sum_in_all_entries());
-                cur_node_belief2 *= rcp(sum(cur_node_belief2).sum_in_all_entries());
+                // // node normalization is needed for avoid NaN
+                // // FIXME investigate edge scalings that could obviate this
+                // // FIXME investigate scaling the edges only every N somethings to reduce expense
+                // cur_node_belief1 *= rcp(sum(cur_node_belief1).sum_in_all_entries());
+                // cur_node_belief2 *= rcp(sum(cur_node_belief2).sum_in_all_entries());
 
                 store4vec<w1>(cur_belief.x + ne*4*ws + 0,    cur_edge_belief1);
                 store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1, cur_edge_belief2);
