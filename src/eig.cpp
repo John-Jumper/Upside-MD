@@ -395,7 +395,7 @@ struct AffineAlignment : public CoordNode
     //     return round==0 ? 3 : 0;
     // }
 
-    virtual int propagate_deriv(int round) {
+    virtual int propagate_deriv(int round) override {
         Timer timer(string("affine_alignment_deriv"));
         VecArray pos_sens_va = pos.sens.acquire();
         float* pos_sens = pos_sens_va.x;

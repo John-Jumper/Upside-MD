@@ -270,20 +270,20 @@ TaskGraphExecutor::~TaskGraphExecutor() {
 
     printf("digraph G{\n");
     auto total_time = 0.;
-    printf("\"op\",\"n_thread\",\"time\",\"aff\"\n");
+    // printf("\"op\",\"n_thread\",\"time\",\"aff\"\n");
     for(int nt=0; nt<int(tasks.size()); ++nt) {
         double t1 = 1e6*tasks[nt].timing.controller_total_time/n_invocations;
         double t2 = 1e6*tasks[nt].timing.subtask_total_time/n_invocations;
         total_time += t1+t2;
-        printf("\"%s\",%i,%f,\"serial\"\n", tasks[nt].name.c_str(), 1+n_workers, t1+t2);
-        // printf("    n%02i[label=\"%s\\n%.1f tot %.1f ctrl %.1f sub\"];\n",
-        //         nt, tasks[nt].name.c_str(), t1+t2, t1,t2);
+        // printf("\"%s\",%i,%f,\"serial\"\n", tasks[nt].name.c_str(), 1+n_workers, t1+t2);
+        printf("    n%02i[label=\"%s\\n%.1f tot %.1f ctrl %.1f sub\"];\n",
+                nt, tasks[nt].name.c_str(), t1+t2, t1,t2);
     }
-    printf("\"%s\",%i,%f,\"serial\"\n", "total", 1+n_workers, total_time);
+    // printf("\"%s\",%i,%f,\"serial\"\n", "total", 1+n_workers, total_time);
     printf("\n    ");
     for(int nt=0; nt<int(tasks.size()); ++nt)
         for(int i: tasks[nt].consumers)
             printf("n%02i -> n%02i[dir=back]; ", i, nt);
 
-    printf("label=\"%f total\";}\n", total_time);
+    printf("\n    label=\"%f total\"\n;}\n", total_time);
 }

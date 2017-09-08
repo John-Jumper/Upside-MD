@@ -1,6 +1,7 @@
 #ifndef INTERACTION_GRAPH_H
 #define INTERACTION_GRAPH_H
 
+#include <tuple>
 #include <vector>
 #include "deriv_engine.h"
 #include "vector_math.h"
@@ -463,14 +464,16 @@ struct InteractionGraph{
     }
 
     template<bool param_deriv=false>
-    void compute_edges_run(int task_num, int n_subtasks) {
+    std::tuple<int,int> compute_edges_run(int task_num, int n_subtasks) {
         int n_chunk = round_up(n_edge,4)/4;
         int edge_per_subtask = 4*(n_chunk/n_subtasks);
-        int my_start = task_num*edge_per_subtask;
-        // make sure the last subtask covers exactly the number of edges
-        int my_stop  = task_num==n_subtasks-1 ? n_edge : (task_num+1)*edge_per_subtask;
 
-        for(int ne=my_start; ne<my_stop; ne+=4) {
+        // make sure the last subtask covers exactly the number of edges
+        auto my_range = std::make_tuple(
+                task_num*edge_per_subtask, 
+                (task_num==n_subtasks-1) ? n_edge : (task_num+1)*edge_per_subtask);
+
+        for(int ne=std::get<0>(my_range); ne < std::get<1>(my_range); ne+=4) {
             auto i1 = Int4(edge_indices1+ne);
             auto i2 = Int4(edge_indices2+ne);
 
@@ -504,6 +507,7 @@ struct InteractionGraph{
                 }
             }
         }
+        return my_range;
     }
 
 

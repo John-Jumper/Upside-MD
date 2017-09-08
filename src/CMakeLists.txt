@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 project(upside CXX C)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+
 set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED COMPONENTS C)
 find_package(Threads)
@@ -55,6 +57,7 @@ add_library(upside_calculation SHARED
     ${ENGINE_SRC})
 
 set_target_properties(upside_calculation PROPERTIES
+    EXCLUDE_FROM_ALL 1
     COMPILE_FLAGS "-DPARAM_DERIV"
     OUTPUT_NAME   "upside")
 

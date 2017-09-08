@@ -451,75 +451,75 @@ struct EdgeHolder {
         }
 
         template <int N_ROT1, int N_ROT2>
-            void update_beliefs() {
-                constexpr const int w1 = (N_ROT1+3)/4;
-                constexpr const int w2 = (N_ROT2+3)/4;
-                constexpr const int ws = w1+w2;
-                // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
+        void update_beliefs() {
+            constexpr const int w1 = (N_ROT1+3)/4;
+            constexpr const int w2 = (N_ROT2+3)/4;
+            constexpr const int ws = w1+w2;
+            // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
 
-                float* vec_old_node_belief1 = nodes1.old_belief.x.get();
-                float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
+            float* vec_old_node_belief1 = nodes1.old_belief.x.get();
+            float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
 
-                float* vec_old_node_belief2 = nodes2.old_belief.x.get();
-                float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
+            float* vec_old_node_belief2 = nodes2.old_belief.x.get();
+            float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
 
-                int n_edge = nodes_to_edge.n_edge;
+            int n_edge = nodes_to_edge.n_edge;
 
-                for(int ne=0; ne<n_edge; ++ne) {
-                    int i1 = edge_indices1[ne]*4*w1;
-                    int i2 = edge_indices2[ne]*4*w2;
+            for(int ne=0; ne<n_edge; ++ne) {
+                int i1 = edge_indices1[ne]*4*w1;
+                int i2 = edge_indices2[ne]*4*w2;
 
-                    auto old_edge_belief1 = read4vec<w1>(old_belief.x + ne*4*ws + 0);
-                    auto old_edge_belief2 = read4vec<w2>(old_belief.x + ne*4*ws + 4*w1);
+                auto old_edge_belief1 = read4vec<w1>(old_belief.x + ne*4*ws + 0);
+                auto old_edge_belief2 = read4vec<w2>(old_belief.x + ne*4*ws + 4*w1);
 
-                    auto old_node_belief1 = read4vec<w1>(vec_old_node_belief1 + i1);
-                    auto old_node_belief2 = read4vec<w2>(vec_old_node_belief2 + i2);
+                auto old_node_belief1 = read4vec<w1>(vec_old_node_belief1 + i1);
+                auto old_node_belief2 = read4vec<w2>(vec_old_node_belief2 + i2);
 
-                    auto v1 = old_node_belief1 * vec_rcp(Float4(1e-10f) + old_edge_belief1);
-                    auto v2 = old_node_belief2 * vec_rcp(Float4(1e-10f) + old_edge_belief2);
+                auto v1 = old_node_belief1 * vec_rcp(Float4(1e-10f) + old_edge_belief1);
+                auto v2 = old_node_belief2 * vec_rcp(Float4(1e-10f) + old_edge_belief2);
 
-                    // load the edge probability matrix
-                    auto eprob = PaddedMatrix<N_ROT1,N_ROT2>(prob.x + ne*N_ROT1*4*w2);
-                    auto cur_edge_belief1 = eprob.apply_left (v2);
-                    auto cur_edge_belief2 = eprob.apply_right(v1);
+                // load the edge probability matrix
+                auto eprob = PaddedMatrix<N_ROT1,N_ROT2>(prob.x + ne*N_ROT1*4*w2);
+                auto cur_edge_belief1 = eprob.apply_left (v2);
+                auto cur_edge_belief2 = eprob.apply_right(v1);
 
-                    auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
-                    auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
-                    
-                    // node normalization is needed for avoid NaN
-                    // FIXME investigate edge scalings that could obviate this
-                    // FIXME investigate scaling the edges only every N somethings to reduce expense
-                    cur_node_belief1 *= rcp(sum(cur_node_belief1).sum_in_all_entries());
-                    cur_node_belief2 *= rcp(sum(cur_node_belief2).sum_in_all_entries());
+                auto cur_node_belief1 = cur_edge_belief1 * read4vec<w1>(vec_cur_node_belief1 + i1);
+                auto cur_node_belief2 = cur_edge_belief2 * read4vec<w2>(vec_cur_node_belief2 + i2);
+                
+                // node normalization is needed for avoid NaN
+                // FIXME investigate edge scalings that could obviate this
+                // FIXME investigate scaling the edges only every N somethings to reduce expense
+                cur_node_belief1 *= rcp(sum(cur_node_belief1).sum_in_all_entries());
+                cur_node_belief2 *= rcp(sum(cur_node_belief2).sum_in_all_entries());
 
-                    store4vec<w1>(cur_belief.x + ne*4*ws + 0,    cur_edge_belief1);
-                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1, cur_edge_belief2);
-                    store4vec<w1>(vec_cur_node_belief1 + i1,     cur_node_belief1);
-                    store4vec<w2>(vec_cur_node_belief2 + i2,     cur_node_belief2);
-                }
-
-                // Perform edge normalization for all edges
-                // We could perform it in the loop above, but it would insert a long dependency chain in the 
-                // middle of the algorithm.  The hope is that the processor will expose much more instruction
-                // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal
-                // adds.
-                for(int ne=0; ne<n_edge; ne+=2) {
-                    auto cb11 = read4vec<w1>(cur_belief.x + ne*4*ws + 0);
-                    auto cb12 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*w1);
-                    auto cb21 = read4vec<w1>(cur_belief.x + ne*4*ws + 4*ws);
-                    auto cb22 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1));
-
-                    // let's approximately l1 normalize everything edges to avoid any numerical problems later
-                    Float4 scales_for_unit_l1 = approx_rcp(horizontal_add(
-                                horizontal_add(sum(cb11), sum(cb12)),
-                                horizontal_add(sum(cb21), sum(cb22))));
-
-                    store4vec<w1>(cur_belief.x + ne*4*ws + 0,         cb11*scales_for_unit_l1.broadcast<0>());
-                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1,      cb12*scales_for_unit_l1.broadcast<1>());
-                    store4vec<w1>(cur_belief.x + ne*4*ws + 4*ws,      cb21*scales_for_unit_l1.broadcast<2>());
-                    store4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1), cb22*scales_for_unit_l1.broadcast<3>());
-                }
+                store4vec<w1>(cur_belief.x + ne*4*ws + 0,    cur_edge_belief1);
+                store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1, cur_edge_belief2);
+                store4vec<w1>(vec_cur_node_belief1 + i1,     cur_node_belief1);
+                store4vec<w2>(vec_cur_node_belief2 + i2,     cur_node_belief2);
             }
+
+            // Perform edge normalization for all edges
+            // We could perform it in the loop above, but it would insert a long dependency chain in the 
+            // middle of the algorithm.  The hope is that the processor will expose much more instruction
+            // parallelism in this loop.  The loop process 2 edges at a time to fully utilize the horizontal
+            // adds.
+            for(int ne=0; ne<n_edge; ne+=2) {
+                auto cb11 = read4vec<w1>(cur_belief.x + ne*4*ws + 0);
+                auto cb12 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*w1);
+                auto cb21 = read4vec<w1>(cur_belief.x + ne*4*ws + 4*ws);
+                auto cb22 = read4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1));
+
+                // let's approximately l1 normalize everything edges to avoid any numerical problems later
+                Float4 scales_for_unit_l1 = approx_rcp(horizontal_add(
+                            horizontal_add(sum(cb11), sum(cb12)),
+                            horizontal_add(sum(cb21), sum(cb22))));
+
+                store4vec<w1>(cur_belief.x + ne*4*ws + 0,         cb11*scales_for_unit_l1.broadcast<0>());
+                store4vec<w2>(cur_belief.x + ne*4*ws + 4*w1,      cb12*scales_for_unit_l1.broadcast<1>());
+                store4vec<w1>(cur_belief.x + ne*4*ws + 4*ws,      cb21*scales_for_unit_l1.broadcast<2>());
+                store4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1), cb22*scales_for_unit_l1.broadcast<3>());
+            }
+        }
 };
 
 
@@ -855,16 +855,16 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     void fill_holders_subtask(int task_idx, int n_subtasks) {
-        igraph.compute_edges_run(task_idx, n_subtasks);
+        tuple<int,int> my_range = igraph.compute_edges_run(task_idx, n_subtasks);
+        for(int ne=get<0>(my_range); ne < get<1>(my_range); ++ne)
+            igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
     }
 
     void fill_holders_finish()
     {
-        for(int ne=0; ne<igraph.n_edge; ++ne) 
-            igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
-
+        tuple<int,int> my_range(0,igraph.n_edge);
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
-        for(int ne=0; ne<igraph.n_edge; ++ne) {
+        for(int ne=get<0>(my_range); ne < get<1>(my_range); ++ne) {
             int   id1  = igraph.edge_id1[ne];
             int   id2  = igraph.edge_id2[ne];
             float prob = igraph.edge_value[ne];  // value of edge is potential
