@@ -211,7 +211,6 @@ struct NodeHolder {
     const int n_elem;
 
     VecArrayStorage prob;
-    // VecArrayStorage energy_capping_deriv;
 
     VecArrayStorage cur_belief;
     VecArrayStorage old_belief;
@@ -222,7 +221,6 @@ struct NodeHolder {
         n_rot(n_rot_),
         n_elem(n_elem_),
         prob         (n_rot,n_elem),
-        // energy_capping_deriv(n_rot,n_elem),
         cur_belief   (n_rot,n_elem),
         old_belief   (n_rot,n_elem),
 
@@ -236,7 +234,7 @@ struct NodeHolder {
     void reset() { fill(prob, 0.f); } // prob array initially contains energy
     void swap_beliefs() { swap(cur_belief, old_belief); }
 
-    void convert_energy_to_prob(float e_cap, float e_cap_width) {
+    void convert_energy_to_prob() {
         // prob array should initially contain energy
         // prob array is not normalized at the end (one of the entries will be 1.),
         //   but should be sanely scaled to resist underflow/overflow
@@ -360,8 +358,8 @@ struct EdgeHolder {
         }
         void swap_beliefs() { swap(cur_belief, old_belief); }
 
-        void add_to_edge(
-                int ne, float prob_val,
+        float& insert_or_get_loc(
+                int ne,
                 unsigned id1, unsigned rot1, 
                 unsigned id2, unsigned rot2) {
             int32_t idx;
@@ -371,8 +369,8 @@ struct EdgeHolder {
             }
 
             int j = rot1*ru(n_rot2)+rot2;
-            prob(j, idx) *= prob_val;
             edge_loc.emplace_back(EdgeLoc{ne, int(rot1*n_rot2+rot2), int(idx)});
+            return prob(j,idx);
         }
 
         void move_edge_prob_to_node2() {
@@ -603,8 +601,8 @@ struct RotamerSidechain: public PotentialNode {
     EdgeHolder* edge_holders_matrix[UPPER_ROT][UPPER_ROT];
     EdgeHolder edges11, edges13, edges16, edges33, edges36, edges66; // FIXME initialize these with sane max_n_edge
 
-    float energy_cap;
-    float energy_cap_width;
+    int max_edge_cell_assignment;
+    unique_ptr<float*[]> edge_cell_assignment;
 
     float damping;
     int   max_iter;
@@ -633,11 +631,8 @@ struct RotamerSidechain: public PotentialNode {
         edges36(nodes3,nodes6,n_elem_rot[3]* n_elem_rot[6]),
         edges66(nodes6,nodes6,n_elem_rot[6]*(n_elem_rot[6]+1)/2),
 
-        // energy_cap      (read_attribute<float>(grp,"pair_interaction","energy_cap")),
-        // energy_cap_width(read_attribute<float>(grp,"pair_interaction","energy_cap_width")),
-
-        energy_cap      (-4.),
-        energy_cap_width( 1.),
+        max_edge_cell_assignment(0),
+        edge_cell_assignment(nullptr),
 
         damping (read_attribute<float>(grp, ".", "damping")),
         max_iter(read_attribute<int  >(grp, ".", "max_iter")),
@@ -813,21 +808,6 @@ struct RotamerSidechain: public PotentialNode {
         } else {
             return -1;
         }
-        // if(n_round==0) {
-        //     energy_fresh_relative_to_derivative = mode==PotentialAndDerivMode;
-        //     fill_holders_init();
-        //     fill_holders_subtask(0,1);
-        //     fill_holders_finish();
-        //     auto solve_results = solve_for_marginals();
-        //     if(solve_results.first >= max_iter - iteration_chunk_size - 1)
-        //         n_bad_solve++;
-
-        //     propagate_derivatives();
-        //     if(mode==PotentialAndDerivMode) potential = calculate_energy_from_marginals();
-        //     return 0; // node is finished
-        // } else {
-        //     return -1;
-        // }
     }
 
     void fill_holders_init() {
@@ -862,36 +842,46 @@ struct RotamerSidechain: public PotentialNode {
         }
         for(int n_rot: range(1,UPPER_ROT))
             if(node_holders_matrix[n_rot])
-                node_holders_matrix[n_rot]->convert_energy_to_prob(energy_cap, energy_cap_width);
+                node_holders_matrix[n_rot]->convert_energy_to_prob();
         igraph.compute_edges_init();
+
+        if(igraph.n_edge > max_edge_cell_assignment) {
+            max_edge_cell_assignment = igraph.n_edge;
+            edge_cell_assignment.reset(new float*[max_edge_cell_assignment]);
+        }
     }
 
     void fill_holders_subtask(int task_idx, int n_subtasks) {
-        tuple<int,int> my_range = igraph.compute_edges_run(task_idx, n_subtasks);
-        for(int ne=get<0>(my_range); ne < get<1>(my_range); ++ne)
-            igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
+        if(task_idx==n_subtasks-1) {
+            // special subtask to find the write locations
+            // this is typically fairly expensive but not trivially parallelized
+            // even better would be to make it fully parallel -- it takes about 30us on ubiquitin
+            const unsigned selector = (1u<<n_bit_rotamer) - 1u;
+            for(int ne=0; ne < igraph.n_edge; ++ne) {
+                int   id1  = igraph.edge_id1[ne];
+                int   id2  = igraph.edge_id2[ne];
+
+                if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
+
+                unsigned   rot1 = id1 & selector; id1 >>= n_bit_rotamer;
+                unsigned   rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+
+                unsigned n_rot1 = id1 & selector; id1 >>= n_bit_rotamer;
+                unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
+
+                edge_cell_assignment[ne] = &edge_holders_matrix[n_rot1][n_rot2]->insert_or_get_loc(ne, id1, rot1, id2, rot2);
+            }
+        } else {
+            tuple<int,int> my_range = igraph.compute_edges_run(task_idx, n_subtasks-1);
+            for(int ne=get<0>(my_range); ne < get<1>(my_range); ++ne)
+                igraph.edge_value[ne] = expf(-igraph.edge_value[ne]);  // value of edge is potential
+        }
     }
 
     void fill_holders_finish()
     {
-        tuple<int,int> my_range(0,igraph.n_edge);
-        const unsigned selector = (1u<<n_bit_rotamer) - 1u;
-        for(int ne=get<0>(my_range); ne < get<1>(my_range); ++ne) {
-            int   id1  = igraph.edge_id1[ne];
-            int   id2  = igraph.edge_id2[ne];
-            float prob = igraph.edge_value[ne];  // value of edge is potential
-            // float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
-
-            if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
-
-            unsigned   rot1 = id1 & selector; id1 >>= n_bit_rotamer;
-            unsigned   rot2 = id2 & selector; id2 >>= n_bit_rotamer;
-
-            unsigned n_rot1 = id1 & selector; id1 >>= n_bit_rotamer;
-            unsigned n_rot2 = id2 & selector; id2 >>= n_bit_rotamer;
-
-            edge_holders_matrix[n_rot1][n_rot2]->add_to_edge(ne, prob, id1, rot1, id2, rot2);
-        }
+        for(int ne=0; ne < igraph.n_edge; ++ne)
+            *edge_cell_assignment[ne] *= igraph.edge_value[ne];  // value of edge is potential
 
         // for edges with a 1, we can just move it
         for(int n_rot: range(2,UPPER_ROT))

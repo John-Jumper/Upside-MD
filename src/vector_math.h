@@ -763,19 +763,15 @@ inline Vec<2,S> sigmoid(S x) {
 inline bool any(bool x) {return x;} // scalar any function is trivial
 inline bool none(bool x) {return !x;} // scalar none function is trivial
 
-
 // Sigmoid-like function that has zero derivative outside (-1/sharpness,1/sharpness)
 // This function is 1 for large negative values and 0 for large positive values
 template <typename S>
 inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
     // FIXME this sigmoid is both narrower and reversed direction from a normal sigmoid
-#ifdef NONCOMPACT_SIGMOID
-    // factor of three makes the slopes even at the origin
-    auto z = sigmoid(-3.f*x*sharpness);
-    return make_vec2(z.x(), -3.f*z.y()*sharpness);
-#else
     S y = x*sharpness;
-    Vec<2,S> z = make_vec2(S(0.25f)*(y+S(2.f))*(y-S(1.f))*(y-one<S>()), (sharpness*S(0.75f))*(sqr(y)-one<S>()));
+    Vec<2,S> z = make_vec2(
+            S(0.25f)*(y+S(2.f))*(y-one<S>())*(y-one<S>()),
+            (sharpness*S(0.75f))*(sqr(y)-one<S>()));
 
     auto too_big   = S( 1.f)<y;
     auto too_small = y<S(-1.f);
@@ -784,7 +780,6 @@ inline Vec<2,S> compact_sigmoid(const S& x, const S& sharpness) {
     z.x() = ternary(too_small, one<S>(), ternary(too_big, zero<S>(), z.x()));
     z.y() = ternary(too_small | too_big, zero<S>(), z.y());
     return z;
-#endif
 }
 
 inline float compact_sigmoid_cutoff(float sharpness) {
