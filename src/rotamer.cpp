@@ -337,7 +337,7 @@ struct EdgeHolder {
             nodes_to_edge(nodes1.n_elem)
         {
 
-            edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
+            // edge_loc.reserve(n_rot1*n_rot2*max_n_edge);
             fill(cur_belief, 0.f);
             fill(old_belief, 0.f);
             fill_n(edge_indices1, round_up(max_n_edge,simd_width), 0);
@@ -369,7 +369,7 @@ struct EdgeHolder {
             }
 
             int j = rot1*ru(n_rot2)+rot2;
-            edge_loc.emplace_back(EdgeLoc{ne, int(rot1*n_rot2+rot2), int(idx)});
+            edge_loc.push_back(EdgeLoc{ne, int(rot1*n_rot2+rot2), int(idx)});
             return prob(j,idx);
         }
 

@@ -52,18 +52,47 @@ struct RandomGenerator
                     r123::u01<float>(bits.v[3]));
         }
 
-        float4 normal() {
-            threefry4x32_ctr_t bits = random_bits();
-            r123::float2 n1 = r123::boxmuller(bits.v[0], bits.v[1]);
-            r123::float2 n2 = r123::boxmuller(bits.v[2], bits.v[3]);
-            return make_vec4(n1.x, n1.y, n2.x, n2.y);
+        void many_normal(float* output, int n_gen) {
+            // output must have at least one extra space in case we overwrite
+
+            int idx=0;
+            while(idx<n_gen) {
+                // threefry4x32_ctr_t bits = random_bits();
+                // r123::float2 n1 = r123::boxmuller(bits.v[0], bits.v[1]);
+                // r123::float2 n2 = r123::boxmuller(bits.v[2], bits.v[3]);
+
+                // output[idx++] = n1.x;
+                // if(idx<n_gen) output[idx++] = n1.y;
+                // if(idx<n_gen) output[idx++] = n2.x;
+                // if(idx<n_gen) output[idx++] = n2.y;
+                // uses the polar Marsaglia method
+                auto x = uniform_open_closed()*2.f-1.f;
+
+                for(int i=0; (i<2)&(idx<n_gen); ++i) {
+                    auto s = sqr(x[i]) + sqr(x[i+2]);
+                    if((idx<n_gen) & (s<1.f) & (s>1e-10f)) {
+                        float scale = sqrtf(-2.f*logf(s)*rcp(s));
+                        output[idx++] = x[i]*scale;
+                        if(idx<n_gen)
+                            output[idx++] = x[i+2]*scale;
+                    }
+                }
+            }
+        }
+
+        Vec<4> normal() {
+            Vec<4> ret;
+            many_normal(&ret[0], 4);
+            return ret;
         }
 
         float3 normal3 () {
             // just discard the 4th random number
-            float4 ret = normal();
-            return make_vec3(ret.x(), ret.y(), ret.z());
+            Vec<3> ret;
+            many_normal(&ret[0], 3);
+            return ret;
         };
 };
+
 
 #endif

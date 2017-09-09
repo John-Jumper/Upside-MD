@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cmath>
+#include <memory>
 
 struct OrnsteinUhlenbeckThermostat
         // following the notation in Gillespie, 1996
@@ -10,6 +11,9 @@ struct OrnsteinUhlenbeckThermostat
             mom_scale   = exp(-delta_t/timescale);
             noise_scale = sqrtf(temp * (1-mom_scale*mom_scale));
         }
+
+        int max_randn;
+        std::unique_ptr<float[]> randn;
 
     public:
         uint32_t random_seed;

@@ -15,18 +15,16 @@ integration_stage(
         const VecArray deriv,
         float vel_factor,
         float pos_factor,
-        float max_force,
+        float max_force_mag,
         int n_atom)
 {
     for(int na=0; na<n_atom; ++na) {
         // assumes unit mass for all particles
 
         auto d = load_vec<3>(deriv, na);
-        if(max_force) {
-            float f_mag = mag(d)+1e-6f;  // ensure no NaN when mag(deriv)==0.
-            float scale_factor = atan(f_mag * ((0.5f*M_PI_F) / max_force)) *
-                (max_force/f_mag * (2.f/M_PI_F));
-            d *= scale_factor;
+        if(max_force_mag) {
+            float f_mag = mag(d)+1e-10f;  // ensure no NaN when mag(deriv)==0.
+            if(f_mag > max_force_mag) d *= max_force_mag*rcp(f_mag);
         }
 
         auto p = load_vec<3>(mom, na) - vel_factor*d;
