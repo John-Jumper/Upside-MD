@@ -212,8 +212,8 @@ struct NodeHolder {
 
     VecArrayStorage prob;
 
-    VecArrayStorage cur_belief;
-    VecArrayStorage old_belief;
+    VecArrayAccum cur_belief;
+    VecArrayAccum old_belief;
 
     unique_ptr<float[]> energy_offset;
 
@@ -221,18 +221,16 @@ struct NodeHolder {
         n_rot(n_rot_),
         n_elem(n_elem_),
         prob         (n_rot,n_elem),
-        cur_belief   (n_rot,n_elem),
-        old_belief   (n_rot,n_elem),
+        cur_belief   (n_rot,n_elem,VecArrayAccum::Op::Product),
+        old_belief   (n_rot,n_elem,VecArrayAccum::Op::Product),
 
         energy_offset(new_aligned<float>(n_elem,4))
         {
-            fill(cur_belief, 1.f);
-            fill(old_belief, 1.f);
             reset();
         }
 
     void reset() { fill(prob, 0.f); } // prob array initially contains energy
-    void swap_beliefs() { swap(cur_belief, old_belief); }
+    void swap_beliefs() { cur_belief.swap(old_belief); }
 
     void convert_energy_to_prob() {
         // prob array should initially contain energy
@@ -255,41 +253,46 @@ struct NodeHolder {
 
     template <int N_ROT>
         void standardize_belief_update(float damping) {
+            VecArray old_belief_acc = old_belief.accum();
+            VecArray cur_belief_acc = cur_belief.accum();
             if(damping != 0.f) {
                 for(int ne: range(n_elem)) {
-                    auto b = load_vec<N_ROT>(cur_belief, ne);
-                    b = (1.f-damping)*rcp(max(b))*b + damping*load_vec<N_ROT>(old_belief, ne);
-                    store_vec(cur_belief, ne, b);
+                    auto b = load_vec<N_ROT>(cur_belief_acc, ne);
+                    b = (1.f-damping)*rcp(max(b))*b + damping*load_vec<N_ROT>(old_belief_acc, ne);
+                    store_vec(cur_belief_acc, ne, b);
                 }
             } else {  // zero damping should not keep any info, even NaN from previous iteration
                 for(int ne: range(n_elem)) {
-                    auto b = load_vec<N_ROT>(cur_belief, ne);
+                    auto b = load_vec<N_ROT>(cur_belief_acc, ne);
                     b = rcp(max(b))*b;
-                    store_vec(cur_belief, ne, b);
+                    store_vec(cur_belief_acc, ne, b);
                 }
             }
         }
 
     float max_deviation() {
+        VecArray old_belief_acc = old_belief.accum();
+        VecArray cur_belief_acc = cur_belief.accum();
         float dev = 0.f;
         for(int d: range(n_rot)) 
             for(int nn: range(n_elem)) 
-                dev = max(cur_belief(d,nn)-old_belief(d,nn), dev);
+                dev = max(cur_belief_acc(d,nn)-old_belief_acc(d,nn), dev);
         return dev;
     }
 
     template<int N_ROT>
         void calculate_marginals() {
+            VecArray cur_belief_acc = cur_belief.accum();
             // marginals are stored in the same array in cur_belief but l1 normalized
             for(int nn: range(n_elem)) {
-                auto b = load_vec<N_ROT>(cur_belief,nn);
-                store_vec(cur_belief,nn, b*rcp(sum(b)));
+                auto b = load_vec<N_ROT>(cur_belief_acc,nn);
+                store_vec(cur_belief_acc,nn, b*rcp(sum(b)));
             }
         }
 
     template <int N_ROT>
-        float node_free_energy(int nn) {
-            auto b = load_vec<N_ROT>(cur_belief,nn);
+        float node_free_E(const VecArray& cur_belief_acc, int nn) {
+            auto b = load_vec<N_ROT>(cur_belief_acc,nn);
             b *= rcp(sum(b));
             auto pr = load_vec<N_ROT>(prob,nn);
 
@@ -391,23 +394,16 @@ struct EdgeHolder {
             }
         }
 
-        // float max_deviation() {
-        //     FIX for padding;
-        //     float dev = 0.f;
-        //     for(int d: range(n_rot1+n_rot2)) 
-        //         for(int nn: range(nodes_to_edge.n_edge)) 
-        //             dev = max(cur_belief(d,nn)-old_belief(d,nn), dev);
-        //     return dev;
-        // }
-
         template<int N_ROT1, int N_ROT2>
         void calculate_marginals() {
             // FIXME ASSERT(n_rot1 == N_ROT1)
             // FIXME ASSERT(n_rot2 == N_ROT2)  // kind of clunky but should improve performance by loop unrolling
 
+            auto cb1 = nodes1.cur_belief.accum();
+            auto cb2 = nodes2.cur_belief.accum();
             for(int ne: range(nodes_to_edge.n_edge)) {
-                auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, edge_indices1[ne]);
-                auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, edge_indices2[ne]);
+                auto b1 = load_vec<N_ROT1>(cb1, edge_indices1[ne]);
+                auto b2 = load_vec<N_ROT2>(cb2, edge_indices2[ne]);
 
                 // correct for self interaction
                 auto b = load_vec<ru(N_ROT1)+ru(N_ROT2)>(cur_belief, ne);
@@ -427,9 +423,9 @@ struct EdgeHolder {
         }
 
         template<int N_ROT1, int N_ROT2>
-        float edge_free_energy(int ne) {
-            auto b1 = load_vec<N_ROT1>(nodes1.cur_belief, edge_indices1[ne]);  // really marginal
-            auto b2 = load_vec<N_ROT2>(nodes2.cur_belief, edge_indices2[ne]);
+        float edge_free_E(const VecArray& cb1, const VecArray& cb2, int ne) {
+            auto b1 = load_vec<N_ROT1>(cb1, edge_indices1[ne]);  // really marginal
+            auto b2 = load_vec<N_ROT2>(cb2, edge_indices2[ne]);
 
             auto p  = load_vec<N_ROT1*   N_ROT2 >(marginal, ne);
             auto pr = load_vec<N_ROT1*ru(N_ROT2)>(prob, ne);
@@ -455,11 +451,16 @@ struct EdgeHolder {
             constexpr const int ws = w1+w2;
             // horizontal SIMD implementation of update_beliefs for N_ROT1==N_ROT2==3
 
-            float* vec_old_node_belief1 = nodes1.old_belief.x.get();
-            float* vec_cur_node_belief1 = nodes1.cur_belief.x.get();
+            VecArray ob1 = nodes1.old_belief.accum();
+            VecArray cb1 = nodes1.cur_belief.acquire();
+            VecArray ob2 = nodes2.old_belief.accum();
+            VecArray cb2 = nodes2.cur_belief.acquire();
 
-            float* vec_old_node_belief2 = nodes2.old_belief.x.get();
-            float* vec_cur_node_belief2 = nodes2.cur_belief.x.get();
+            float* vec_old_node_belief1 = ob1.x;
+            float* vec_cur_node_belief1 = cb1.x;
+
+            float* vec_old_node_belief2 = ob2.x;
+            float* vec_cur_node_belief2 = cb2.x;
 
             int n_edge = nodes_to_edge.n_edge;
 
@@ -529,6 +530,8 @@ struct EdgeHolder {
                 store4vec<w1>(cur_belief.x + ne*4*ws + 4*ws,      cb21*scales_for_unit_l1.broadcast<2>());
                 store4vec<w2>(cur_belief.x + ne*4*ws + 4*(ws+w1), cb22*scales_for_unit_l1.broadcast<3>());
             }
+            nodes1.cur_belief.release(cb1);
+            nodes2.cur_belief.release(cb2);
         }
 };
 
@@ -734,9 +737,10 @@ struct RotamerSidechain: public PotentialNode {
                 int nn=0;
                 for(const NodeHolder& nodes: {cref(nodes1), cref(nodes3), cref(nodes6)}) {
                     int n_rot = nodes.n_rot;
+                    VecArray cb = nodes.cur_belief.accum();
                     for(int ne=0; ne<nodes.n_elem; ++ne, ++nn)  // increment both global and local counters
                         for(int nr=0; nr<6; ++nr)
-                            node_marginal[nn*6+nr] = (nr<n_rot) ? nodes.cur_belief(nr,ne) : 0.f;
+                            node_marginal[nn*6+nr] = (nr<n_rot) ? cb(nr,ne) : 0.f;
                 }
 
                 for(int i1=0; i1<n_node; ++i1)
@@ -893,13 +897,17 @@ struct RotamerSidechain: public PotentialNode {
         // marginals must already have been solved
         // since edges1x were folded into the node probabilites, they should not be accumulated here
         float en = 0.f;
-        for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_energy<1>  (nn);
-        for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_energy<3>  (nn);
-        for(int nn: range(nodes6 .n_elem)) en += nodes6 .node_free_energy<6>  (nn);
+        auto cb1 = nodes1.cur_belief.accum();
+        auto cb3 = nodes3.cur_belief.accum();
+        auto cb6 = nodes6.cur_belief.accum();
+
+        for(int nn: range(nodes1 .n_elem)) en += nodes1 .node_free_E<1>(cb1,nn);
+        for(int nn: range(nodes3 .n_elem)) en += nodes3 .node_free_E<3>(cb3,nn);
+        for(int nn: range(nodes6 .n_elem)) en += nodes6 .node_free_E<6>(cb6,nn);
         for(int ne: range(edges11.nodes_to_edge.n_edge)) en += -logf(edges11.prob(0,ne));
-        for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_energy<3,3>(ne);
-        for(int ne: range(edges36.nodes_to_edge.n_edge)) en += edges36.edge_free_energy<3,6>(ne);
-        for(int ne: range(edges66.nodes_to_edge.n_edge)) en += edges66.edge_free_energy<6,6>(ne);
+        for(int ne: range(edges33.nodes_to_edge.n_edge)) en += edges33.edge_free_E<3,3>(cb3,cb3,ne);
+        for(int ne: range(edges36.nodes_to_edge.n_edge)) en += edges36.edge_free_E<3,6>(cb3,cb6,ne);
+        for(int ne: range(edges66.nodes_to_edge.n_edge)) en += edges66.edge_free_E<6,6>(cb6,cb6,ne);
         return en;
     }
 
@@ -908,9 +916,13 @@ struct RotamerSidechain: public PotentialNode {
         vector<float> e3(nodes3.n_elem, 0.f);
         vector<float> e6(nodes6.n_elem, 0.f);
 
-        for(int nn: range(nodes1 .n_elem)) {float en = nodes1.node_free_energy<1>(nn); e1[nn] += en;}
-        for(int nn: range(nodes3 .n_elem)) {float en = nodes3.node_free_energy<3>(nn); e3[nn] += en;}
-        for(int nn: range(nodes6 .n_elem)) {float en = nodes6.node_free_energy<6>(nn); e6[nn] += en;}
+        auto cb1 = nodes1.cur_belief.accum();
+        auto cb3 = nodes3.cur_belief.accum();
+        auto cb6 = nodes6.cur_belief.accum();
+
+        for(int nn: range(nodes1 .n_elem)) {float en = nodes1.node_free_E<1>(cb1,nn); e1[nn] += en;}
+        for(int nn: range(nodes3 .n_elem)) {float en = nodes3.node_free_E<3>(cb3,nn); e3[nn] += en;}
+        for(int nn: range(nodes6 .n_elem)) {float en = nodes6.node_free_E<6>(cb6,nn); e6[nn] += en;}
 
         for(int ne: range(edges11.nodes_to_edge.n_edge)) {
             float en = -logf(edges11.prob(0,ne));
@@ -919,19 +931,19 @@ struct RotamerSidechain: public PotentialNode {
         }
 
         for(int ne: range(edges33.nodes_to_edge.n_edge)) {
-            float en = edges33.edge_free_energy<3,3>(ne);
+            float en = edges33.edge_free_E<3,3>(cb3,cb3,ne);
             e3[edges33.edge_indices1[ne]] += 0.5*en;
             e3[edges33.edge_indices2[ne]] += 0.5*en;
         }
 
         for(int ne: range(edges36.nodes_to_edge.n_edge)) {
-            float en = edges36.edge_free_energy<3,6>(ne);
+            float en = edges36.edge_free_E<3,6>(cb3,cb6,ne);
             e3[edges36.edge_indices1[ne]] += 0.5*en;
             e6[edges36.edge_indices2[ne]] += 0.5*en;
         }
 
         for(int ne: range(edges66.nodes_to_edge.n_edge)) {
-            float en = edges66.edge_free_energy<6,6>(ne);
+            float en = edges66.edge_free_E<6,6>(cb6,cb6,ne);
             e6[edges66.edge_indices1[ne]] += 0.5*en;
             e6[edges66.edge_indices2[ne]] += 0.5*en;
         }
@@ -953,9 +965,9 @@ struct RotamerSidechain: public PotentialNode {
             int index = igraph.loc1[n];
 
             switch(n_rot) {
-                case 1: e1[id] += nodes1.cur_belief(rot,id) * energy_1body(0,index); break;
-                case 3: e3[id] += nodes3.cur_belief(rot,id) * energy_1body(0,index); break;
-                case 6: e6[id] += nodes6.cur_belief(rot,id) * energy_1body(0,index); break;
+                case 1: e1[id] += nodes1.cur_belief.accum()(rot,id) * energy_1body(0,index); break;
+                case 3: e3[id] += nodes3.cur_belief.accum()(rot,id) * energy_1body(0,index); break;
+                case 6: e6[id] += nodes6.cur_belief.accum()(rot,id) * energy_1body(0,index); break;
                 default: throw string("impossible");
             }
         }
@@ -992,12 +1004,13 @@ struct RotamerSidechain: public PotentialNode {
     }
 
     void propagate_derivatives() {
-        for(auto &el: edges11.edge_loc)
-            igraph.edge_sensitivity[el.edge_num] = 1.f;
-        for(auto &el: edges13.edge_loc)
-            igraph.edge_sensitivity[el.edge_num] = nodes3 .cur_belief(el.dim, edges13.edge_indices2[el.ne]);
-        for(auto &el: edges16.edge_loc)
-            igraph.edge_sensitivity[el.edge_num] = nodes6 .cur_belief(el.dim, edges16.edge_indices2[el.ne]);
+        VecArray cb3 = nodes3.cur_belief.accum();
+        VecArray cb6 = nodes6.cur_belief.accum();
+
+        for(auto &el: edges11.edge_loc) igraph.edge_sensitivity[el.edge_num] = 1.f;
+        for(auto &el: edges13.edge_loc) igraph.edge_sensitivity[el.edge_num] = cb3(el.dim, edges13.edge_indices2[el.ne]);
+        for(auto &el: edges16.edge_loc) igraph.edge_sensitivity[el.edge_num] = cb6(el.dim, edges16.edge_indices2[el.ne]);
+
         for(auto edge_set: {&edges33,&edges36,&edges66})
             for(auto &el: edge_set->edge_loc)
                 igraph.edge_sensitivity[el.edge_num] = edge_set->marginal(el.dim, el.ne);
@@ -1008,16 +1021,19 @@ struct RotamerSidechain: public PotentialNode {
         for(int i: range(n_prob_nodes)) 
             sens_1body.emplace_back(prob_nodes[i]->sens.acquire());
 
+        VecArray nh_cb[UPPER_ROT];
+        for(int no=0; no<UPPER_ROT; ++no)
+            if(node_holders_matrix[no])
+                nh_cb[no] = node_holders_matrix[no]->cur_belief.accum();
+
         for(int n: range(igraph.n_elem1)) {
             unsigned id = igraph.id1[n];
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
 
-            for(int i: range(n_prob_nodes)) {
-                NodeHolder* nh = node_holders_matrix[n_rot];
-                sens_1body[i](0,igraph.loc1[n]) += nh->cur_belief(rot,id);
-            }
+            for(int i: range(n_prob_nodes))
+                sens_1body[i](0,igraph.loc1[n]) += nh_cb[n_rot](rot,id);
         }
         for(int i: range(n_prob_nodes)) 
             prob_nodes[i]->sens.release(sens_1body[i]);
@@ -1025,8 +1041,12 @@ struct RotamerSidechain: public PotentialNode {
 
 
     void calculate_new_beliefs(float damping_for_this_iteration, bool do_swap_for_initial=false) {
-        copy(nodes3.prob, nodes3.cur_belief);
-        copy(nodes6.prob, nodes6.cur_belief);
+        {
+            VecArray cb3 = nodes3.cur_belief.accum();
+            VecArray cb6 = nodes6.cur_belief.accum();
+            copy(nodes3.prob, cb3);
+            copy(nodes6.prob, cb6);
+        }
         edges33.update_beliefs<3,3>();
         edges36.update_beliefs<3,6>();
         edges66.update_beliefs<6,6>();
@@ -1046,10 +1066,12 @@ struct RotamerSidechain: public PotentialNode {
         // first initialize old node beliefs to just be probability
         // this may affect the final answer since belief propagation is minimizing a non-convex function
         for(auto nh: node_holders_matrix)
-            if(nh)
+            if(nh) {
+                VecArray ob = nh->old_belief.accum();
                 for(int no: range(nh->n_rot))
                     for(int ne: range(nh->n_elem))
-                        nh->old_belief(no,ne) = nh->prob(no,ne);
+                        ob(no,ne) = nh->prob(no,ne);
+            }
 
         alignas(16) float start_belief3 [4] = {1.f,1.f,1.f,0.f}; auto sb3  = Float4(start_belief3);
         alignas(16) float start_belief6a[4] = {1.f,1.f,1.f,1.f}; auto sb6a = Float4(start_belief6a);

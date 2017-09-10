@@ -25,9 +25,16 @@ struct OrnsteinUhlenbeckThermostat
         float noise_scale;
 
         OrnsteinUhlenbeckThermostat() {}
-        OrnsteinUhlenbeckThermostat(uint32_t random_seed_, float timescale_, float temp_, float delta_t_):
+        OrnsteinUhlenbeckThermostat(uint32_t random_seed_, float timescale_,
+                float temp_, float delta_t_):
             n_invocations(0),
-            random_seed(random_seed_), timescale(timescale_), delta_t(delta_t_), temp(temp_), noise_scale(0.f)
+            max_randn(0),
+            randn(nullptr),
+            random_seed(random_seed_),
+            timescale(timescale_),
+            delta_t(delta_t_),
+            temp(temp_),
+            noise_scale(0.f)
             {
                 update_parameters();
             }

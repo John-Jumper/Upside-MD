@@ -105,6 +105,10 @@ static void copy(VecArrayStorage& v_src, VecArrayStorage& v_dst) {
     assert(v_src.row_width == v_dst.row_width);
     std::copy_n(v_src.x.get(), v_src.n_elem*v_src.row_width, v_dst.x.get()); 
 }
+static void copy(VecArrayStorage& v_src, VecArray& v_dst) {
+    assert(v_src.row_width == v_dst.row_width);
+    std::copy_n(v_src.x.get(), v_src.n_elem*v_src.row_width, v_dst.x); 
+}
 
 inline void swap(VecArrayStorage& a, VecArrayStorage& b) {
     assert(a.n_elem==b.n_elem);
@@ -122,6 +126,19 @@ static void fill(VecArray v, int n_dim, int n_elem, float fill_value) {
             v(d,ne) = fill_value;
 }
 
+struct SplitRange {
+    // these are half-open ranges
+    int start;
+    int end;
+
+    SplitRange(int n_elem, int group_idx, int n_group) {
+        int chunk = n_elem/n_group;
+        start = chunk*group_idx;
+        // make sure all elements are accounted for
+        end   = group_idx==n_group-1 ? n_elem : chunk*(group_idx+1);
+    }
+};
+
 
 struct VecArrayAccum {
     // Class representing accumulation of vectors
@@ -129,7 +146,7 @@ struct VecArrayAccum {
     // the entire public API is thread-safe
 
     protected:
-        std::mutex mut;
+        mutable std::mutex mut;
         // FIXME for reasons that make no sense to me, code is consistently
         // 5% *faster* on ubiquitin when reclaim is false, even on a single core
         // where reclaim should be strictly less work.  I do not understand.
@@ -140,23 +157,23 @@ struct VecArrayAccum {
             Previous,
             Current};
 
-        int n_store;
-        std::vector<ActiveState> state;
+        mutable bool needs_accum;
+        mutable std::vector<ActiveState> state;
         // We must store unique_ptr's because we hand out the indices of the stores
         // and a vector resize would perform a dangerous move.  
-        std::vector<std::unique_ptr<VecArrayStorage>> store;
+        mutable std::vector<std::unique_ptr<VecArrayStorage>> store;
 
         void push_back_store() {
-            ++n_store;
             state.push_back(ActiveState::Never);
             store.emplace_back(
                     std::unique_ptr<VecArrayStorage>(
                         new VecArrayStorage(elem_width, n_elem)));
+            if(op==Op::Product) fill(*store.back(), 1.f);
         }
 
-        void zero_store(int ns) {
+        void reset_store(int ns) const {
             // reset for later accumulation
-            fill(*store[ns], 0.f);
+            fill(*store[ns], (op==Op::Sum) ? 0.f : 1.f);
             state[ns] = ActiveState::Never;
         }
 
@@ -164,19 +181,23 @@ struct VecArrayAccum {
     public:
         int n_elem;
         int elem_width;
+        enum class Op {Sum, Product};
+        Op op;
 
-        VecArrayAccum(int elem_width_, int n_elem_):
-            n_store(0),
+        VecArrayAccum(int elem_width_, int n_elem_, Op op_=Op::Sum):
+            needs_accum(false),
             n_elem(n_elem_),
-            elem_width(elem_width_)
+            elem_width(elem_width_),
+            op(op_)
         {
             push_back_store();  // always have at least one store
         }
 
         VecArray acquire() {
             std::lock_guard<std::mutex> g(mut);
+            needs_accum = true;
 
-            for(int i=0; i<n_store; ++i) {
+            for(size_t i=0; i<store.size(); ++i) {
                 if(state[i]!=ActiveState::Current) {
                     // We cannot accumulate multiple threads into previously released
                     // arrays when we want deterministic results because random 
@@ -199,7 +220,7 @@ struct VecArrayAccum {
             // I will figure out which to release from the pointer
             // It would be better but more annoying to make the user keep the index
 
-            for(int i=0; i<n_store; ++i) {
+            for(size_t i=0; i<store.size(); ++i) {
                 if(va.x == store[i]->x.get()) {
                     state[i] = ActiveState::Previous;
                     return;
@@ -210,27 +231,35 @@ struct VecArrayAccum {
             throw std::string("VecArrayAccum release does not match any acquire");
         }
 
-        VecArray accum() {
+        VecArray accum() const {
             // accumulate all arrays into the zeroth array
             std::lock_guard<std::mutex> g(mut);
 
-            float* base = store[0]->x.get();
-            int n_entry = store[0]->n_elem*store[0]->row_width;
+            if(needs_accum) {
+                float* base = store[0]->x.get();
+                int n_entry = store[0]->n_elem*store[0]->row_width;
 
-            for(int ns=1; ns<n_store; ++ns) {
-                switch(state[ns]) {
-                    case ActiveState::Never:
-                        continue;
+                for(size_t ns=1; ns<store.size(); ++ns) {
+                    switch(state[ns]) {
+                        case ActiveState::Never:
+                            continue;
 
-                    case ActiveState::Current:
-                        throw std::string("VecArrayAccum missing release before accum");
+                        case ActiveState::Current:
+                            throw std::string("VecArrayAccum missing release before accum");
 
-                    case ActiveState::Previous:
-                        float* acc = store[ns]->x.get();
-                        for(int i=0; i<n_entry; ++i)
-                            base[i] += acc[i];
-                        zero_store(ns);
+                        case ActiveState::Previous:
+                            float* acc = store[ns]->x.get();
+                            if(op==Op::Sum) {
+                                for(int i=0; i<n_entry; ++i)
+                                    base[i] += acc[i];
+                            } else if(op==Op::Product) {
+                                for(int i=0; i<n_entry; ++i)
+                                    base[i] *= acc[i];
+                            }
+                            reset_store(ns);
+                    }
                 }
+                needs_accum = false;
             }
             
             return *store[0];
@@ -238,12 +267,19 @@ struct VecArrayAccum {
 
         void zero_accum() {
             std::lock_guard<std::mutex> g(mut);
-            for(int ns=0; ns<n_store; ++ns)
+            needs_accum = false;
+            for(size_t ns=0; ns<store.size(); ++ns)
                 if(ns==0 || state[ns] != ActiveState::Never)
-                    zero_store(ns);
+                    reset_store(ns);
+        }
+        void swap(VecArrayAccum& b) {
+            accum();
+            b.accum();
+
+            std::lock_guard<std::mutex> g(mut);
+            store[0].swap(b.store[0]);
         }
 };
-
 
 struct range {
     int start;
