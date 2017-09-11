@@ -208,7 +208,7 @@ void solve_clamped_1d_spline(
     for(int i=0; i<n; ++i) c[i] = 1./6.;
     for(int i=0; i<n; ++i) solution[i] = data[i];
 
-    // FIXME also implement zero-derivative clamped splines
+    // FIXME also implement nonzero-derivative clamped splines
     // this is a homogenous boundary condition and quite convenient for cartesian potentials
     // for a zero-clamped spline, we must have coeff[-1] == coeff[1] and coeff[N-2] == coeff[N]
     // this conditions break the tridiagonal condition if added naively.
