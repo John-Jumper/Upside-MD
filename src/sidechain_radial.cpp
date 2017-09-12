@@ -55,14 +55,25 @@ struct RadialHelper {
         auto dist_coord = dist2*(inv_dist*inv_dx);
 
         const float* pp[4] = {p[0]+1, p[1]+1, p[2]+1, p[3]+1};
-        auto en = clamped_deBoor_value_and_deriv(pp, dist_coord, n_param);
+        auto en = clamped_deBoor_value_and_deriv(pp, dist_coord, n_knot);
         d1 = disp*(inv_dist*inv_dx*en.y());
         d2 = -d1;
         return en.x();
     }
 
-    static void param_deriv(Vec<n_param> &d_param, const float* p, 
-            const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {}
+    static void param_deriv(Vec<n_param> &d_param, const float* p,
+            const Vec<n_dim1> &x1, const Vec<n_dim2> &x2) {
+        d_param = make_zero<n_param>();
+        float inv_dx = p[0];
+        auto dist_coord = inv_dx*mag(x1-x2); // to convert to spline coords of interger grid of knots
+        auto dV_dinv_dx = clamped_deBoor_value_and_deriv(p+1, dist_coord, n_knot).y()*mag(x1-x2);
+        d_param[0] = dV_dinv_dx;
+ 
+        int starting_bin;
+        float result[4];
+        clamped_deBoor_coeff_deriv(&starting_bin, result, dist_coord, n_knot);
+        for(int i: range(4)) d_param[1+starting_bin+i] = result[i];
+   }
 };
 
 
@@ -116,6 +127,12 @@ struct HBondSidechainRadialPairs : public PotentialNode
                 potential += igraph.edge_value[ne];
         }
     }
+
+    virtual std::vector<float> get_param() const override {return igraph.get_param();}
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
+#endif
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
 };
 
 
