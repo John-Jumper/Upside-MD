@@ -3,8 +3,8 @@
 
 #include "vector_math.h"
 
-namespace {
 
+//! \brief Apply a 3x3 rotation matrix U to 3d vector r
 inline float3 apply_rotation(const float* restrict U, const float3 &r)
 {
     float3 ret;
@@ -14,6 +14,10 @@ inline float3 apply_rotation(const float* restrict U, const float3 &r)
     return ret;
 }
 
+//! \brief Apply a 3x3 rotation matrix U^{-1} to 3d vector r
+//!
+//! Given a rotation matrix U, this applies the transpose/inverse of U
+//! so that it "undoes" a rotation by U
 inline float3 apply_inverse_rotation(const float* restrict U, const float3 &r)
 {
     float3 ret;
@@ -23,6 +27,10 @@ inline float3 apply_inverse_rotation(const float* restrict U, const float3 &r)
     return ret;
 }
 
+//! \brief Apply an affine transformation to r
+//!
+//! A affine transformation is the combination of rotation and translation so 
+//! that output = U*r + t.
 inline float3 apply_affine(const float* restrict U, const float3& t, const float3& r) {
     float3 ret;
     ret.x() = U[0]*r.x() + U[1]*r.y() + U[2]*r.z() + t[0];
@@ -32,6 +40,12 @@ inline float3 apply_affine(const float* restrict U, const float3& t, const float
 }
 
 
+//! \brief Convert a rotation from axis-angle format to a rotation matrix
+//!
+//! Rotations may be expressed in a couple of formats.  Every rotation in 
+//! 3d can be expressed as a rotation by a specified angle about an single axis.
+//! This function converts rotations specified by a axis and an angle into
+//! a 3x3 rotation matrix. The axis must be a unit-vector.
 inline void axis_angle_to_rot(
         float* U,
         float angle,
@@ -51,6 +65,10 @@ inline void axis_angle_to_rot(
 
 
 
+//! \brief Compute the relative rotation between two reference frames (U1^{-1}*U2)
+//!
+//! The relative rotation of two rotations with respect to a common reference frame
+//! is the result of undoing rotation U1 then apply rotation U2, hence V=U1^{-1}*U2.
 inline void relative_rotation(
         float* restrict V,
         const float* U1,
@@ -68,6 +86,15 @@ inline void relative_rotation(
     V[8] = U1[2]*U2[2] + U1[5]*U2[5] + U1[8]*U2[8];
 }
 
+//! \brief Convert rotation from unit quaternion representation to 3x3 matrix
+//!
+//! The unit quaternion representation of rotations is a 4-dimensional unit
+//! vector q, where ! q and -q map to the same rotation (and choosing a random
+//! normalized ! 4-vector chooses a uniformly random rotation).  This format 
+//! is convenient for constructing and combining rotations but annoying for
+//! applying rotations to specific vectors.  Use this function to convert 
+//! to an appropriate format for applying the rotations (see Wikipedia for
+//! details).
 inline void 
 quat_to_rot(
         float*       restrict U,    // length 9 (row-major order)
@@ -79,13 +106,12 @@ quat_to_rot(
     U[1*3+0] = 2.f*b*c+2.f*a*d; U[1*3+1] = a*a-b*b+c*c-d*d; U[1*3+2] = 2.f*c*d-2.f*a*b;
     U[2*3+0] = 2.f*b*d-2.f*a*c; U[2*3+1] = 2.f*c*d+2.f*a*b; U[2*3+2] = a*a-b*b-c*c+d*d;
 }
-}
 
-
-namespace { 
-
-
-
+//! \brief Compute the relative rotation between two reference frames for quaternions
+//!
+//! The relative rotation of two rotations with respect to a common reference frame
+//! is the result of undoing rotation q1 then apply rotation q2, hence ret=q1^{-1}*q2.
+//! The inverse rotation for a quaternion is its quaternion complex-conjugate.
 inline void
 relative_quat(float* restrict ret, const float* q1, const float* q2)
 // ret = conjugate(p) * q  -- it takes you from the right reference frame to the left
@@ -96,5 +122,4 @@ relative_quat(float* restrict ret, const float* q1, const float* q2)
     ret[3] = -q1[3]*q2[0] + q1[2]*q2[1] - q1[1]*q2[2] + q1[0]*q2[3];
 }
 
-}
 #endif

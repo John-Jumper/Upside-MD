@@ -9,43 +9,71 @@
 #include <map>
 #include "vector_math.h"
 
+//!\brief Copy VecArray to a flat float* array
 inline void copy_vec_array_to_buffer(VecArray arr, int n_elem, int n_dim, float* buffer) {
         for(int i=0; i<n_elem; ++i)
             for(int d=0; d<n_dim; ++d) 
                 buffer[i*n_dim+d] = arr(d,i);
 }
 
-typedef int index_t;  //!< type of coordinate indices
+typedef int index_t;  //!< Type of coordinate indices
 
+//! \brief Update position and momentum
 void
 integration_stage(
-        VecArray mom,
-        VecArray pos,
-        const VecArray deriv,
-        float vel_factor,
-        float pos_factor,
-        float max_force,
-        int n_atom);
+        VecArray mom, //!< [inout] momentum
+        VecArray pos, //!< [inout] position
+        const VecArray deriv, //!< [in] derivative of potential with respect to position
+        float vel_factor, //!< [in] fraction of force to add to momentum (integration dependent)
+        float pos_factor,//!< [in] fraction of momentum to add to position (integration dependent)
+        float max_force, //!< [in] clip forces so that they do not exceed maxforce (increase stability)
+        int n_atom //!<[in] number of atoms
+        );
 
+//! \brief Recenter position array to origin
 void
-recenter(VecArray pos, bool xy_recenter_only, int n_atom);
+recenter(
+        VecArray pos, //!< [inout] position
+        bool xy_recenter_only, //!< if true, do not recenter in z-direction (useful for membrane)
+        int n_atom //!< number of atoms
+        );
 
-enum ComputeMode { DerivMode = 0, PotentialAndDerivMode = 1 };
+//! \brief Whether to compute potential value as well as its derivative
+enum ComputeMode {
+    DerivMode = 0, //!< Only derivative must be computed correctly (potential may not be correct)
+    PotentialAndDerivMode = 1 //!< Compute potential and derivative correctly
+};
 
+//! \brief Differentiable computation node
 struct DerivComputation 
 {
+    //! \brief True if output represents a potential energy rather than a new coordinate
     const bool potential_term;
+
+    //! \brief Construct only noting if node is a potential_node
     DerivComputation(bool potential_term_):
         potential_term(potential_term_) {}
+
+    //! \brief Trivial destructor
     virtual ~DerivComputation() {}
+
+    //! \brief Reads inputs and computes output value
     virtual void compute_value(ComputeMode mode)=0;
+
+    //! \brief Uses its sensitivity to its output to add to sensivities of its inputs
     virtual void propagate_deriv() =0;
 
+    //! \brief Return arbitrary subset of parameters
     virtual std::vector<float> get_param() const {return std::vector<float>();}
+
+    //! \brief Set arbitrary subset of parameters (same as get_param)
     virtual void set_param(const std::vector<float>& new_params) {}
 #ifdef PARAM_DERIV
+    //! \brief Param deriv of arbitrary subset of parameters (same as get_param)
     virtual std::vector<float> get_param_deriv() {return std::vector<float>();}
 #endif
+
+    //! \brief Compute a named quantity and return vector of floats (arbitrary behavior)
     virtual std::vector<float> get_value_by_name(const char* log_name) {
         throw std::string("No values implemented");
     }

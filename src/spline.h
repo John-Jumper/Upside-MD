@@ -7,19 +7,36 @@
 #include "vector_math.h"
 #include "Float4.h"
 
+//! \brief Compute polynomial coefficients from periodic data
+//!
+//! Computes data in polynomial representation, where
+//! each segment of the spline is represented by coefficients
+//! for ax^3+bx^2+cx+d
 void solve_periodic_1d_spline(
-        int n, 
-        double* coefficients, // length 4*n
-        const double* data,   // length n
-        double* temp_storage);// length 8*n
+        int n,                //!< number of data points
+        double* coefficients, //!< [out] coefficients, length 4*n
+        const double* data,   //!< [in] data points to fit with spline, length n
+        double* temp_storage  //!< [out] scratch storage for the fitting algorithm, length 8*n
+        );
 
-
+//! \brief Compute polynomial coefficients from data for clamped spline
+//!
+//! Computes data in polynomial representation, where
+//! each segment of the spline is represented by coefficients
+//! for ax^3+bx^2+cx+d.  Clamped spline means that the derivative
+//! of the spline is zero on both ends.
 void solve_clamped_1d_spline(
         int n, 
         double* coefficients, // length 4*(n-1)
         const double* data,   // length n
         double* temp_storage);// length 4*n
 
+//! \brief Compute bspline coefficients from data for clamped spline
+//!
+//! Computes data in bspline coefficient representation, where
+//! each of the values represents the scale factor for a single
+//! B-spline centered at that knot.  Clamped spline means that the derivative
+//! of the spline is zero on both ends.
 void solve_clamped_1d_spline_for_bsplines(
         int n_coeff, 
         double* coefficients, // length n_coeff
@@ -27,6 +44,11 @@ void solve_clamped_1d_spline_for_bsplines(
         double* temp_storage);// length 3*n_coeff
 
 
+//! \brief Compute polynomial coefficients for 2d periodic data
+//!
+//! Computes data in polynomial representation, where
+//! each segment of the spline is represented by the 16 coefficients
+//! necessary for a 3d bicubic polynomial.
 void solve_periodic_2d_spline(
         int nx, int ny,
         double* coefficients, // length (nx,ny,4,4) row-major
@@ -34,6 +56,7 @@ void solve_periodic_2d_spline(
         double* temp_storage);// length (nx+8)*(ny+8)*4
 
 
+//! \brief Evaluate 2d polynomial in polynomial representation to get value and deriv
 template<typename T>
 inline void spline_value_and_deriv(T &value, T &dx, T &dy, const T* c, T fx, T fy) {
     T fx2 = fx*fx; 
@@ -56,6 +79,7 @@ inline void spline_value_and_deriv(T &value, T &dx, T &dy, const T* c, T fx, T f
     value = vx0 + fx*vx1 + fx2*vx2 + fx3*vx3;
 }
 
+//! \brief Evaluate 1d polynomial in polynomial representation to get value and deriv
 template<typename T>
 inline void spline_value_and_deriv(T result[2], const T* c, T fx) {
     T fx2 = fx*fx; 
@@ -65,6 +89,11 @@ inline void spline_value_and_deriv(T result[2], const T* c, T fx) {
     result[1] = c[0] + fx*c[1] +        fx2*c[2] +        fx3*c[3]; // value
 }
 
+//! \brief Evaluate 1d polynomial in B-spline basis to get value and deriv
+//!
+//! Uses the de Boor algorithm for splines in the B-spline representation.  The 
+//! value is returned in the zeroth component and the derivative is returned in the
+//! first component.  This function computes a single spline evaluation at a time.
 inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) {
     // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
     // the first spline is centered at -1
@@ -99,6 +128,11 @@ inline Vec<2> deBoor_value_and_deriv(const float* bspline_coeff, const float x) 
 }
 
 
+//! \brief Evaluate 1d polynomial in B-spline basis to get value and deriv (Float4)
+//!
+//! Uses the de Boor algorithm for splines in the B-spline representation.  The 
+//! value is returned in the zeroth component and the derivative is returned in the
+//! first component.  This function computes four spline evaluation at a time.
 inline Vec<2,Float4> uniform_deBoor_algorithm(
     const Float4& c00, const Float4& c01, const Float4& c02, const Float4& c03,
     const Float4& excess) 
@@ -140,7 +174,13 @@ inline Vec<2,Float4> uniform_deBoor_algorithm(
 }
 
 
-inline Vec<3,Float4> deBoor2d_value_and_deriv(const int ny, const float* bspline_coeff[4], const Float4& x, const Float4& y) {
+//! \brief Evaluate 2d polynomial in B-spline basis to get value and deriv (Float4)
+//!
+//! Uses the de Boor algorithm for splines in the B-spline representation.  The 
+//! value is returned in the zeroth component and the derivative is returned in the
+//! first and second components.  This function computes four spline evaluation at a time.
+inline Vec<3,Float4> deBoor2d_value_and_deriv(const int ny, const float* bspline_coeff[4],
+        const Float4& x, const Float4& y) {
     // return array contains (value, dvalue/dx, dvalue/dy)
 
     // First compute the x bins so I know where to pick out rows for the y deBoor
@@ -177,10 +217,15 @@ inline Vec<3,Float4> deBoor2d_value_and_deriv(const int ny, const float* bspline
 }
 
 
+//! \brief Evaluate 1d polynomial in B-spline basis to get value and deriv (Float4)
+//!
+//! Uses the de Boor algorithm for splines in the B-spline representation.  The 
+//! value is returned in the zeroth component and the derivative is returned in the
+//! first component.  This function computes four spline evaluation at a time.
+//!
+//! This function assumes that endpoint conditions (say x<=1.) have already been taken care of.
+//! The first spline is centered at -1.
 inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x) {
-    // this function assumes that endpoint conditions (say x<=1.) have already been taken care of
-    // the first spline is centered at -1
-    // return is value then derivative
 
     Int4 x_bin = x.truncate_to_int();  // must be at least 1
     Float4 y = x - x.round<_MM_FROUND_TO_ZERO>();
@@ -196,27 +241,39 @@ inline Vec<2,Float4> deBoor_value_and_deriv(const float* bspline_coeff[4], const
     return uniform_deBoor_algorithm(c00,c01,c02,c03, y);
 }
 
+//! \brief Left side clamping value for clamped spline
+//!
+//! For clamping with derivative continuity, you should really have
+//! bspline_coeff[0] == bspline_coeff[2]
 inline float clamped_spline_left(const float* bspline_coeff, int n_coeff) {
-    // for clamping with derivative continuity, you should really have bspline_coeff[0] == bspline_coeff[2]
     return (1.f/6.f)*bspline_coeff[0] + 
            (2.f/3.f)*bspline_coeff[1] + 
            (1.f/6.f)*bspline_coeff[2];
 }
 
+//! \brief Right side clamping value for clamped spline
+//!
+//! For clamping with derivative continuity, you should really have
+//! bspline_coeff[n_coeff-3] == bspline_coeff[n_coeff-1]
 inline float clamped_spline_right(const float* bspline_coeff, int n_coeff) {
-    // for clamping with derivative continuity, you should really have bspline_coeff[n_coeff-3] == bspline_coeff[n_coeff-1]
     return (1.f/6.f)*bspline_coeff[n_coeff-3] + 
            (2.f/3.f)*bspline_coeff[n_coeff-2] + 
            (1.f/6.f)*bspline_coeff[n_coeff-1];
 }
 
+//! \brief Evaluate clamped spline that has n_knots
+//!
+//! For clamping with derivative continuity, you should really have
+//! bspline_coeff[0] == bspline_coeff[2] and  bspline_coeff[n_knot-3] == bspline_coeff[n_knot-1]
 inline Vec<2> clamped_deBoor_value_and_deriv(const float* bspline_coeff, const float x, int n_knot) {
     if(x<=1.f)      return make_vec2(clamped_spline_left (bspline_coeff, n_knot), 0.f);
     if(x>=n_knot-2) return make_vec2(clamped_spline_right(bspline_coeff, n_knot), 0.f);
     return deBoor_value_and_deriv(bspline_coeff, x);
 }
 
-inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4], const Float4& x, int n_knot) {
+//! \brief Float4 implementation of clamped_deBoor_value_and_deriv
+inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4],
+        const Float4& x, int n_knot) {
     auto one = Float4(1.f);
     auto too_small = x<one;
     auto too_big   = Float4(n_knot-2)<=x;
@@ -252,6 +309,12 @@ inline Vec<2,Float4> clamped_deBoor_value_and_deriv(const float* bspline_coeff[4
     return value;
 }
 
+//! \brief Coefficient derivative for splines in the B-spline representation
+//!
+//! The derivative of a spline has 4 non-zero coefficients in the B-spline basis,
+//! which are the 4 coefficients that contribute to that value.  This function
+//! returns the value of those coefficients in result and the first coefficient with
+//! non-zero derivative as starting_bin.
 inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float x) {
     // this function is not intended to be especially efficient
 
@@ -272,6 +335,12 @@ inline void deBoor_coeff_deriv(int* starting_bin, float result[4], const float x
     }
 }
 
+//! \brief Coefficient derivative for 2d splines in the B-spline representation
+//! 
+//! The derivative of a spline has 4x4 non-zero coefficients in the B-spline basis,
+//! which are the 4x4 coefficients that contribute to that value.  This function
+//! returns the value of those coefficients in result and the first coefficient with
+//! non-zero derivative as starting_bin.
 inline void deBoor2d_coeff_deriv(int* starting_bin, float result[4][4], int ny, const float x, const float y) {
     // this function is not intended to be especially efficient
 
@@ -297,7 +366,14 @@ inline void deBoor2d_coeff_deriv(int* starting_bin, float result[4][4], int ny, 
 }
 
 
-inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const float x, int n_knot) {
+//! \brief Coefficient derivative for clamped splines in the B-spline representation
+//!
+//! The derivative of a spline has 4 non-zero coefficients in the B-spline basis,
+//! which are the 4 coefficients that contribute to that value.  This function
+//! returns the value of those coefficients in result and the first coefficient with
+//! non-zero derivative as starting_bin.
+inline void clamped_deBoor_coeff_deriv(int* starting_bin,
+        float result[4], const float x, int n_knot) {
     if(x<=1.f) {
         *starting_bin = 0;
         result[0] = 1.f/6.f;
@@ -316,6 +392,7 @@ inline void clamped_deBoor_coeff_deriv(int* starting_bin, float result[4], const
 }
 
 
+//! \brief Old-style spline object -- not intended for new code
 template<int NDIM_VALUE>
 struct LayeredPeriodicSpline2D {
     const int n_layer;
@@ -374,6 +451,8 @@ struct LayeredPeriodicSpline2D {
 };
 
 
+//! \brief Old-style spline object -- not intended for new code
+template<int NDIM_VALUE>
 template<int NDIM_VALUE>
 struct LayeredClampedSpline1D {
     const int n_layer;
