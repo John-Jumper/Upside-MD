@@ -453,7 +453,6 @@ struct LayeredPeriodicSpline2D {
 
 //! \brief Old-style spline object -- not intended for new code
 template<int NDIM_VALUE>
-template<int NDIM_VALUE>
 struct LayeredClampedSpline1D {
     const int n_layer;
     const int nx;
