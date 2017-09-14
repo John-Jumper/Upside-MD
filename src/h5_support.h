@@ -9,8 +9,8 @@
 
 #include <hdf5.h>
 
+//! NB this library is not threadsafe.  It is up to the user to deal with this fact
 namespace h5 {
-// NB this library is not threadsafe.  It is up to the user to deal with this fact
 
 //! \cond
 template <typename T> // DO NOT ADD BOOL TO THIS TYPE -- unwitting users might hit vector<bool>
