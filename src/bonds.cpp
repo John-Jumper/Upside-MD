@@ -90,6 +90,84 @@ struct TensionPotential : public PotentialNode
 static RegisterNodeType<TensionPotential,1> tension_node("tension");
 
 
+struct AFMPotential : public PotentialNode
+{
+    float time_initial;
+    float time_step;      // WARNING: this should be the same as the global time step !
+    float time_estimate;  // WARNING: changes frequently
+    int round_num;        // WARNING: changes frequently
+    int n_elem;
+    CoordNode& pos;
+    struct Param {
+        index_t atom;
+        float spring_const;
+        Vec<3> starting_tip_pos;
+        Vec<3> pulling_vel;
+        };
+    vector<Param> params;
+    
+    AFMPotential(hid_t grp, CoordNode& pos_):
+        PotentialNode(),
+        time_initial(read_attribute<float>(grp, "pulling_vel", "time_initial")),
+        time_step(read_attribute<float>(grp, "pulling_vel", "time_step")),
+        time_estimate(time_initial),
+        round_num(0),
+        n_elem(get_dset_size(1, grp, "atom")[0]),
+        pos(pos_),
+        params(n_elem)
+    {
+        check_size(grp, "atom",          n_elem);
+        check_size(grp, "spring_const",  n_elem);
+        check_size(grp, "starting_tip_pos", n_elem, 3);
+        check_size(grp, "pulling_vel",      n_elem, 3);
+        
+        auto &p = params;
+        traverse_dset<1,int>  (grp,"atom",             [&](size_t i,         int   x){p[i].atom                = x;});
+        traverse_dset<1,float>(grp,"spring_const",     [&](size_t i,         float x){p[i].spring_const        = x;});
+        traverse_dset<2,float>(grp,"starting_tip_pos", [&](size_t i,size_t d,float x){p[i].starting_tip_pos[d] = x;});
+        traverse_dset<2,float>(grp,"pulling_vel",      [&](size_t i,size_t d,float x){p[i].pulling_vel[d]      = x;});
+        
+        if(logging(LOG_BASIC)) {
+            default_logger->add_logger<float>("tip_pos", {n_elem, 3}, [&](float* buffer) {
+                round_num -= 2;
+                time_estimate = time_initial + float(time_step)*round_num;
+                
+                for(int nt=0; nt<n_elem; ++nt) {
+                    auto p = params[nt];
+                    auto tip_pos = p.starting_tip_pos + p.pulling_vel * time_estimate;
+                    for(int d=0; d<3; ++d) buffer[nt*3+d] = tip_pos[d];
+                }
+            });
+           
+            default_logger->add_logger<float>("time_estimate", {1}, [&](float* buffer) {
+                buffer[0] = time_estimate;
+            });
+        }
+    }
+
+    virtual void compute_value(ComputeMode mode) {
+        Timer timer(string("AFM"));
+        
+        round_num += 1;
+        time_estimate = time_initial + float(time_step)*round_num;
+        
+        VecArray pos_c    = pos.output;
+        VecArray pos_sens = pos.sens;
+        
+        float pot = 0.f;
+        for(auto &p: params) {
+            auto x = load_vec<3>(pos_c, p.atom);
+            auto tip_pos = p.starting_tip_pos + p.pulling_vel * time_estimate;
+            auto x_diff = x - tip_pos;
+            pot += 0.5*p.spring_const*mag2(x_diff);
+            update_vec(pos_sens, p.atom, p.spring_const*x_diff);
+        }
+        potential = pot;
+    }
+};
+static RegisterNodeType<AFMPotential,1> AFM_node("AFM");
+
+
 struct RamaCoord : public CoordNode
 {
     struct alignas(16) Jac {float j[2][5][4];}; // padding for vector load/store

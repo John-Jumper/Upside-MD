@@ -548,7 +548,7 @@ try {
             // quick hack of a check for z-centering and membrane potential
             if(do_recenter && !xy_recenter_only) {
                 for(auto &n: sys->engine.nodes) {
-                    if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom") || is_prefix(n.name, "tension"))
+                    if(is_prefix(n.name, "membrane_potential") || is_prefix(n.name, "z_flat_bottom") || is_prefix(n.name, "tension") || is_prefix(n.name, "AFM"))
                         throw string("You have z-centering and a z-dependent potential turned on.  "
                                 "This is not what you want.  Consider --disable-z-recentering "
                                 "or --disable-recentering.");

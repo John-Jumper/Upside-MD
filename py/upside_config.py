@@ -108,6 +108,44 @@ def write_tension(parser, fasta, tension_table):
     create_array(g, 'tension_coeff', obj=tension)
 
 
+def write_AFM(parser, fasta, AFM_table, time_initial, time_step):
+    fields = [ln.split() for ln in open(AFM_table, 'U')]
+    header = 'residue spring_const tip_pos_x tip_pos_y tip_pos_z pulling_vel_x pulling_vel_y pulling_vel_z'
+    actual_header = [x.lower() for x in fields[0]]
+    if actual_header != header.split():
+        parser.error('First line of tension table must be "%s" but is "%s"'
+                %(header," ".join(actual_header)))
+    if not all(len(f)==len(fields[0]) for f in fields):
+        parser.error('Invalid format for AFM file')
+    fields = fields[1:]
+    n_spring = len(fields)
+
+    g = t.create_group(t.root.input.potential, 'AFM')
+    g._v_attrs.arguments = np.array(['pos'])
+
+    atom             = np.zeros((n_spring,), dtype='i')
+    spring_const     = np.zeros((n_spring,))
+    starting_tip_pos = np.zeros((n_spring,3))
+    pulling_vel      = np.zeros((n_spring,3))
+
+    for i,f in enumerate(fields):
+        res = int(f[0])
+        msg = 'AFM energy specified for residue %i (zero is first residue) but there are only %i residues in the FASTA'
+        if not (0 <= res < len(fasta)):
+            raise ValueError(msg % (res, len(fasta)))
+        atom[i]             = int(f[0])*3 + 1  # restrain the CA atom in each residue
+        spring_const[i]     = f[1]
+        starting_tip_pos[i] = [float(x) for x in (f[2],f[3],f[4])]
+        pulling_vel[i]      = [float(x) for x in (f[5],f[6],f[7])]
+
+    create_array(g, 'atom',             obj=atom)
+    create_array(g, 'spring_const',     obj=spring_const)
+    create_array(g, 'starting_tip_pos', obj=starting_tip_pos)
+    create_array(g, 'pulling_vel',      obj=pulling_vel)
+    g.pulling_vel._v_attrs.time_initial = time_initial
+    g.pulling_vel._v_attrs.time_step    = time_step
+
+
 def write_backbone_pair(fasta):
     n_res = len(fasta)
     grp = t.create_group(potential, 'backbone_pairs')
@@ -1235,6 +1273,23 @@ def main():
             'must contain "residue tension_x tension_y tension_z".  The residue will be pulled in the '+
             'direction (tension_x,tension_y,tension_z) by its CA atom.  The magnitude of the tension vector '+
             'sets the force.  Units are kT/Angstrom.')
+    
+    parser.add_argument('--AFM', default='',
+            help='Table of tip positions and pulling velocitis for mimicing AFM pulling experiment in the constant velocity mode. ' +
+            'Each line must contain 8 fields and the first line must contain ' +
+            '"residue spring_const tip_pos_x tip_pos_y tip_pos_z pulling_vel_x pulling_vel_y pulling_vel_z". ' +
+            'The residue will be pulled in the direction (pulling_vel_x, pulling_vel_y, pulling_vel_z) by its CA atom, ' +
+            'which is attached to the tip at (tip_pos_x, tip_pos_y, tip_pos_z). ' +
+            'The magnitude of the pulling velocity vector sets the pulling speed. The unit is: angstrom/time_step. ' +
+            'The spring_const is in the unit of kT/angstrom^2. At T = 298.15 K, it equals 41.14 pN/angstrom.')
+    parser.add_argument('--AFM-time-initial', default=0., type=float,
+            help='Time initial for AFM pulling simulation. The default value is 0. ' +
+            'WARNING: do not change this value unless the simulation is a continuation of a previous one. ' +
+            'To set the time initial, check the /root/output/time_estimate in the output h5 file. ' )
+    parser.add_argument('--AFM-time-step', default=0.009, type=float,
+            help='Time step for AFM pulling simulation. The default value is 0.009. ' +
+            'WARNING: this should be the same as the global time step, which is set to 0.009 by default. Change this value accordingly.')
+
     parser.add_argument('--initial-structure', default='',
             help='Pickle file for initial structure for the simulation.  ' +
             'If there are not enough structures for the number of replicas ' +
@@ -1528,9 +1583,13 @@ def main():
 
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
-
-    if args.tension:
-        write_tension(parser,fasta_seq, args.tension)
+    
+    if args.tension and args.AFM:
+        print 'Nope, you cannot pull the protein using two modes. Choose one.'
+    elif args.tension and not args.AFM:
+        write_tension(parser, fasta_seq, args.tension)
+    elif args.AFM and not args.tension:
+        write_AFM(parser, fasta_seq, args.AFM, args.AFM_time_initial, args.AFM_time_step)
 
     if args.rotamer_interaction:
         # must be after write_count_hbond if hbond_coverage is used
