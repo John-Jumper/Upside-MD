@@ -111,6 +111,8 @@ def main():
     parser.add_argument('--allow-unexpected-chain-breaks', default=False, action='store_true', 
             help='Do not fail on unexpected chain breaks (dangerous)')
     parser.add_argument('--record-chain-breaks', action='store_true', help='Record index of chain first residues to help automate generation of system files for multiple chains')
+    parser.add_argument('--disable-recentering', action='store_true',
+            help='If turned on, disable recentering of the structure.')
     args = parser.parse_args()
     
     structure = prody.parsePDB(args.pdb, model=args.model)
@@ -160,7 +162,8 @@ def main():
             chain_resnum.append((str(chain_id),r.resnum))
         print
     coords = np.array(coords)
-    coords -= coords.mean(axis=0) # move com to origin
+    if not args.disable_recentering:
+        coords -= coords.mean(axis=0) # move com to origin
     chi = np.array(chi)
 
     if unexpected_chain_breaks and not args.allow_unexpected_chain_breaks:
