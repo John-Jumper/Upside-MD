@@ -9,7 +9,7 @@
 // knots for the various splines using the preprocessor defines.  This is poor practice
 // FIXME Make n_param and the various n_knots proper runtime flags, probably by making sure
 // that InteractionGraph receives an IType object rather than just using it as a namespace.
-#if defined(PARAM_OLD)
+#if defined(PARAM_7A_CUTOFF)
     #define N_KNOT_SC_SC   16
     #define N_KNOT_SC_BB   12
     #define N_KNOT_ANGULAR 15
