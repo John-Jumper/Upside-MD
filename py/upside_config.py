@@ -1274,14 +1274,15 @@ def main():
             'direction (tension_x,tension_y,tension_z) by its CA atom.  The magnitude of the tension vector '+
             'sets the force.  Units are kT/Angstrom.')
     
-    parser.add_argument('--AFM', default='',
+    parser.add_argument('--ask-before-using-AFM', default='',
             help='Table of tip positions and pulling velocitis for mimicing AFM pulling experiment in the constant velocity mode. ' +
             'Each line must contain 8 fields and the first line must contain ' +
             '"residue spring_const tip_pos_x tip_pos_y tip_pos_z pulling_vel_x pulling_vel_y pulling_vel_z". ' +
             'The residue will be pulled in the direction (pulling_vel_x, pulling_vel_y, pulling_vel_z) by its CA atom, ' +
             'which is attached to the tip at (tip_pos_x, tip_pos_y, tip_pos_z). ' +
             'The magnitude of the pulling velocity vector sets the pulling speed. The unit is: angstrom/time_step. ' +
-            'The spring_const is in the unit of kT/angstrom^2. At T = 298.15 K, it equals 41.14 pN/angstrom.')
+            'The spring_const is in the unit of kT/angstrom^2. At T = 298.15 K, it equals 41.14 pN/angstrom. ' + 
+            'Note: consult with the developer before using this AFM function.')
     parser.add_argument('--AFM-time-initial', default=0., type=float,
             help='Time initial for AFM pulling simulation. The default value is 0. ' +
             'WARNING: do not change this value unless the simulation is a continuation of a previous one. ' +
@@ -1584,11 +1585,11 @@ def main():
     if args.z_flat_bottom:
         write_z_flat_bottom(parser,fasta_seq, args.z_flat_bottom)
     
-    if args.tension and args.AFM:
+    if args.tension and args.ask_before_using_AFM:
         print 'Nope, you cannot pull the protein using two modes. Choose one.'
-    elif args.tension and not args.AFM:
+    elif args.tension and not args.ask_before_using_AFM:
         write_tension(parser, fasta_seq, args.tension)
-    elif args.AFM and not args.tension:
+    elif args.ask_before_using_AFM and not args.tension:
         write_AFM(parser, fasta_seq, args.AFM, args.AFM_time_initial, args.AFM_time_step)
 
     if args.rotamer_interaction:
