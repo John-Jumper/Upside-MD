@@ -859,11 +859,11 @@ def write_contact_energies(parser, fasta, contact_table):
                  '         Please ignore this warning if you intentionally have repulsive contacts.')
 
     group_energy_array = np.array([group_energy.get(ng,0.)
-        for ng in range(1+np.amax(group.keys()))])
+        for ng in range(1+np.amax(group_energy.keys()))])
 
     create_array(g, 'group_energy', obj=group_energy_array)
     create_array(g, 'id',           obj=id)
-    create_array(g, 'group_id',     obj=group_id)
+    create_array(g, 'group_id',     obj=group)
     create_array(g, 'distance',     obj=dist)
     create_array(g, 'width',        obj=width)
 

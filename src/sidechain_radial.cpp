@@ -167,7 +167,6 @@ struct ContactEnergy : public PotentialNode
         check_size(grp, "group_energy", n_group);
         check_size(grp, "group_id",     n_contact);
         check_size(grp, "id",           n_contact, 2);
-        check_size(grp, "energy",       n_contact);
         check_size(grp, "distance",     n_contact);
         check_size(grp, "width",        n_contact);
 
