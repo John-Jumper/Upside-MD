@@ -140,47 +140,65 @@ struct ContactEnergy : public PotentialNode
 {
     struct Param {
         index_t   loc[2];
-        float     energy;
         float     dist;
         float     scale;  // 1.f/width
         float     cutoff;
     };
+    struct Pij {
+        float one_minus_p_ij;
+        Vec<3> deriv;
+    };
 
+    int n_group;
     int n_contact;
+
     CoordNode& bead_pos;
-    vector<Param> params;
-    float cutoff;
+    vector<vector<Param>> params;
+    vector<float> group_energy;
+    vector<Pij> p_ij;
 
     ContactEnergy(hid_t grp, CoordNode& bead_pos_):
         PotentialNode(),
+        n_group(get_dset_size(1, grp, "group_energy")[0]),
         n_contact(get_dset_size(2, grp, "id")[0]),
-        bead_pos(bead_pos_), 
-        params(n_contact)
+        bead_pos(bead_pos_)
     {
-        check_size(grp, "id",       n_contact, 2);
-        check_size(grp, "energy",   n_contact);
-        check_size(grp, "distance", n_contact);
-        check_size(grp, "width",    n_contact);
+        check_size(grp, "group_energy", n_group);
+        check_size(grp, "group_id",     n_contact);
+        check_size(grp, "id",           n_contact, 2);
+        check_size(grp, "energy",       n_contact);
+        check_size(grp, "distance",     n_contact);
+        check_size(grp, "width",        n_contact);
 
-        traverse_dset<2,int  >(grp, "id",       [&](size_t nc, size_t i, int x){params[nc].loc[i] = x;});
-        traverse_dset<1,float>(grp, "distance", [&](size_t nc, float x){params[nc].dist = x;});
-        traverse_dset<1,float>(grp, "energy",   [&](size_t nc, float x){params[nc].energy = x;});
-        traverse_dset<1,float>(grp, "width",    [&](size_t nc, float x){params[nc].scale = 1.f/x;});
-        for(auto &p: params) p.cutoff = p.dist + 1.f/p.scale;
+        vector<size_t> group_id;
+        vector<size_t> loc_within_group;
+        params.resize(n_group);
 
-        if(logging(LOG_DETAILED)) {
-            default_logger->add_logger<float>("contact_energy", {bead_pos.n_elem}, 
-                    [&](float* buffer) {
-                       fill_n(buffer, bead_pos.n_elem, 0.f);
-                       VecArray pos  = bead_pos.output;
+        traverse_dset<1,float>(grp, "group_energy", [&](size_t ng, float x){
+                group_energy.push_back(x);});
 
-                       for(const auto &p: params) {
-                           auto dist = mag(load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]));
-                           float en = p.energy * compact_sigmoid(dist-p.dist, p.scale)[0];
-                           buffer[p.loc[0]] += 0.5f*en;
-                           buffer[p.loc[1]] += 0.5f*en;
-                       }});
+        traverse_dset<1,int>(grp, "group_id", [&](size_t nc, int gid){
+                group_id.push_back(gid);
+                loc_within_group.push_back(params[gid].size());
+                params[gid].emplace_back();
+                });
+
+        traverse_dset<2,int  >(grp, "id",       [&](size_t nc, size_t i, int x){
+                params[group_id[nc]][loc_within_group[nc]].loc[i] = x;});
+
+        traverse_dset<1,float>(grp, "distance", [&](size_t nc, float x){
+                params[group_id[nc]][loc_within_group[nc]].dist = x;});
+
+        traverse_dset<1,float>(grp, "width",    [&](size_t nc, float x){
+                params[group_id[nc]][loc_within_group[nc]].scale = 1.f/x;});
+
+        // update all of the cutoffs and count largest group
+        int n_largest_group = 0;
+        for(auto &ps: params) {
+            n_largest_group = max(int(ps.size()), n_largest_group);
+            for(auto& p: ps) p.cutoff = p.dist + 1.f/p.scale;
         }
+        p_ij.resize(n_largest_group);
     }
 
     virtual void compute_value(ComputeMode mode) {
@@ -189,17 +207,32 @@ struct ContactEnergy : public PotentialNode
         VecArray sens = bead_pos.sens;
         potential = 0.f;
 
-        for(int nc=0; nc<n_contact; ++nc) {
-            const auto& p = params[nc];
-            auto disp = load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]);
-            auto dist = mag(disp);
-            if(dist>=p.cutoff) continue;
+        for(int ng=0; ng<n_group; ++ng) {
+            auto& ps = params[ng];
+            float one_minus_pi = 1.f;
+            for(size_t nc=0; nc<ps.size(); ++nc) {
+                const auto& p = ps[nc];
+                auto disp = load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]);
+                auto dist = mag(disp);
+                Vec<2> contact = (dist>=p.cutoff)
+                    ? make_vec2(0.f,0.f)
+                    : compact_sigmoid(dist-p.dist, p.scale);
+                p_ij[nc].one_minus_p_ij = 1.f - contact.x();
+                p_ij[nc].deriv = (contact.y()*rcp(dist)) * disp;
+                one_minus_pi *= p_ij[nc].one_minus_p_ij;
+            }
+            potential += group_energy[ng] * (1.f-one_minus_pi);
 
-            Vec<2> contact = compact_sigmoid(dist-p.dist, p.scale);
-            potential += p.energy*contact.x();
-            auto deriv = (p.energy*contact.y()*rcp(dist)) * disp;
-            update_vec(sens, p.loc[0],  deriv);
-            update_vec(sens, p.loc[1], -deriv);
+            for(size_t nc=0; nc<ps.size(); ++nc) {
+                float one_minus_pi_other = 1.f;
+                for(size_t nc_o=0; nc_o<ps.size(); ++nc_o)
+                    if(nc_o!=nc)
+                        one_minus_pi_other *= p_ij[nc_o].one_minus_p_ij;
+
+                auto scaled_deriv = (group_energy[ng] * one_minus_pi_other) * p_ij[nc].deriv;
+                update_vec(sens, ps[nc].loc[0],  scaled_deriv);
+                update_vec(sens, ps[nc].loc[1], -scaled_deriv);
+            }
         }
     }
 };

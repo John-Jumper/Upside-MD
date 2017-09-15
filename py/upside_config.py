@@ -813,7 +813,7 @@ def write_CB(fasta):
 
 def write_contact_energies(parser, fasta, contact_table):
     fields = [ln.split() for ln in open(contact_table,'U')]
-    header_fields = 'residue1 residue2 energy distance transition_width'.split()
+    header_fields = 'residue1 residue2 group energy distance transition_width'.split()
     if [x.lower() for x in fields[0]] != header_fields:
         parser.error('First line of contact energy table must be "%s"'%(" ".join(header_fields)))
     if not all(len(f)==len(header_fields) for f in fields):
@@ -825,7 +825,8 @@ def write_contact_energies(parser, fasta, contact_table):
     g._v_attrs.arguments = np.array(['placement_fixed_point_only_CB'])
 
     id     = np.zeros((n_contact,2), dtype='i')
-    energy = np.zeros((n_contact,))
+    group  = np.zeros((n_contact,),  dtype='i')
+    group_energy = dict()
     dist   = np.zeros((n_contact,))
     width  = np.zeros((n_contact,))
 
@@ -835,22 +836,37 @@ def write_contact_energies(parser, fasta, contact_table):
         if not (0 <= id[i,0] < len(fasta)): raise ValueError(msg % (id[i,0], len(fasta)))
         if not (0 <= id[i,1] < len(fasta)): raise ValueError(msg % (id[i,1], len(fasta)))
 
-        energy[i] = float(f[2])
-        dist[i]   = float(f[3])
-        width[i]  = float(f[4])  # compact_sigmoid cuts off at distance +/- width
+        group[i]= int(f[2])
+        energy  = float(f[3])
+
+        if group[i] not in group_energy:
+            group_energy[group[i]] = energy
+        if energy != group_energy[group[i]]:
+            raise ValueError(('All contacts in a group must have the same energy '+
+                'but there are multiple energies for group %i (at least %f and %f)')
+                % (group[i], group_energy[group[i]], energy))
+
+        dist[i]   = float(f[4])
+        width[i]  = float(f[5])  # compact_sigmoid cuts off at distance +/- width
 
         if width[i] <= 0.: raise ValueError('Cannot have negative contact transition_width')
 
     # 0-based indexing sometimes trips up users, so give them a quick check
-    highlight_residues('residues that participate in any --contact potential in uppercase', fasta, id.ravel())
-    if energy.max() > 0.:
+    highlight_residues('residues that participate in any --contact potential in uppercase',
+            fasta, id.ravel())
+    if np.amax(group_energy.values()) > 0.:
         print ('\nWARNING: Some contact energies are positive (repulsive).\n'+
                  '         Please ignore this warning if you intentionally have repulsive contacts.')
 
-    create_array(g, 'id',       obj=id)
-    create_array(g, 'energy',   obj=energy)
-    create_array(g, 'distance', obj=dist)
-    create_array(g, 'width',    obj=width)
+    group_energy_array = np.array([group_energy.get(ng,0.)
+        for ng in range(1+np.amax(group.keys()))])
+
+    create_array(g, 'group_energy', obj=group_energy_array)
+    create_array(g, 'id',           obj=id)
+    create_array(g, 'group_id',     obj=group_id)
+    create_array(g, 'distance',     obj=dist)
+    create_array(g, 'width',        obj=width)
+
 
 def write_rama_coord():
     grp = t.create_group(potential, 'rama_coord')
