@@ -114,7 +114,7 @@ struct HBondSidechainRadialPairs : public PotentialNode
         igraph(grp, &hb_point_, &bb_point_)
     {};
 
-    virtual void compute_value(ComputeMode mode) {
+    virtual void compute_value(ComputeMode mode) override {
         Timer timer(string("hbond_sc_radial_pairs"));
 
         igraph.compute_edges();
@@ -146,6 +146,7 @@ struct ContactEnergy : public PotentialNode
     };
     struct Pij {
         float one_minus_p_ij;
+        float one_minus_p_i_after;
         Vec<3> deriv;
     };
 
@@ -223,11 +224,18 @@ struct ContactEnergy : public PotentialNode
             }
             potential += group_energy[ng] * (1.f-one_minus_pi);
 
+            {
+                float one_minus_p_i_after = 1.f;
+                for(int nc=int(ps.size()-1); nc>=0; --nc) {
+                    p_ij[nc].one_minus_p_i_after = one_minus_p_i_after;
+                    one_minus_p_i_after *= p_ij[nc].one_minus_p_ij;
+                }
+            }
+
+            float one_minus_p_i_before = 1.f;
             for(size_t nc=0; nc<ps.size(); ++nc) {
-                float one_minus_pi_other = 1.f;
-                for(size_t nc_o=0; nc_o<ps.size(); ++nc_o)
-                    if(nc_o!=nc)
-                        one_minus_pi_other *= p_ij[nc_o].one_minus_p_ij;
+                float one_minus_pi_other = one_minus_p_i_before * p_ij[nc].one_minus_p_i_after;
+                one_minus_p_i_before *= p_ij[nc].one_minus_p_ij;
 
                 auto scaled_deriv = (group_energy[ng] * one_minus_pi_other) * p_ij[nc].deriv;
                 update_vec(sens, ps[nc].loc[0],  scaled_deriv);
