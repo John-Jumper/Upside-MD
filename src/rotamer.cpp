@@ -446,6 +446,14 @@ struct EdgeHolder {
 
         template <int N_ROT1, int N_ROT2>
         void update_beliefs() {
+            // FIXME this is not quite stable since it accumulates into the
+            // node beliefs multiplicatively without any normalization.  This
+            // can cause underflow.  We can fight the underflow in one of two
+            // ways.  The old way was to L1 normalize the beliefs on every
+            // update but that is very expensive and has a noticeable effect on
+            // end-to-end performance.  A better way would be to accumulate to
+            // an AVX-based Double4 type and just depend on double's increased
+            // range.
             constexpr const int w1 = (N_ROT1+3)/4;
             constexpr const int w2 = (N_ROT2+3)/4;
             constexpr const int ws = w1+w2;
