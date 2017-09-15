@@ -1590,7 +1590,7 @@ def main():
     elif args.tension and not args.ask_before_using_AFM:
         write_tension(parser, fasta_seq, args.tension)
     elif args.ask_before_using_AFM and not args.tension:
-        write_AFM(parser, fasta_seq, args.AFM, args.AFM_time_initial, args.AFM_time_step)
+        write_AFM(parser, fasta_seq, args.ask_before_using_AFM, args.AFM_time_initial, args.AFM_time_step)
 
     if args.rotamer_interaction:
         # must be after write_count_hbond if hbond_coverage is used

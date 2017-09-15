@@ -129,7 +129,7 @@ struct AFMPotential : public PotentialNode
         
         if(logging(LOG_BASIC)) {
             default_logger->add_logger<float>("tip_pos", {n_elem, 3}, [&](float* buffer) {
-                round_num -= 2;
+                
                 time_estimate = time_initial + float(time_step)*round_num;
                 
                 for(int nt=0; nt<n_elem; ++nt) {
@@ -148,7 +148,7 @@ struct AFMPotential : public PotentialNode
     virtual void compute_value(ComputeMode mode) {
         Timer timer(string("AFM"));
         
-        round_num += 1;
+        if (mode == DerivMode) round_num += 1;
         time_estimate = time_initial + float(time_step)*round_num;
         
         VecArray pos_c    = pos.output;
